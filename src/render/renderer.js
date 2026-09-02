@@ -8,6 +8,7 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { TILE } from '../core/constants.js';
 import { FogOfWar, Lighting, depthTint } from './lighting.js';
+import { Atmosphere } from './atmosphere.js';
 import { createMaterials } from './materials.js';
 import { PropFactory } from './props.js';
 import { DungeonView } from './dungeon.js';
@@ -15,23 +16,42 @@ import { CharacterFactory } from './characters.js';
 import { Effects } from './effects.js';
 import { CameraRig } from './camera.js';
 
+// Grading runs on the linear HDR frame (after bloom, before the ACES output pass): per-depth tint,
+// split toning (cool shadows / warm highlights), contrast about mid grey, saturation, vignette,
+// film grain (deterministic in time), flash/fade, and chromatic aberration (off unless uChroma > 0).
 const GradingShader = {
   uniforms: {
     tDiffuse: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uVignette: { value: 0.5 },
     uFlash: { value: new THREE.Color(0, 0, 0) }, uFlashAmt: { value: 0 }, uFade: { value: 0 }, uSat: { value: 1.05 }, uLift: { value: 0.004 },
+    uContrast: { value: 1.05 }, uShadows: { value: new THREE.Color(0.55, 0.6, 0.8) }, uHighlights: { value: new THREE.Color(1, 0.95, 0.85) },
+    uChroma: { value: 0 }, uGrain: { value: 0.02 }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1600, 900) }, uPulse: { value: 0 },
   },
   vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: `
     uniform sampler2D tDiffuse; uniform vec3 uTint; uniform float uVignette; uniform vec3 uFlash; uniform float uFlashAmt; uniform float uFade; uniform float uSat; uniform float uLift;
+    uniform float uContrast; uniform vec3 uShadows; uniform vec3 uHighlights; uniform float uChroma; uniform float uGrain; uniform float uTime; uniform vec2 uRes; uniform float uPulse;
     varying vec2 vUv;
+    float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
     void main() {
-      vec3 col = texture2D(tDiffuse, vUv).rgb;
+      vec2 d = (vUv - 0.5) * vec2(1.15, 1.0);
+      vec3 col;
+      if (uChroma > 0.0) {
+        vec2 off = d * uChroma * dot(d, d);
+        col = vec3(texture2D(tDiffuse, vUv + off).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - off).b);
+      } else col = texture2D(tDiffuse, vUv).rgb;
       col = col * uTint + uLift;
       float lum = dot(col, vec3(0.299, 0.587, 0.114));
+      // split toning (luminance-preserving): shadows take the depth band's cold cast, highlights stay warm
+      vec3 st = mix(uShadows, uHighlights, smoothstep(0.02, 0.5, lum));
+      col *= st / max(1e-3, dot(st, vec3(0.299, 0.587, 0.114)));
       col = mix(vec3(lum), col, uSat);
-      vec2 d = (vUv - 0.5) * vec2(1.15, 1.0);
-      float vig = smoothstep(1.08, 0.42, length(d));
-      col *= mix(1.0, vig, uVignette);
+      col = (col - 0.18) * uContrast + 0.18;
+      col = max(col, vec3(0.0));
+      float vig = smoothstep(1.12, 0.38, length(d));
+      col *= mix(1.0, vig, uVignette + uPulse);
+      // fine film grain, stronger in the darks (hides banding in the void)
+      float g = hash(floor(vUv * uRes) + fract(uTime * 7.31) * 113.0) - 0.5;
+      col += g * uGrain * (0.25 + 0.75 * (1.0 - smoothstep(0.0, 0.6, lum)));
       col = mix(col, uFlash * 2.5, uFlashAmt * 0.6);
       col *= (1.0 - uFade);
       gl_FragColor = vec4(col, 1.0);
@@ -52,7 +72,7 @@ export class Renderer {
     this.gl.shadowMap.enabled = true;
     this.gl.shadowMap.type = this.quality === 'low' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.gl.toneMappingExposure = 1.15;
+    this.gl.toneMappingExposure = 1.1;
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
     this.gl.info.autoReset = false;
     this.scene = new THREE.Scene();
@@ -60,8 +80,8 @@ export class Renderer {
     this.fog = new FogOfWar();
     this.mats = createMaterials(this.fog);
     this.props = new PropFactory(this.mats);
-    this.lighting = new Lighting(this.scene, this.fog);
-    if (this.quality === 'low') this.lighting.spot.shadow.mapSize.set(512, 512);
+    this.lighting = new Lighting(this.scene, this.fog, { quality: this.quality });
+    this.atmosphere = new Atmosphere(this.scene, this.fog);
     this.dungeon = new DungeonView(this.scene, this.mats, this.props, this.fog);
     this.characters = new CharacterFactory(this.fog);
     this.effects = new Effects(this.scene, this.fog, bus);
@@ -88,7 +108,8 @@ export class Renderer {
     const target = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: this.quality === 'low' ? 0 : 4 });
     this.composer = new EffectComposer(this.gl, target);
     this.renderPass = new RenderPass(this.scene, this.camera);
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.55, 0.82);
+    // Bloom threshold sits above lit stone (linear HDR ~0.3-0.9) so only emissive/hot things glow: gold, magic, flames, the Sword.
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.62, 0.6, 1.05);
     this.grading = new ShaderPass(GradingShader);
     this.output = new OutputPass();
     this.composer.addPass(this.renderPass);
@@ -103,6 +124,7 @@ export class Renderer {
     this.gl.setSize(w, h, false);
     this.composer.setSize(w, h);
     this.bloom.setSize(w, h);
+    this.grading.uniforms.uRes.value.set(w * this.gl.getPixelRatio(), h * this.gl.getPixelRatio());
     this.cameraRig.setAspect(w / h);
   }
 
@@ -158,19 +180,25 @@ export class Renderer {
     this.dungeon.setTorchSpots(this.lighting.torchSpots);
     this.dungeon.build(level);
     this.fog.setLevel(level, { instant: true });
-    const tint = depthTint(level.depth);
-    void tint;
-    this.grading.uniforms.uTint.value.copy(this.tintFor(level.depth));
+    this.atmosphere.setLevel(level, this.lighting.torchSpots);
+    this.applyGrade(level.depth);
     for (const e of level.entities) this.ensureView(e, false);
     this.syncViews(0);
   }
 
-  tintFor(depth) {
-    if (depth <= 0) return new THREE.Color(1.0, 1.0, 1.05);
-    if (depth <= 5) return new THREE.Color(1.06, 1.0, 0.92);
-    if (depth <= 12) return new THREE.Color(0.94, 0.98, 1.08);
-    if (depth <= 18) return new THREE.Color(0.92, 1.04, 0.95);
-    return new THREE.Color(1.08, 0.92, 1.06);
+  /** Depth-dependent colour grading: deeper = colder, less saturated, more contrast, heavier vignette. */
+  applyGrade(depth) {
+    const g = depthTint(depth).grade;
+    const u = this.grading.uniforms;
+    u.uTint.value.copy(g.tint); u.uSat.value = g.sat; u.uContrast.value = g.contrast; u.uVignette.value = g.vignette; u.uLift.value = g.lift;
+    u.uShadows.value.copy(g.shadows); u.uHighlights.value.copy(g.highlights);
+  }
+
+  /** Post-processing knobs (settings menu / debug): chromatic aberration is off by default. */
+  setPost({ chroma, grain, bloom } = {}) {
+    if (chroma !== undefined) this.grading.uniforms.uChroma.value = chroma;
+    if (grain !== undefined) this.grading.uniforms.uGrain.value = grain;
+    if (bloom !== undefined) this.bloom.strength = bloom;
   }
 
   ensureView(e, spawnAnim = true) {
@@ -252,16 +280,20 @@ export class Renderer {
     for (const v of this.dungeon.itemViews.values()) { const it = v.userData.item; if (it && it.type === 'gold' && !it.hidden && (this.fog.override === 'all' || g.level.isVisible(it.x, it.y))) goldViews.push(v); }
     this.effects.update(dt, { player: g.player, playerPos: ppos, statuses, hasSword: !!g.player.hasSword, goldViews });
     this.lighting.update(dt, { x: ppos.x, z: ppos.z }, { lightOn: g.lightOn(), sword: !!g.player.hasSword, allLit: this.fog.override === 'all' });
+    this.atmosphere.update(dt, { x: ppos.x, z: ppos.z }, this.lighting.activeLights);
     if (this.dungeon.waterMat) { this.dungeon.waterMat.uniforms.uLightPos.value.set(ppos.x, 0.9, ppos.z); }
     this.fog.update(dt);
     // grading uniforms
     const u = this.grading.uniforms;
     u.uFlash.value.copy(this.effects.flash.color); u.uFlashAmt.value = this.effects.flash.amount;
     u.uFade.value = this.cameraRig.fade;
+    u.uTime.value = this.time;
+    u.uPulse.value = 0;
     if (g.state.quest.timer !== null && g.state.quest.timer < 300 && g.player.hasSword) {
       const pulse = 0.5 + 0.5 * Math.sin(this.time * 4);
       u.uFlash.value.lerp(this._alarm, 0.5);
       u.uFlashAmt.value = Math.max(u.uFlashAmt.value, pulse * 0.12);
+      u.uPulse.value = pulse * 0.25; // the vignette breathes with the Sword's clock
     }
   }
 

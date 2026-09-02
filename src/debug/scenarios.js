@@ -29,6 +29,17 @@ function teleportNear(game, x, y) {
   return s;
 }
 
+/** Put the player beside a tile (east/west first, then south) so the camera sees the tile unobstructed. */
+function teleportBeside(game, x, y) {
+  const lv = game.level;
+  const opts = neighbours(lv, x, y, { empty: false }).filter((n) => !lv.monsterAt(n.x, n.y));
+  const rank = (n) => (n.y === y && Math.abs(n.x - x) === 1 ? 0 : n.y > y ? 1 : 2) * 10 + Math.abs(n.x - x) + Math.abs(n.y - y);
+  opts.sort((a, b) => rank(a) - rank(b));
+  const s = opts[0];
+  if (s) game.teleportTo(s.x, s.y);
+  return s;
+}
+
 function findTiles(level, tile) {
   const out = [];
   for (let y = 0; y < level.height; y++) for (let x = 0; x < level.width; x++) if (level.get(x, y) === tile) out.push({ x, y });
@@ -108,7 +119,8 @@ export const scenarios = {
   async 'stairs'(ctx) {
     const g = ctx.reset();
     const sd = g.level.stairsDown;
-    teleportNear(g, sd.x, sd.y);
+    teleportBeside(g, sd.x, sd.y);
+    castWith(ctx, 'light');
     ctx.step(400);
   },
 
@@ -116,7 +128,7 @@ export const scenarios = {
   async 'pit'(ctx) {
     const g = ctx.reset();
     const found = findDepthWith(g, TILE.PIT, 1, 8);
-    if (found) { if (found.depth !== g.depth) g.goToDepth(found.depth); teleportNear(g, found.tiles[0].x, found.tiles[0].y); }
+    if (found) { if (found.depth !== g.depth) g.goToDepth(found.depth); teleportBeside(g, found.tiles[0].x, found.tiles[0].y); }
     else {
       const p = g.player; const s = neighbours(g.level, p.x, p.y)[0];
       if (s) { g.level.set(s.x, s.y, TILE.PIT); ctx.renderer.rebuildLevel(); }
@@ -178,6 +190,50 @@ export const scenarios = {
   },
 
   async 'spell-light'(ctx) { const g = ctx.reset(); castWith(ctx, 'light'); void g; ctx.step(250); },
+
+  /** Fog of war as darkness: the start room remembered (dim, cool), a corridor visible, the rest unknown. */
+  async 'fog-of-war'(ctx) {
+    const g = ctx.reset();
+    ctx.step(200);
+    const p = g.player, lv = g.level;
+    let best = null, bestD = Infinity;
+    for (const t of findTiles(lv, TILE.CORRIDOR)) {
+      const d = Math.abs(t.x - p.x) + Math.abs(t.y - p.y);
+      if (d >= 5 && d <= 9 && lv.isEmptyFloor(t.x, t.y) && Math.abs(d - 6) < bestD) { best = t; bestD = Math.abs(d - 6); }
+    }
+    if (best) { g.teleportTo(best.x, best.y); g.updateFov(); }
+    ctx.step(700);
+  },
+
+  /** A wall torch up close with the lantern off: warm flicker, halo, torch-cast shadows, dust in the beam. */
+  async 'torchlight'(ctx) {
+    const g = ctx.reset();
+    const p = g.player, lv = g.level;
+    const spots = ctx.renderer.lighting.torchSpots.slice().sort((a, b) => Math.hypot(a.tx - p.x, a.ty - p.y) - Math.hypot(b.tx - p.x, b.ty - p.y));
+    for (const sp of spots) {
+      const x = sp.tx + sp.nx * 2, y = sp.ty + sp.nz * 2;
+      const alt = { x: sp.tx + sp.nx, y: sp.ty + sp.nz };
+      const t = lv.isEmptyFloor(x, y) ? { x, y } : lv.isEmptyFloor(alt.x, alt.y) ? alt : null;
+      if (t) { g.teleportTo(t.x, t.y); p.facing = { dx: sp.nx, dy: sp.nz }; g.updateFov(); break; }
+    }
+    ctx.step(600);
+  },
+
+  /** The air itself: a shaft of light from a crack in the ceiling, dust drifting through it, torches beyond. */
+  async 'atmosphere'(ctx) {
+    const g = ctx.reset();
+    for (let d = 2; d <= 6; d++) {
+      g.goToDepth(d);
+      const spots = ctx.renderer.atmosphere.shaftSpots;
+      if (spots.length) {
+        const s = spots[0];
+        const n = neighbours(g.level, s.x, s.z, { empty: true }).sort((a, b) => (b.y - s.z) - (a.y - s.z))[0];
+        if (n) { g.teleportTo(n.x, n.y); g.updateFov(); break; }
+      }
+    }
+    for (const m of g.level.monsters) freeze(m);
+    ctx.step(900);
+  },
   async 'spell-teleport'(ctx) {
     const g = ctx.reset();
     castWith(ctx, 'teleport');
