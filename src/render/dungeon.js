@@ -36,7 +36,12 @@ export class DungeonView {
     this.beaconView = null; this.beaconKey = null;
     this.climbViews = [];
     this.swordDepth = -1;
+    /** geometries created for the current level only (disposed on clear; shared ones live on the instance/prop cache) */
+    this.ownedGeos = [];
   }
+
+  /** Register a per-level geometry so clear() can dispose it. */
+  own(geo) { this.ownedGeos.push(geo); return geo; }
 
   /** Rebuild everything for a level. */
   build(level) {
@@ -118,14 +123,14 @@ export class DungeonView {
     this.wallMesh = wallMesh;
 
     // A black floor far below so holes read as depth (and pits are dark).
-    const abyss = new THREE.Mesh(new THREE.PlaneGeometry(W + 4, H + 4), this.mats.dark);
+    const abyss = new THREE.Mesh(this.own(new THREE.PlaneGeometry(W + 4, H + 4)), this.mats.dark);
     abyss.rotation.x = -Math.PI / 2; abyss.position.set(W / 2 - 0.5, -1.6, H / 2 - 0.5);
     abyss.receiveShadow = false;
     this.root.add(abyss);
 
     // Water surface: one merged plane.
     if (waterTiles.length) {
-      const g = new THREE.BufferGeometry();
+      const g = this.own(new THREE.BufferGeometry());
       const pos = [], uv = [], idx = [];
       waterTiles.forEach((w, i) => {
         const x0 = w.x - 0.5, z0 = w.y - 0.5, y = -0.14;
@@ -182,9 +187,9 @@ export class DungeonView {
     g.position.set(x, 0, y);
     g.rotation.y = Math.atan2(d.dx, d.dy) + Math.PI; // steps descend toward the wall side
     // shaft walls
-    const shaft = new THREE.Mesh(new THREE.BoxGeometry(1, 1.6, 1), this.mats.pitWall);
+    const shaft = new THREE.Mesh(this.own(new THREE.BoxGeometry(1, 1.6, 1)), this.mats.pitWall);
     shaft.position.y = -0.8; shaft.material = this.mats.pitWall;
-    const inner = new THREE.Mesh(new THREE.BoxGeometry(0.92, 1.6, 0.92), this.mats.dark);
+    const inner = new THREE.Mesh(this.own(new THREE.BoxGeometry(0.92, 1.6, 0.92)), this.mats.dark);
     inner.position.y = -0.82;
     g.add(shaft); g.add(inner);
     for (let i = 0; i < 4; i++) {
@@ -215,7 +220,7 @@ export class DungeonView {
     arch.position.set(0, 0.45, -0.42);
     g.add(arch);
     this.stairGlow = this.stairGlow || (() => { const m = this.mats.holyGlow.clone(); m.opacity = 0.16; return m; })();
-    const glow = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 0.8), this.stairGlow);
+    const glow = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.7, 0.8)), this.stairGlow);
     glow.position.set(0, 0.9, -0.4);
     g.add(glow);
     this.root.add(g);
@@ -224,14 +229,14 @@ export class DungeonView {
   addPit(x, y) {
     const g = new THREE.Group();
     g.position.set(x, 0, y);
-    const wall = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.38, 1.5, 14, 1, true), this.mats.pitWall);
+    const wall = new THREE.Mesh(this.own(new THREE.CylinderGeometry(0.42, 0.38, 1.5, 14, 1, true)), this.mats.pitWall);
     wall.position.y = -0.75; wall.material.side = THREE.BackSide;
     g.add(wall);
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.44, 0.07, 8, 18), this.mats.rim);
+    const rim = new THREE.Mesh(this.own(new THREE.TorusGeometry(0.44, 0.07, 8, 18)), this.mats.rim);
     rim.rotation.x = Math.PI / 2; rim.position.y = 0.0; rim.castShadow = true; rim.receiveShadow = true;
     g.add(rim);
     // floor ring around the hole (fills the tile)
-    const ring = new THREE.Mesh(new THREE.RingGeometry(0.44, 0.75, 24), this.mats.dirt);
+    const ring = new THREE.Mesh(this.own(new THREE.RingGeometry(0.44, 0.75, 24)), this.mats.dirt);
     ring.rotation.x = -Math.PI / 2; ring.position.y = -0.005; ring.receiveShadow = true;
     g.add(ring);
     this.root.add(g);
@@ -324,6 +329,11 @@ export class DungeonView {
   clear() {
     for (const child of [...this.root.children]) { if (child !== this.markers) this.root.remove(child); }
     for (const c of [...this.markers.children]) this.markers.remove(c);
+    // free GPU buffers owned by the old level (instance attributes + per-level geometry); shared geometry/materials stay
+    if (this.floorMesh) { this.floorMesh.dispose(); this.floorMesh = null; }
+    if (this.wallMesh) { this.wallMesh.dispose(); this.wallMesh = null; }
+    for (const g of this.ownedGeos) g.dispose();
+    this.ownedGeos = [];
     this.itemViews.clear(); this.animated = []; this.flames = []; this.water = null; this.pickups = [];
     this.beaconView = null; this.beaconKey = null; this.climbViews = [];
     this.level = null;
