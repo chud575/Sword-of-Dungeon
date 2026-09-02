@@ -58,10 +58,72 @@ function findDepthWith(game, tile, from = 1, to = 12) {
 
 function freeze(m) { m.speed = 0; m.moveTimer = 0; }
 
+/** A lit rectangular hall registered at `depth` (used by the bestiary scenarios). */
+function bestiaryHall(g, W, H, depth) {
+  const lv = new Level({ depth, width: W, height: H, seed: 7 });
+  for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) lv.set(x, y, TILE.FLOOR);
+  lv.rooms.push({ x: 1, y: 1, w: W - 2, h: H - 2, type: 'hall', cx: W >> 1, cy: H >> 1 });
+  lv.set(1, 1, TILE.STAIRS_UP); lv.stairsUp = { x: 1, y: 1 };
+  lv.set(W - 2, 1, TILE.STAIRS_DOWN); lv.stairsDown = { x: W - 2, y: 1 }; lv.stairsDownAll = [{ x: W - 2, y: 1 }];
+  lv.set(1, H - 2, TILE.TEMPLE); lv.temples.push({ x: 1, y: H - 2 });
+  lv.revealAll();
+  g.levels.set(depth, lv);
+  return lv;
+}
+
+/** Monsters in two ranks in front of the hero, seen from the ordinary gameplay camera. */
+function lineup(ctx, types) {
+  const g = ctx.reset();
+  const W = 18, H = 12, depth = 3;
+  bestiaryHall(g, W, H, depth);
+  const px = W >> 1, py = H - 3;
+  g.enterLevel(depth, 'teleport', { arrival: { x: px, y: py } });
+  const p = g.player; p.facing = { dx: 0, dy: -1 };
+  const front = Math.ceil(types.length / 2), back = types.length - front;
+  types.forEach((t, i) => {
+    const row = i < front ? 0 : 1, col = i < front ? i : i - front, n = row === 0 ? front : back;
+    const x = px + Math.round((col - (n - 1) / 2) * 1.5), y = py - 2 - row * 2;
+    const m = g.spawnMonster(t, x, y, { depth: 10, state: 'idle' });
+    if (m) { freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false; }
+  });
+  ctx.renderer.fog.override = 'all';
+  ctx.renderer.rebuildLevel();
+  ctx.renderer.cameraRig.follow(ctx.renderer.playerView.pos, { x: 0, z: -1.5 });
+  ctx.renderer.cameraRig.snap();
+  ctx.step(500);
+}
+
 function castWith(ctx, spell) {
   const g = ctx.game;
   g.give(spell, 1);
   g.castSpell(spell);
+}
+
+/** Step the player off the up-stairs (its archway hides effects) onto an open floor tile, preferring south. */
+function clearStart(game) {
+  const p = game.player, lv = game.level;
+  const opts = neighbours(lv, p.x, p.y).filter((n) => lv.get(n.x, n.y) === TILE.FLOOR);
+  opts.sort((a, b) => (b.y - p.y) - (a.y - p.y) || Math.abs(a.x - p.x) - Math.abs(b.x - p.x));
+  const s = opts[0];
+  if (s) { game.teleportTo(s.x, s.y); game.updateFov(); }
+  return s;
+}
+
+/** Empty floor tiles around the player ordered south row, sides, north row, then the second ring. */
+function ringSpots(game, max = 12) {
+  const p = game.player, lv = game.level;
+  const spots = [];
+  for (let r = 1; r <= 2 && spots.length < max; r++) {
+    const ring = [];
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = p.x + dx, y = p.y + dy;
+      if ((lv.get(x, y) === TILE.FLOOR || lv.get(x, y) === TILE.CORRIDOR) && lv.isEmptyFloor(x, y)) ring.push({ x, y, dx, dy });
+    }
+    ring.sort((a, b) => (b.dy - a.dy) || Math.abs(a.dx) - Math.abs(b.dx));
+    spots.push(...ring);
+  }
+  return spots;
 }
 
 export const scenarios = {
@@ -150,26 +212,56 @@ export const scenarios = {
     ctx.step(600);
   },
 
-  /** Gold, chests, potions and scrolls scattered around the player. */
+  /** Gold, chests, potions, spellbooks and a magic sack laid out around the player in the open. */
   async 'treasure'(ctx) {
     const g = ctx.reset();
-    const p = g.player, lv = g.level;
+    clearStart(g);
+    const lv = g.level;
     castWith(ctx, 'light');
-    const spots = [];
-    for (let r = 1; r <= 2 && spots.length < 10; r++) {
-      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-        const x = p.x + dx, y = p.y + dy;
-        if (lv.get(x, y) === TILE.FLOOR || lv.get(x, y) === TILE.CORRIDOR) if (lv.isEmptyFloor(x, y)) spots.push({ x, y });
-      }
-    }
+    ctx.step(2600); // let the cast settle so the props carry the shot
+    const spots = ringSpots(g, 12);
     const items = [
-      { type: 'gold', gold: 40 }, { type: 'chest', hidden: false, trap: null, content: { item: 'potion' } }, { type: 'potion' },
-      { type: 'teleport' }, { type: 'shield' }, { type: 'gold', gold: 25 }, { type: 'sack' }, { type: 'chest', hidden: true, trap: null, content: { item: 'sack' } },
-      { type: 'gold', gold: 60, hidden: true }, { type: 'regeneration' },
+      { type: 'chest', hidden: false, trap: null, content: { item: 'potion' } }, { type: 'gold', gold: 140 }, { type: 'potion' },
+      { type: 'teleport' }, { type: 'shield' }, { type: 'sack' }, { type: 'gold', gold: 25 }, { type: 'regeneration' },
+      { type: 'chest', hidden: true, trap: null, content: { item: 'sack' } }, { type: 'gold', gold: 60, hidden: true }, { type: 'map' }, { type: 'invisibility' },
     ];
     items.forEach((it, i) => { const s = spots[i]; if (s) lv.addItem({ qty: 1, x: s.x, y: s.y, ...it }); });
-    ctx.step(500);
+    ctx.step(700);
+  },
+
+  /** Level-up burst: gold shock ring, helix, pillar, rays and the banner. */
+  async 'level-up'(ctx) {
+    const g = ctx.reset();
+    clearStart(g);
+    ctx.step(300);
+    g.give('xp', 250);
+    ctx.step(120);
+  },
+
+  /** Gold pickup: the player steps onto a fat gold sack — coin fountain, flash and the +gold number. */
+  async 'gold-pickup'(ctx) {
+    const g = ctx.reset();
+    clearStart(g);
+    const lv = g.level, p = g.player;
+    const s = ringSpots(g, 3)[0];
+    if (s) {
+      lv.addItem({ qty: 1, x: s.x, y: s.y, type: 'gold', gold: 95 });
+      ctx.step(200);
+      g.move(s.x - p.x, s.y - p.y);
+      ctx.step(g.balance.playerStepTime * 1000 + 60);
+    }
+  },
+
+  /** A monster slain beside the player: ichor burst, soul motes, floor splat. */
+  async 'monster-slain'(ctx) {
+    const g = ctx.reset();
+    clearStart(g);
+    const p = g.player;
+    p.maxHp = 200; p.hp = 200; p.skill = 60;
+    const s = ringSpots(g, 3)[0];
+    const m = s ? g.spawnMonster('hobgoblin', s.x, s.y, { depth: 1, state: 'hunt' }) : null;
+    if (m) { m.hp = 1; m.facing = { dx: Math.sign(p.x - s.x), dy: Math.sign(p.y - s.y) }; g.move(s.x - p.x, s.y - p.y); }
+    ctx.step(260);
   },
 
   /** The Sword of Fargoal just picked up: pillar of light, aura, sword raised. */
@@ -240,10 +332,10 @@ export const scenarios = {
     ctx.renderer.cameraRig.follow(ctx.renderer.playerView.pos, null); ctx.renderer.cameraRig.snap();
     void g; ctx.step(250);
   },
-  async 'spell-shield'(ctx) { ctx.reset(); castWith(ctx, 'shield'); ctx.step(400); },
-  async 'spell-invisibility'(ctx) { ctx.reset(); castWith(ctx, 'invisibility'); ctx.step(400); },
-  async 'spell-regeneration'(ctx) { const g = ctx.reset(); g.player.hp = Math.floor(g.player.maxHp / 2); castWith(ctx, 'regeneration'); ctx.step(400); },
-  async 'spell-drift'(ctx) { ctx.reset(); castWith(ctx, 'drift'); ctx.step(600); },
+  async 'spell-shield'(ctx) { const g = ctx.reset(); clearStart(g); ctx.step(200); castWith(ctx, 'shield'); ctx.step(300); },
+  async 'spell-invisibility'(ctx) { const g = ctx.reset(); clearStart(g); ctx.step(200); castWith(ctx, 'invisibility'); ctx.step(300); },
+  async 'spell-regeneration'(ctx) { const g = ctx.reset(); clearStart(g); ctx.step(200); g.player.hp = Math.floor(g.player.maxHp / 2); castWith(ctx, 'regeneration'); ctx.step(300); },
+  async 'spell-drift'(ctx) { const g = ctx.reset(); clearStart(g); ctx.step(200); castWith(ctx, 'drift'); ctx.step(300); },
 
   /** Depth 18: obsidian/green band, many deep monsters in view. */
   async 'deep-level'(ctx) {
@@ -265,33 +357,56 @@ export const scenarios = {
     ctx.step(500);
   },
 
-  /** Every monster type in a lit grid facing the camera, plus the player in front. */
+  /** Every monster type in a warm, lit hall facing the camera in ranks, the hero in front. */
   async 'bestiary'(ctx) {
     const g = ctx.reset();
-    const W = 22, H = 11, depth = 40;
-    const lv = new Level({ depth, width: W, height: H, seed: 7 });
-    for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) lv.set(x, y, TILE.FLOOR);
-    lv.rooms.push({ x: 1, y: 1, w: W - 2, h: H - 2, type: 'hall', cx: W >> 1, cy: H >> 1 });
-    lv.set(1, 1, TILE.STAIRS_UP); lv.stairsUp = { x: 1, y: 1 };
-    lv.set(W - 2, 1, TILE.STAIRS_DOWN); lv.stairsDown = { x: W - 2, y: 1 }; lv.stairsDownAll = [{ x: W - 2, y: 1 }];
-    lv.set(W >> 1, H - 2, TILE.TEMPLE); lv.temples.push({ x: W >> 1, y: H - 2 });
-    lv.revealAll();
-    g.levels.set(depth, lv);
+    const W = 16, H = 14, depth = 3;
+    const lv = bestiaryHall(g, W, H, depth);
     g.enterLevel(depth, 'teleport', { arrival: { x: W >> 1, y: H - 3 } });
     const p = g.player; p.facing = { dx: 0, dy: 1 };
     const types = MONSTER_TYPES;
-    const cols = 8;
+    const cols = 6;
     types.forEach((t, i) => {
       const col = i % cols, row = Math.floor(i / cols);
-      const x = 4 + col * 2, y = 2 + row * 2.5;
-      const m = g.spawnMonster(t, x, Math.round(y), { depth: 10, state: 'idle' });
+      const x = 3 + col * 2, y = 3 + row * 2;
+      const m = g.spawnMonster(t, x, y, { depth: 10, state: 'idle' });
       if (m) { freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false; }
     });
     ctx.renderer.fog.override = 'all';
     ctx.renderer.rebuildLevel();
-    ctx.renderer.cameraRig.setOverview(W / 2, H / 2 - 0.5, 18, 8.5, { elevation: 48 });
+    void lv;
+    ctx.renderer.cameraRig.setOverview(W / 2, H / 2 - 0.4, 13.5, 10.5, { elevation: 40 });
     ctx.renderer.cameraRig.snap();
     ctx.step(500);
+  },
+
+  /** A killing blow: the hero mid-swing, a hobgoblin buckling and toppling, another one flinching from a hit. */
+  async 'monster-death'(ctx) {
+    const g = ctx.reset();
+    const p = g.player;
+    p.maxHp = 200; p.hp = 200; p.skill = 400;
+    const spots = neighbours(g.level, p.x, p.y).sort((a, b) => (b.y - p.y) - (a.y - p.y) || Math.abs(a.x - p.x) - Math.abs(b.x - p.x));
+    const victims = [];
+    for (let i = 0; i < Math.min(2, spots.length); i++) {
+      const s = spots[i];
+      const m = g.spawnMonster(i === 0 ? 'hobgoblin' : 'ogre', s.x, s.y, { depth: 1, state: 'hunt' });
+      if (m) { freeze(m); m.facing = { dx: Math.sign(p.x - s.x), dy: Math.sign(p.y - s.y) }; victims.push(m); }
+    }
+    ctx.step(300);
+    if (victims[0]) { victims[0].hp = 1; g.move(victims[0].x - p.x, victims[0].y - p.y); }
+    ctx.step(120);
+    if (victims[1]) { victims[1].hp = 999; victims[1].maxHp = 999; ctx.renderer.characters.hurt(ctx.renderer.views.get(victims[1].id)); }
+    ctx.step(160);
+  },
+
+  /** The creature family up close at the gameplay camera: two ranks in front of the hero. */
+  async 'bestiary-beasts'(ctx) {
+    lineup(ctx, ['dire-wolf', 'ogre', 'hobgoblin', 'werebear', 'gargoyle', 'troll', 'wyvern', 'dimension-spider', 'shadow-dragon', 'fyre-drake', 'demon']);
+  },
+
+  /** The human family up close at the gameplay camera: two ranks in front of the hero. */
+  async 'bestiary-humans'(ctx) {
+    lineup(ctx, ['rogue', 'barbarian', 'elvin-ranger', 'dwarven-guard', 'mercenary', 'swordsman', 'monk', 'dark-warrior', 'assassin', 'war-lord', 'mage']);
   },
 };
 
