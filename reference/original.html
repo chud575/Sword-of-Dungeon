@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sword of Fargoal (C64, 1983) — reference replica</title>
+<!--
+  Visual reference replica of the original Commodore 64 "Sword of Fargoal" (Epyx, 1983) play screen.
+  Everything is procedural and self-contained: a 320x200 C64 frame (40x25 cells of 8x8) is rendered
+  pixel-exact into an offscreen canvas and integer-scaled onto a black letterbox like a CRT capture.
+
+  Fidelity notes (derived from pixel analysis of 1:1 emulator captures):
+  - Row 0 is the text window: "HITS: n   EXP PTS: n   GOLD: n" (or a message such as "TEMPLE!").
+  - Unexplored dungeon = 1-pixel checkerboard of C64 yellow (7) on black (reads as olive-grey on a CRT).
+  - Explored walls = dark grey (11) 8x8 masonry tile; explored floor = black.
+  - Map glyphs are white 8x8 characters: stairs up/down, temple, gold sack, hidden treasure/trap checker, pit.
+  - The player and monsters are multicolour sprites (white / light red / grey for the hero).
+  - The font is the game's own custom gothic character set (glyphs traced from captures; 6 9 Q Z , - ? are
+    hand-drawn in the same style because they never appear in the available captures).
+  URL params: ?seed=N  ?w=1600&h=900  ?scale=N (force)  ?msg=TEMPLE!  ?scanlines=0
+-->
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<script>
+'use strict';
+// ------------------------------------------------------------------ params
+const Q = new URLSearchParams(location.search);
+const SEED = Number(Q.get('seed') || 1983);
+const OUT_W = Number(Q.get('w') || window.innerWidth || 1600);
+const OUT_H = Number(Q.get('h') || window.innerHeight || 900);
+const SCANLINES = Q.get('scanlines') !== '0';
+const MSG = Q.get('msg'); // optional message replacing the stats line
+
+// ------------------------------------------------------------------ C64 palette (VICE-style, values matched to captures)
+const PAL = [
+  [0,0,0],[255,255,255],[146,74,64],[122,196,196],[140,80,160],[114,177,75],[72,58,170],[213,223,124],
+  [140,90,40],[103,82,0],[193,129,120],[96,96,96],[138,138,138],[160,230,140],[130,130,230],[180,180,180],
+];
+const BLACK=0, WHITE=1, RED=2, GREEN=5, BLUE=6, YELLOW=7, BROWN=9, LRED=10, DGREY=11, GREY=12;
+
+// ------------------------------------------------------------------ deterministic RNG (mulberry32; same algorithm as src/core/rng.js)
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rnd = mulberry32(SEED);
+const rint = (a, b) => a + Math.floor(rnd() * (b - a + 1));
+const pick = (arr) => arr[Math.floor(rnd() * arr.length)];
+
+// ------------------------------------------------------------------ the game's custom font (8 bytes per glyph, MSB = left pixel)
+const FONT = {"H":[33,98,98,126,98,98,66,135],"I":[8,24,24,24,24,24,16,32],"T":[126,16,48,48,48,50,58,28],"S":[58,100,96,60,14,70,110,188],":":[0,0,24,24,0,24,24,0],"8":[60,78,70,60,78,70,70,60],"E":[29,50,96,120,96,98,118,61],"X":[66,102,44,24,24,52,102,66],"P":[188,98,98,124,96,96,64,128],"5":[126,96,96,124,14,6,78,60],"2":[60,78,6,28,48,96,96,126],"G":[29,50,96,111,98,98,118,61],"O":[24,52,98,98,98,98,52,24],"L":[32,96,96,96,96,97,114,190],"D":[248,76,70,70,70,70,108,184],"7":[126,66,6,12,24,48,48,48],"R":[188,98,98,124,104,100,70,130],"N":[34,98,114,122,110,102,66,130],"C":[29,50,96,96,96,98,118,61],"0":[60,118,98,98,98,98,118,60],"V":[66,98,98,102,52,60,24,24],"1":[8,24,56,24,24,24,24,60],"M":[34,118,126,106,98,98,66,135],"A":[24,52,98,126,98,98,66,135],"U":[97,34,98,98,98,98,52,24],"B":[252,78,70,124,78,70,102,188],"K":[34,98,100,120,108,102,70,131],"W":[65,98,98,98,106,126,118,34],".":[0,0,0,0,0,0,24,24],"3":[60,78,6,28,14,6,78,60],"4":[4,76,76,76,126,12,12,12],"Y":[68,70,102,62,6,70,110,60],"F":[29,50,96,120,96,96,64,128],"+":[0,8,8,62,8,8,0,0],"!":[8,24,24,24,8,8,0,8],"J":[31,6,6,54,86,70,110,60],
+  // hand-drawn in the same style (not present in any capture)
+  "6":[60,114,96,124,102,98,118,60],"9":[60,118,98,118,62,6,70,60],"Q":[24,52,98,98,106,102,54,25],"Z":[126,70,12,24,48,96,98,190],
+  ",":[0,0,0,0,0,24,24,48],"-":[0,0,0,62,0,0,0,0],"?":[60,78,6,28,24,0,24,24]," ":[0,0,0,0,0,0,0,0]};
+
+// ------------------------------------------------------------------ 8x8 map glyphs (white on black) and the masonry tile
+const GLYPH = {
+  brick:      [221,193,56,187,187,131,28,221],   // explored wall (dark grey)
+  stairsDown: [255,161,168,170,170,168,161,255],
+  stairsUp:   [255,250,234,170,170,234,250,255],
+  temple:     [60,36,231,153,153,231,36,60],
+  gold:       [48,188,118,110,102,62,189,209],   // sack of gold
+  hidden:     [170,85,170,85,170,85,170,85],     // hidden treasure / trap ("little grey square")
+  pit:        [60,66,165,153,153,165,66,60],
+};
+
+// ------------------------------------------------------------------ multicolour sprites (letters -> palette index)
+const SPRITES = {
+  player: { map: { W: WHITE, r: LRED, m: GREY }, rows: [
+    'WW....WW....',
+    'WW..rrrrrr..',
+    'WW..rrrrrr..',
+    'WW....WW....',
+    'WW..WWWWWW..',
+    'rrWWmmWWmmWW',
+    'WW..mmmmmmrr',
+    '....WWmmWW..',
+    '....WW..WW..',
+    '....WW..WW..',
+    '..WWmm..mmWW' ] },
+  // green "other monster" (blob creature) — from a level-1 capture
+  green: { map: { G: GREEN, m: GREY, W: WHITE }, rows: [
+    '....GG..GG..',
+    '..GGmmGG..GG',
+    '..mmWWmm..mm',
+    '....mm....mm',
+    'GGWWGGWWGGmm',
+    'mmWWWWWWmmWW',
+    '..mmWWmm..mm',
+    '..mmGGmm..GG',
+    '..mm..mmGG..',
+    '..mm..mm....',
+    'GGmm..mmGG..' ] },
+  // blue spider-like creature
+  blue: { map: { A: BLUE, B: GREY, C: WHITE }, rows: [
+    '....AAAA....',
+    '..AABBBBAA..',
+    'CC..BBBB..CC',
+    'BB..AAAABBAA',
+    'AAAABBBBAAAA',
+    '..AABBBBAA..',
+    '....BBBB....',
+    '..BBAAAABB..',
+    '..BB....AA..',
+    '..AA....AA..',
+    'CCBB....BBCC' ] },
+  // small brown creature
+  brown: { map: { A: GREY, B: BROWN }, rows: [
+    'AA..AABBAABB',
+    'BBBBBBAABBBB',
+    '..BBAAAABB..',
+    '....AAAA....',
+    '..AAAABBBB..',
+    '..AA....BB..',
+    '..BB....BB..',
+    'AABB....BBAA' ] },
+  // large red/grey beast with a white head (deeper-level monster)
+  beast: { map: { A: WHITE, B: GREY, C: DGREY, D: RED }, rows: [
+    '..........AA........',
+    '....BBBB..AAAA......',
+    '..BBCCCCBBBBDDAA....',
+    '....CCCC..DDDDDDAADD',
+    'BB..BBCCBBBBDD..DDAA',
+    'CCCCCCAADDBBBBBBDD..',
+    '..CCAAAADDDDAADD....',
+    '....AABB..AAAAAA....',
+    '..BBAACCBBBBAABB....',
+    '..CC....CCBB..BB....',
+    '..CC....CCBB..BB....',
+    'BBBB....BBDD..DDBB..' ] },
+};
+
+// ------------------------------------------------------------------ dungeon generation (40 x 24 cells under the text row)
+const COLS = 40, ROWS = 24;
+const ROCK = 0, FLOOR = 1, WALL = 2;
+const tiles = new Uint8Array(COLS * ROWS);
+const explored = new Uint8Array(COLS * ROWS);
+const idx = (x, y) => y * COLS + x;
+const inb = (x, y) => x >= 0 && y >= 0 && x < COLS && y < ROWS;
+
+function carveRoom(r) { for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) tiles[idx(x, y)] = FLOOR; }
+function overlaps(a, b, gap) {
+  return !(a.x + a.w + gap <= b.x || b.x + b.w + gap <= a.x || a.y + a.h + gap <= b.y || b.y + b.h + gap <= a.y);
+}
+const rooms = [];
+for (let tries = 0; tries < 600 && rooms.length < 6; tries++) {
+  const w = rint(5, 10), h = rint(3, 6);
+  const r = { x: rint(1, COLS - w - 2), y: rint(1, ROWS - h - 2), w, h };
+  if (rooms.some((o) => overlaps(o, r, 4))) continue;
+  rooms.push(r);
+}
+rooms.sort((a, b) => a.x + a.y * 0.5 - (b.x + b.y * 0.5));
+const centre = (r) => ({ x: r.x + (r.w >> 1), y: r.y + (r.h >> 1) });
+
+// 1-wide corridors made of straight runs joined by 90-degree turns (the original's long, twisty passages)
+function carveLine(a, b) {
+  const dx = Math.sign(b.x - a.x), dy = Math.sign(b.y - a.y);
+  let x = a.x, y = a.y;
+  tiles[idx(x, y)] = FLOOR;
+  while (x !== b.x || y !== b.y) { x += dx; y += dy; if (inb(x, y)) tiles[idx(x, y)] = FLOOR; }
+}
+function corridor(a, b) {
+  const pts = [{ x: a.x, y: a.y }];
+  let x = a.x, y = a.y, horiz = rnd() < 0.5;
+  const turns = rint(1, 3);
+  for (let t = 0; t < turns; t++) {
+    if (horiz) x = rint(Math.min(x, b.x), Math.max(x, b.x)); else y = rint(Math.min(y, b.y), Math.max(y, b.y));
+    pts.push({ x, y }); horiz = !horiz;
+  }
+  if (x !== b.x) { x = b.x; pts.push({ x, y }); }
+  if (y !== b.y) { y = b.y; pts.push({ x, y }); }
+  for (let i = 0; i + 1 < pts.length; i++) carveLine(pts[i], pts[i + 1]);
+}
+rooms.forEach(carveRoom);
+for (let i = 0; i + 1 < rooms.length; i++) corridor(centre(rooms[i]), centre(rooms[i + 1]));
+if (rooms.length > 4 && rnd() < 0.6) corridor(centre(rooms[1]), centre(rooms[rooms.length - 1]));
+// walls: every rock cell touching a floor cell (8-neighbourhood)
+for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+  if (tiles[idx(x, y)] !== ROCK) continue;
+  let touch = false;
+  for (let j = -1; j <= 1 && !touch; j++) for (let i = -1; i <= 1; i++) if (inb(x + i, y + j) && tiles[idx(x + i, y + j)] === FLOOR) { touch = true; break; }
+  if (touch) tiles[idx(x, y)] = WALL;
+}
+
+// ------------------------------------------------------------------ features: stairs, temple, gold, traps, pits, monsters
+const floorCells = (r, avoid) => {
+  const out = [];
+  for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (!avoid.has(idx(x, y))) out.push({ x, y });
+  return out;
+};
+const used = new Set();
+const startRoom = rooms[0], playerRoom = rooms[Math.min(2, rooms.length - 1)];
+// player: in the second room, a few steps in from the corridor
+const player = pick(floorCells(playerRoom, used));
+used.add(idx(player.x, player.y));
+// everything keeps at least one empty cell away from everything else so the oversized sprites stay readable
+const placed = [player];
+const clearOfPlayer = (c) => placed.every((p) => Math.max(Math.abs(c.x - p.x), Math.abs(c.y - p.y)) >= 2);
+const takeIn = (room) => {
+  const cells = floorCells(room, used);
+  const c = pick(cells.filter(clearOfPlayer).length ? cells.filter(clearOfPlayer) : cells);
+  used.add(idx(c.x, c.y)); placed.push(c); return c;
+};
+const features = [];
+const stairsUp = takeIn(startRoom); features.push({ g: 'stairsUp', ...stairsUp });
+{ // the temple sits inside the hero's light radius so it is always on screen
+  const near = floorCells(playerRoom, used).filter((c) => clearOfPlayer(c) && Math.hypot(c.x - player.x, c.y - player.y) <= 3.5);
+  const t = near.length ? pick(near) : takeIn(playerRoom);
+  used.add(idx(t.x, t.y)); placed.push(t); features.push({ g: 'temple', ...t });
+}
+features.push({ g: 'stairsDown', ...takeIn(rooms[rooms.length - 1]) });
+features.push({ g: 'stairsDown', ...takeIn(rooms[1]) });   // levels have several stairs
+for (const r of rooms) if (rnd() < 0.8) features.push({ g: 'gold', ...takeIn(r) });
+features.push({ g: 'hidden', ...takeIn(playerRoom) });
+features.push({ g: 'hidden', ...takeIn(rooms[rooms.length - 1]) });
+const inRoom = (x, y) => rooms.some((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+const corridorCells = [];
+for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++)
+  if (tiles[idx(x, y)] === FLOOR && !inRoom(x, y)) corridorCells.push({ x, y });
+
+// ------------------------------------------------------------------ exploration: light radius along the path walked so far
+function reveal(cx, cy, radius) {
+  for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++)
+    if (Math.hypot(x - cx, y - cy) <= radius) explored[idx(x, y)] = 1;
+}
+// walk from the stairs up to the player's spot along the actual corridor (BFS path), revealing as we go
+function bfsPath(from, to) {
+  const prev = new Int32Array(COLS * ROWS).fill(-1);
+  const q = [idx(from.x, from.y)]; prev[q[0]] = q[0];
+  while (q.length) {
+    const cur = q.shift(); if (cur === idx(to.x, to.y)) break;
+    const cx = cur % COLS, cy = (cur / COLS) | 0;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = cx + dx, ny = cy + dy;
+      if (!inb(nx, ny) || tiles[idx(nx, ny)] !== FLOOR || prev[idx(nx, ny)] !== -1) continue;
+      prev[idx(nx, ny)] = cur; q.push(idx(nx, ny));
+    }
+  }
+  const path = []; let cur = idx(to.x, to.y);
+  if (prev[cur] === -1) return path;
+  while (cur !== idx(from.x, from.y)) { path.push({ x: cur % COLS, y: (cur / COLS) | 0 }); cur = prev[cur]; }
+  path.push(from); return path.reverse();
+}
+const path = bfsPath(stairsUp, player);
+for (let i = 0; i < path.length; i += 2) reveal(path[i].x, path[i].y, 3.2);
+reveal(stairsUp.x, stairsUp.y, 4.2);
+reveal(player.x, player.y, 4.6);
+// a pit (trap door) in the corridor the hero already walked through
+const pitCells = path.filter((c) => !inRoom(c.x, c.y) && Math.hypot(c.x - player.x, c.y - player.y) > 3 && !used.has(idx(c.x, c.y)));
+if (pitCells.length) { const p = pick(pitCells); used.add(idx(p.x, p.y)); features.push({ g: 'pit', ...p }); }
+
+// monsters: two in the lit area near the hero (room + corridor), the rest lurking in the dark
+const monsters = [];
+const litNear = (cells, maxD) => cells.filter((c) => explored[idx(c.x, c.y)] && !used.has(idx(c.x, c.y)) && clearOfPlayer(c) && Math.hypot(c.x - player.x, c.y - player.y) <= maxD);
+const placeMonster = (s, cells, fallbackRoom) => {
+  const c = cells.length ? pick(cells) : takeIn(fallbackRoom);
+  used.add(idx(c.x, c.y)); placed.push(c); monsters.push({ s, ...c });
+};
+placeMonster('green', litNear(floorCells(playerRoom, used), 4.5), playerRoom);
+placeMonster('blue', litNear(corridorCells, 7), playerRoom);
+placeMonster('brown', [], rooms[rooms.length - 1]);
+if (rooms.length > 3) placeMonster('beast', [], rooms[1]);
+
+// ------------------------------------------------------------------ rasterise the 320x200 frame
+const FW = 320, FH = 200;
+const frame = new Uint8Array(FW * FH); // palette indices
+function px(x, y, c) { if (x >= 0 && y >= 0 && x < FW && y < FH) frame[y * FW + x] = c; }
+function glyph(bits, cx, cy, colour) { // 8x8 at cell (cx, cy); cy counts from the text row
+  for (let r = 0; r < 8; r++) for (let i = 0; i < 8; i++) if (bits[r] & (128 >> i)) px(cx * 8 + i, cy * 8 + r, colour);
+}
+function text(str, col, row, colour = WHITE) { for (let i = 0; i < str.length; i++) glyph(FONT[str[i]] || FONT['?'], col + i, row, colour); }
+function sprite(sp, x0, y0) {
+  sp.rows.forEach((row, r) => { for (let i = 0; i < row.length; i++) { const c = sp.map[row[i]]; if (c !== undefined) px(x0 + i, y0 + r, c); } });
+}
+
+// map cells (rows 1..24 of the screen)
+for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
+  const t = tiles[idx(x, y)], e = explored[idx(x, y)];
+  if (!e || t === ROCK) { // unexplored rock: 1px yellow/black checkerboard
+    for (let r = 0; r < 8; r++) for (let i = 0; i < 8; i++) { const sx = x * 8 + i, sy = (y + 1) * 8 + r; if (((sx + sy) & 1) === 0) px(sx, sy, YELLOW); }
+  } else if (t === WALL) glyph(GLYPH.brick, x, y + 1, DGREY);
+  // FLOOR: black (already)
+}
+for (const f of features) if (explored[idx(f.x, f.y)]) glyph(GLYPH[f.g], f.x, f.y + 1, WHITE);
+for (const m of monsters) if (explored[idx(m.x, m.y)]) {
+  const sp = SPRITES[m.s]; const w = sp.rows[0].length;
+  sprite(sp, m.x * 8 + 4 - (w >> 1), (m.y + 1) * 8 + 4 - (sp.rows.length >> 1));
+}
+sprite(SPRITES.player, player.x * 8 - 2, (player.y + 1) * 8 - 2);
+// text window
+const stats = { hits: rint(9, 24), xp: rint(40, 400), gold: rint(20, 160) };
+if (MSG) text(MSG.toUpperCase().slice(0, 40), 0, 0);
+else text(`HITS: ${stats.hits}   EXP PTS: ${stats.xp}   GOLD: ${stats.gold}`, 0, 0);
+
+// ------------------------------------------------------------------ present: integer scale, black letterbox, subtle scanlines
+const off = document.createElement('canvas'); off.width = FW; off.height = FH;
+const octx = off.getContext('2d');
+const img = octx.createImageData(FW, FH);
+for (let i = 0; i < FW * FH; i++) { const c = PAL[frame[i]]; img.data[i * 4] = c[0]; img.data[i * 4 + 1] = c[1]; img.data[i * 4 + 2] = c[2]; img.data[i * 4 + 3] = 255; }
+octx.putImageData(img, 0, 0);
+
+const canvas = document.getElementById('screen');
+canvas.width = OUT_W; canvas.height = OUT_H;
+const scale = Number(Q.get('scale')) || Math.max(1, Math.floor(Math.min(OUT_W / FW, OUT_H / FH)));
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = '#000'; ctx.fillRect(0, 0, OUT_W, OUT_H);
+ctx.imageSmoothingEnabled = false;
+const ox = Math.floor((OUT_W - FW * scale) / 2), oy = Math.floor((OUT_H - FH * scale) / 2);
+ctx.drawImage(off, ox, oy, FW * scale, FH * scale);
+if (SCANLINES && scale >= 3) {
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  for (let y = oy + scale - 1; y < oy + FH * scale; y += scale) ctx.fillRect(ox, y, FW * scale, 1);
+}
+
+window.__ref = { seed: SEED, scale, rooms, player, monsters, features, stats, tiles, explored, COLS, ROWS };
+window.__REF_READY = true;
+</script>
+</body>
+</html>
