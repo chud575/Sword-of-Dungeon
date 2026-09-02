@@ -459,7 +459,7 @@ export class Game {
   /** Take the down staircase under the player. */
   descend() {
     const p = this.player, level = this.level;
-    if (level.get(p.x, p.y) !== TILE.STAIRS_DOWN) return false;
+    if (this.state.over || level.get(p.x, p.y) !== TILE.STAIRS_DOWN) return false;
     level.lastStairsDown = { x: p.x, y: p.y };
     if (level.depth > 0) gainXp(this, Math.floor(10 * this.rngs.loot.next() + 1) * level.depth);
     this.log('STAIRS GOING DOWN', 'info');
@@ -471,7 +471,7 @@ export class Game {
   /** Take the up staircase under the player (level 1 needs the sword; leads to the surface). */
   ascend() {
     const p = this.player, level = this.level;
-    if (level.get(p.x, p.y) !== TILE.STAIRS_UP) return false;
+    if (this.state.over || level.get(p.x, p.y) !== TILE.STAIRS_UP) return false;
     if (level.depth === 1 && !p.hasSword) { this.log('The way out is sealed by Umla\'s magic. Only the Sword can open it.', 'quest'); return false; }
     this.log('STAIRS GOING UP', 'info');
     this.emit('fx:ascend', {});

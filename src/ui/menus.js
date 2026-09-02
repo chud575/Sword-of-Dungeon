@@ -114,7 +114,11 @@ export class Menus {
   key(e) {
     const top = this.top;
     if (!top) return;
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) { if (e.key === 'Escape') { e.target.blur(); e.preventDefault(); e.stopPropagation(); } return; }
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+      if (e.key === 'Escape') { e.target.blur(); e.preventDefault(); e.stopPropagation(); }
+      else if (e.key === 'Enter' && top.onKey && e.target.type !== 'range' && top.onKey(e) === true) { e.preventDefault(); e.stopPropagation(); } // Enter in a text field submits the panel
+      return;
+    }
     e.stopPropagation();
     const k = e.key;
     if (top.onKey && top.onKey(e) === true) { e.preventDefault(); return; }
@@ -343,7 +347,7 @@ export class Menus {
     const g = this.ctx.getGame();
     return [
       { label: 'Try again', sub: `same seed ${stats.seed} · ${stats.difficulty}`, onSelect: () => { this.closeAll(); this.app.restart(); } },
-      { label: 'New quest', onSelect: () => { this.closeAll(); this.showNewGame({}); } },
+      { label: 'New quest', onSelect: () => this.showNewGame({}) }, // stacked: Back returns here
       { label: 'Hall of Fame', sub: g && g.rank ? `you are #${g.rank}` : '', onSelect: () => this.showHall() },
       { label: 'Copy seed', sub: 'share this dungeon', onSelect: () => { copy(String(stats.seed)); this.bus.emit('log', { text: `Seed ${stats.seed} copied.`, kind: 'info' }); } },
       { label: 'Title screen', onSelect: () => { this.closeAll(); this.app.toTitle(); } },

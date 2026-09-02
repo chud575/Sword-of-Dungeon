@@ -24,6 +24,7 @@ export class CameraRig {
     this.dive = 0;
     this.time = 0;
     this.velocity = new THREE.Vector3();
+    this._dst = new THREE.Vector3(); this._diff = new THREE.Vector3();
   }
 
   setAspect(aspect) { this.camera.aspect = aspect; this.camera.updateProjectionMatrix(); }
@@ -77,10 +78,10 @@ export class CameraRig {
   update(dt) {
     this.time += dt;
     const ov = this.overview;
-    const dst = ov ? ov.center : this.target.clone().add(this.lookAhead);
+    const dst = ov ? ov.center : this._dst.copy(this.target).add(this.lookAhead);
     // critically damped spring toward the destination
     const omega = ov ? 3.5 : 7.5;
-    const diff = new THREE.Vector3().subVectors(this.smoothTarget, dst);
+    const diff = this._diff.subVectors(this.smoothTarget, dst);
     const accel = diff.multiplyScalar(-omega * omega).addScaledVector(this.velocity, -2 * omega);
     this.velocity.addScaledVector(accel, dt);
     this.smoothTarget.addScaledVector(this.velocity, dt);

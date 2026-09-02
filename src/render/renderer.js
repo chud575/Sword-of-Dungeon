@@ -42,13 +42,15 @@ export class Renderer {
   /**
    * @param {{canvas:HTMLCanvasElement, bus:import('../core/events.js').EventBus}} opts
    */
-  constructor({ canvas, bus }) {
+  constructor({ canvas, bus, quality = 'high' }) {
     this.canvas = canvas; this.bus = bus;
     this.game = null;
+    /** 'high': 4x MSAA half-float target, soft 1024 shadows. 'low' (QA bots, weak GPUs): no MSAA, 512 hard shadows — ~2x cheaper fill. */
+    this.quality = quality === 'low' ? 'low' : 'high';
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', alpha: false, stencil: false, preserveDrawingBuffer: true });
-    this.gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+    this.gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.quality === 'low' ? 1 : 1.5));
     this.gl.shadowMap.enabled = true;
-    this.gl.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.gl.shadowMap.type = this.quality === 'low' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
     this.gl.toneMappingExposure = 1.15;
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
@@ -59,6 +61,7 @@ export class Renderer {
     this.mats = createMaterials(this.fog);
     this.props = new PropFactory(this.mats);
     this.lighting = new Lighting(this.scene, this.fog);
+    if (this.quality === 'low') this.lighting.spot.shadow.mapSize.set(512, 512);
     this.dungeon = new DungeonView(this.scene, this.mats, this.props, this.fog);
     this.characters = new CharacterFactory(this.fog);
     this.effects = new Effects(this.scene, this.fog, bus);
@@ -70,6 +73,8 @@ export class Renderer {
     this.time = 0;
     this.frame = 0;
     this.lastLookDir = new THREE.Vector3(0, 0, 1);
+    // per-frame scratch (no allocations in update())
+    this._ppos = new THREE.Vector3(); this._statuses = new Set(); this._goldViews = []; this._alarm = new THREE.Color(0.6, 0.05, 0.05);
     this.setupComposer();
     this.unsub = [];
     this.bind();
@@ -80,7 +85,7 @@ export class Renderer {
   setupComposer() {
     const w = Math.max(1, this.canvas.clientWidth), h = Math.max(1, this.canvas.clientHeight);
     const pr = this.gl.getPixelRatio();
-    const target = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: 4 });
+    const target = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: this.quality === 'low' ? 0 : 4 });
     this.composer = new EffectComposer(this.gl, target);
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.55, 0.55, 0.82);
@@ -94,6 +99,7 @@ export class Renderer {
 
   resize() {
     const w = Math.max(1, this.canvas.clientWidth || window.innerWidth), h = Math.max(1, this.canvas.clientHeight || window.innerHeight);
+    this.sizeW = w; this.sizeH = h;
     this.gl.setSize(w, h, false);
     this.composer.setSize(w, h);
     this.bloom.setSize(w, h);
@@ -136,7 +142,7 @@ export class Renderer {
       const rig = this.cameraRig;
       if (!rig.transition) { rig.startTransition(direction === 'up' ? 'ascend' : 'descend', null); rig.transition.t = rig.transition.dur * 0.5; rig.transition.midDone = true; }
     }
-    if (via === 'pit') { this.effects.shakeRequest += 0.8; this.effects.dust(level.stairsUp?.x ?? 0, level.stairsUp?.y ?? 0, 0); }
+    if (via === 'pit') { const p = this.game.player; this.effects.shakeRequest += 0.8; this.effects.dust(p.x, p.y, 40); }
   }
 
   /** Start a cinematic stairs transition; `onMid` should perform the actual descend/ascend. */
@@ -229,7 +235,7 @@ export class Renderer {
     this.syncViews(dt);
     this.dungeon.update(dt);
     const pv = this.playerView;
-    const ppos = pv ? pv.pos : new THREE.Vector3(g.player.x, 0, g.player.y);
+    const ppos = pv ? pv.pos : this._ppos.set(g.player.x, 0, g.player.y);
     // camera follow with look-ahead from held/facing direction
     if (!this.cameraRig.overview) {
       const held = g.heldDir || (pv && pv.anim.moving ? { dx: Math.sin(pv.anim.angle), dy: Math.cos(pv.anim.angle) } : null);
@@ -239,9 +245,10 @@ export class Renderer {
     }
     this.cameraRig.shake(this.effects.takeShake());
     this.cameraRig.update(dt);
-    const statuses = new Set(g.player.statusEffects.map((s) => s.type));
+    const statuses = this._statuses; statuses.clear();
+    for (const s of g.player.statusEffects) statuses.add(s.type);
     if (g.player.invisible) statuses.add('invisible');
-    const goldViews = [];
+    const goldViews = this._goldViews; goldViews.length = 0;
     for (const v of this.dungeon.itemViews.values()) { const it = v.userData.item; if (it && it.type === 'gold' && !it.hidden && (this.fog.override === 'all' || g.level.isVisible(it.x, it.y))) goldViews.push(v); }
     this.effects.update(dt, { player: g.player, playerPos: ppos, statuses, hasSword: !!g.player.hasSword, goldViews });
     this.lighting.update(dt, { x: ppos.x, z: ppos.z }, { lightOn: g.lightOn(), sword: !!g.player.hasSword, allLit: this.fog.override === 'all' });
@@ -253,7 +260,7 @@ export class Renderer {
     u.uFade.value = this.cameraRig.fade;
     if (g.state.quest.timer !== null && g.state.quest.timer < 300 && g.player.hasSword) {
       const pulse = 0.5 + 0.5 * Math.sin(this.time * 4);
-      u.uFlash.value.lerp(new THREE.Color(0.6, 0.05, 0.05), 0.5);
+      u.uFlash.value.lerp(this._alarm, 0.5);
       u.uFlashAmt.value = Math.max(u.uFlashAmt.value, pulse * 0.12);
     }
   }
@@ -266,6 +273,8 @@ export class Renderer {
 
   draw() {
     this.frame++;
+    // layout can change without a resize event (or after it fired): keep the buffers matched to the canvas
+    if (this.canvas.clientWidth !== this.sizeW || this.canvas.clientHeight !== this.sizeH) this.resize();
     this.gl.info.reset();
     this.composer.render();
   }

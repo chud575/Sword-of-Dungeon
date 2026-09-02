@@ -22,7 +22,7 @@ let currentSeed = seedParam !== null && seedParam !== '' ? (Number.isFinite(Numb
 const difficultyParam = params.get('difficulty') || 'standard';
 
 const canvas = document.getElementById('game-canvas');
-const renderer = new Renderer({ canvas, bus });
+const renderer = new Renderer({ canvas, bus, quality: params.get('quality') || 'high' }); // ?quality=low: cheaper fill for bots / weak GPUs
 const input = new Input({ canvas, bus, pickTile: (x, y) => renderer.pickTile(x, y) });
 const DEFAULT_YAW = renderer.cameraRig.yaw;
 
@@ -30,6 +30,7 @@ let game = null;
 let autoPath = null;
 let exploring = false;
 let frozen = false; // true after a debug scenario ran: the RAF loop stops advancing (deterministic shots)
+let loopEnabled = true; // debug.setLoop(false): the RAF loop stops advancing time but input still works (QA bots drive debug.step)
 let saveRequested = false;
 
 function newGame(seed = currentSeed, opts = {}) {
@@ -131,19 +132,27 @@ app.applySettings(settings);
 // ------------------------------------------------------------------ input wiring
 function stopAuto() { autoPath = null; if (exploring) { exploring = false; bus.emit('ui:explore', { on: false }); } }
 
+/** Stairs cinematic: the player must stay put until the level swaps at the darkest point. */
+function takeStairs(kind) {
+  stopAuto(); input.reset(); game.setHeld(null); game.pendingMove = null;
+  input.enabled = false;
+  renderer.transition(kind, () => { if (kind === 'descend') game.descend(); else game.ascend(); input.enabled = modalCount === 0; });
+}
+const inTransition = () => !!renderer.cameraRig.transition;
+
 function interact() {
   if (!game || game.over) return;
   const lv = game.level, p = game.player, t = lv.get(p.x, p.y);
-  if (renderer.cameraRig.transition) return;
-  if (t === TILE.STAIRS_DOWN) { input.enabled = false; renderer.transition('descend', () => { game.descend(); input.enabled = modalCount === 0; }); return; }
-  if (t === TILE.STAIRS_UP && (lv.depth > 1 || p.hasSword)) { input.enabled = false; renderer.transition('ascend', () => { game.ascend(); input.enabled = modalCount === 0; }); return; }
+  if (inTransition()) return;
+  if (t === TILE.STAIRS_DOWN) { takeStairs('descend'); return; }
+  if (t === TILE.STAIRS_UP && (lv.depth > 1 || p.hasSword)) { takeStairs('ascend'); return; }
   game.interact();
 }
 
-bus.on('input:move', ({ dx, dy }) => { if (!game || frozen) return; stopAuto(); game.move(dx, dy); });
-bus.on('input:held', ({ dx, dy }) => { if (!game || frozen) return; if (dx || dy) stopAuto(); game.setHeld(dx, dy); });
+bus.on('input:move', ({ dx, dy }) => { if (!game || frozen || inTransition()) return; stopAuto(); game.move(dx, dy); });
+bus.on('input:held', ({ dx, dy }) => { if (!game || frozen) return; if ((dx || dy) && inTransition()) return; if (dx || dy) stopAuto(); game.setHeld(dx, dy); });
 bus.on('input:click', ({ x, y, button }) => {
-  if (!game || frozen || button !== 0) return;
+  if (!game || frozen || button !== 0 || inTransition()) return;
   const p = game.player;
   if (x === p.x && y === p.y) { interact(); return; }
   const m = game.level.monsterAt(x, y);
@@ -183,7 +192,7 @@ bus.on('game:over', (p) => { if (!game || debugMode) return; if (p.victory || ga
 
 /** Drive click-to-move / auto-explore one step when the player is ready. */
 function autoStep() {
-  if (!game || game.over || game.paused) return;
+  if (!game || game.over || game.paused || inTransition()) return;
   const p = game.player;
   if (p.moveTimer > 0) return;
   if (autoPath && autoPath.length) {
@@ -201,7 +210,7 @@ function autoStep() {
 let last = performance.now();
 function frame(now) {
   requestAnimationFrame(frame);
-  if (frozen) { last = now; return; }
+  if (frozen || !loopEnabled) { last = now; return; }
   const dt = Math.min(0.1, Math.max(0, (now - last) / 1000));
   last = now;
   input.update(dt);
@@ -210,8 +219,10 @@ function frame(now) {
   renderer.render(dt);
   ui.update(dt);
   audio.update(dt, menus.titleOpen ? null : game);
-  if (saveRequested && game && !game.over && !frozen) { saveRequested = false; saveGame(game); }
+  flushSave();
 }
+/** Deferred autosave (requested on level change) once the frame that produced it is complete. */
+function flushSave() { if (saveRequested && game && !game.over && !frozen) { saveRequested = false; saveGame(game); } }
 
 // ------------------------------------------------------------------ debug API
 const debug = {
@@ -230,6 +241,7 @@ const debug = {
       rem -= d;
     }
     renderer.draw();
+    flushSave();
   },
   /** Run a registered scenario on a fresh game. Resolves false if unknown. */
   async runScenario(name, opts = {}) {
@@ -253,6 +265,9 @@ const debug = {
   /** Resume the live loop after scenarios (they freeze it for deterministic screenshots). */
   resume() { frozen = false; last = performance.now(); },
   get frozen() { return frozen; },
+  /** Enable/disable the live RAF clock (input keeps working). QA bots disable it so debug.step is the only clock. */
+  setLoop(on) { loopEnabled = !!on; last = performance.now(); },
+  get loopEnabled() { return loopEnabled; },
   setSeed(seed) { return newGame(seed); },
   goToDepth(d) { game.goToDepth(d); renderer.render(0); },
   teleport(x, y) { return game.teleportTo(x, y); },

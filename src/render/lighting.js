@@ -169,6 +169,15 @@ export class Lighting {
     this.lightScale = 1;
     this.baseHemi = 0.55; this.baseMoon = 0.5;
     this.flickerPhase = this.rng.float(0, 100);
+    this._near = []; // scratch for the per-frame nearest-spot sort
+  }
+
+  /** Nearest `n` spots to (x,z), reusing the scratch array (spots carry a transient `d`). */
+  nearest(spots, x, z) {
+    const out = this._near; out.length = 0;
+    for (const sp of spots) { sp.d = Math.hypot(sp.x - x, sp.z - z); out.push(sp); }
+    out.sort((a, b) => a.d - b.d);
+    return out;
   }
 
   /** Choose torch spots for a level (wall faces looking into rooms). */
@@ -237,22 +246,22 @@ export class Lighting {
     this.point.distance = 4.5 * s;
     this.point.color.set(state.sword ? 0xc9b0ff : state.lightOn ? 0xfff2cc : 0xbfd8ff);
     // Nearest torches get the real lights.
-    const sorted = this.torchSpots.map((sp) => ({ sp, d: Math.hypot(sp.x - player.x, sp.z - player.z) })).sort((a, b) => a.d - b.d);
+    const sorted = this.nearest(this.torchSpots, player.x, player.z);
     for (let i = 0; i < TORCH_POOL; i++) {
       const l = this.torches[i];
-      const e = sorted[i];
-      if (!e || (e.d > 16 && !state.allLit)) { l.intensity = 0; continue; }
-      const f = 0.8 + 0.15 * Math.sin(t * 9.3 + e.sp.phase) + 0.08 * Math.sin(t * 17.1 + e.sp.phase * 2) + 0.05 * Math.sin(t * 3.1 + e.sp.phase);
-      l.position.set(e.sp.x + e.sp.nx * 0.3, 0.95, e.sp.z + e.sp.nz * 0.3);
+      const sp = sorted[i];
+      if (!sp || (sp.d > 16 && !state.allLit)) { l.intensity = 0; continue; }
+      const f = 0.8 + 0.15 * Math.sin(t * 9.3 + sp.phase) + 0.08 * Math.sin(t * 17.1 + sp.phase * 2) + 0.05 * Math.sin(t * 3.1 + sp.phase);
+      l.position.set(sp.x + sp.nx * 0.3, 0.95, sp.z + sp.nz * 0.3);
       l.intensity = 9 * f;
       l.distance = 6.5;
     }
-    const temples = this.templeSpots.map((sp) => ({ sp, d: Math.hypot(sp.x - player.x, sp.z - player.z) })).sort((a, b) => a.d - b.d);
+    const temples = this.nearest(this.templeSpots, player.x, player.z);
     for (let i = 0; i < TEMPLE_POOL; i++) {
       const l = this.temples[i];
-      const e = temples[i];
-      if (!e) { l.intensity = 0; continue; }
-      l.position.set(e.sp.x, 2.1, e.sp.z);
+      const sp = temples[i];
+      if (!sp) { l.intensity = 0; continue; }
+      l.position.set(sp.x, 2.1, sp.z);
       l.intensity = 4.5 + 0.8 * Math.sin(t * 1.7);
     }
   }

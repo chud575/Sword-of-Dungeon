@@ -7,15 +7,17 @@
 // and fast under SwiftShader. State is logged every 30 simulated seconds; screenshots go to
 // shots/play/ on death, victory and every level change.
 // Exit code is non-zero on any page error, if the player never moved, or never changed depth.
-// Usage: node tools/play.mjs [--seed 1 | --seeds 1,2,3] [--seconds 600] [--w 800] [--h 450] [--difficulty standard] [--verbose]
+// Usage: node tools/play.mjs [--seed 1 | --seeds 1,2,3] [--seconds 600] [--w 800] [--h 450] [--difficulty standard] [--quality low|high] [--maxwall 25] [--verbose]
 import { startServer, launchBrowser, waitReady } from './browser.mjs';
 import fs from 'node:fs';
 
 const args = Object.fromEntries(process.argv.slice(2).map((a, i, arr) => a.startsWith('--') ? [a.slice(2), (arr[i + 1] && !arr[i + 1].startsWith('--')) ? arr[i + 1] : true] : []).filter(Boolean));
 const seeds = args.seeds ? String(args.seeds).split(',').map(Number) : [Number(args.seed || 1)];
 const SECONDS = Number(args.seconds || 600);
+const MAX_WALL = Number(args.maxwall || 25) * 60 * 1000; // minutes of wall clock per seed before the run is cut short
 const W = Number(args.w || 800), H = Number(args.h || 450);
 const difficulty = args.difficulty || 'standard';
+const quality = args.quality || 'low'; // logic QA, not a beauty contest: the cheap render path is ~2x faster under SwiftShader
 const verbose = !!args.verbose;
 const OUT = 'shots/play';
 fs.mkdirSync(OUT, { recursive: true });
@@ -31,7 +33,9 @@ function snapshot() {
   if (!g) return { noGame: true };
   const p = g.player, lv = g.level;
   const cheb = (ax, ay, bx, by) => Math.max(Math.abs(ax - bx), Math.abs(ay - by));
-  const adj = g.visibleMonsters().map((m) => ({ id: m.id, type: m.type, dx: m.x - p.x, dy: m.y - p.y, d: cheb(m.x, m.y, p.x, p.y), hp: m.hp, state: m.state })).sort((a, b) => a.d - b.d);
+  const band = (m) => { const x = (m.strength / Math.max(1, p.skill)) * 5; return x < 1 ? 'trivial' : x < 3 ? 'easy' : x < 6 ? 'even' : x < 12 ? 'hard' : 'deadly'; };
+  const adj = g.visibleMonsters().map((m) => ({ id: m.id, type: m.type, dx: m.x - p.x, dy: m.y - p.y, d: cheb(m.x, m.y, p.x, p.y), hp: m.hp, state: m.state, band: band(m), special: m.special })).sort((a, b) => a.d - b.d);
+  const away = (m) => { let best = null, bestD = -1; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if ((!dx && !dy) || !lv.canStep(p.x, p.y, dx, dy) || lv.isHazard(p.x + dx, p.y + dy) || lv.entityAt(p.x + dx, p.y + dy)) continue; const d = cheb(p.x + dx, p.y + dy, p.x + m.dx, p.y + m.dy); if (d > bestD) { bestD = d; best = { dx, dy }; } } return best; };
   let explored = 0, walkable = 0;
   for (let i = 0; i < lv.tiles.length; i++) if (lv.tiles[i] !== 0) { walkable++; if (lv.explored[i]) explored++; }
   const TILE = { STAIRS_DOWN: 3, STAIRS_UP: 4, PIT: 5, TEMPLE: 6 };
@@ -49,7 +53,7 @@ function snapshot() {
     tile: lv.get(p.x, p.y), onTemple: lv.isTemple(p.x, p.y), climbable: !!lv.climbableAt(p.x, p.y),
     combat: !!g.state.combat, adj, exploredFrac: explored / Math.max(1, walkable),
     templeStep: temple ? pathStep(temple) : null, stairsStep: stairs.length ? pathStep(stairs.sort((a, b) => cheb(a.x, a.y, p.x, p.y) - cheb(b.x, b.y, p.x, p.y))[0]) : null,
-    stairsKnown: stairs.length > 0, pit,
+    stairsKnown: stairs.length > 0, pit, flee: adj.length && adj[0].d <= 2 ? away(adj[0]) : null,
     exploring: !!ui.hud.exploreBtn.classList.contains('on'), autoPaused: ui.hud.autoPaused,
     modal: ui.menus.top ? ui.menus.top.name : (ui.inventory.open ? 'inventory' : null), titleOpen: ui.menus.titleOpen,
     transition: !!G.renderer.cameraRig.transition, inputEnabled: G.debug.input.enabled,
@@ -75,15 +79,18 @@ async function playSeed(seed) {
   const chance = (p) => rnd() < p;
   const log = (...a) => console.log(`[seed ${seed}]`, ...a);
   const problems = [];
-  const stats = { deaths: 0, descents: 0, maxDepth: 1, moves: 0, kills: 0, sacrifices: 0, spells: 0, potions: 0, pits: 0, menus: 0, clicks: 0, ticks: 0 };
+  const stats = { deaths: 0, descents: 0, maxDepth: 1, moves: 0, kills: 0, sacrifices: 0, spells: 0, potions: 0, pits: 0, flees: 0, menus: 0, clicks: 0, ticks: 0, restarts: 0 };
   let pending = null; // snapshot taken right after the last step (saves a round-trip per tick)
   const snap = async () => { const s = pending || await page.evaluate(() => window.__bot.snapshot()); pending = null; return s; };
   const step = async (ms) => { pending = await page.evaluate((ms) => { window.__game.debug.step(ms); return window.__bot.snapshot(); }, ms); stats.ticks++; };
-  const press = async (k) => { await page.keyboard.press(k); };
+  // any real input invalidates the cached snapshot (the game may react synchronously to it)
+  const press = async (k) => { pending = null; await page.keyboard.press(k); };
+  const keyDown = async (k) => { pending = null; await page.keyboard.down(k); };
+  const click = async (x, y) => { pending = null; await page.mouse.click(x, y); stats.clicks++; };
   const shot = async (name) => { const f = `${OUT}/seed${seed}-${name}.png`; await page.screenshot({ path: f }); if (verbose) log('shot', f); };
   const t0 = Date.now();
   try {
-    await page.goto(server.url, { waitUntil: 'load' });
+    await page.goto(server.url + `?quality=${quality}`, { waitUntil: 'load' });
     await waitReady(page);
     await page.evaluate(`window.__bot = { snapshot: ${snapshot.toString()}, tileToClient: ${tileToClient.toString()} };`);
     await page.mouse.move(2, 2); // menus pre-select on hover: park the cursor
@@ -96,6 +103,7 @@ async function playSeed(seed) {
     await page.fill('#ng-seed', String(seed));
     await page.click('#ng-start');
     await page.waitForFunction(() => !document.getElementById('title') && window.__game.game && !window.__game.ui.menus.isOpen, null, { timeout: 5000 });
+    await page.evaluate(() => window.__game.debug.setLoop(false)); // debug.step is the only clock from here on: runs are reproducible per seed
     const started = await snap();
     if (String(await page.evaluate(() => window.__game.game.seed)) !== String(seed)) problems.push(`game seed mismatch (wanted ${seed})`);
     log(`started: ${difficulty}, depth ${started.depth}, at ${started.x},${started.y}, ${started.hp}/${started.maxHp} hp`);
@@ -105,16 +113,18 @@ async function playSeed(seed) {
     let movedEver = false, depthChanged = false;
     let lastDepth = started.depth, lastLogAt = 0, levelEnteredAt = 0, lastMenuAt = 0, lastResizeAt = 0;
     let exploreExhausted = false, fightTicks = 0, lastPos = `${started.x},${started.y}`, stuckTicks = 0;
-    let elapsed = 0;
+    let elapsed = 0, lastMoveAt = 0, stuckReported = false, simBase = 0; // simBase: simulated seconds spent in earlier (dead) quests of this run
     const viewports = [[W, H], [800, 500], [1280, 720]];
 
-    while (elapsed < SECONDS) {
+    while (simBase + elapsed < SECONDS) {
+      if (Date.now() - t0 > MAX_WALL) { log(`wall-clock budget hit at ${fmt(simBase + elapsed)} simulated seconds`); break; }
       const s = await snap();
       if (s.noGame) { problems.push('game object vanished'); break; }
       elapsed = s.elapsed;
       // ---- bookkeeping
       const pos = `${s.x},${s.y}`;
-      if (pos !== lastPos) { stats.moves++; lastPos = pos; stuckTicks = 0; } else stuckTicks++;
+      if (pos !== lastPos) { stats.moves++; lastPos = pos; stuckTicks = 0; lastMoveAt = elapsed; } else stuckTicks++;
+      if (elapsed - lastMoveAt > 120 && !s.combat && !s.adj.length && !stuckReported) { stuckReported = true; problems.push(`player stuck at ${pos} on depth ${s.depth} for ${fmt(elapsed - lastMoveAt)} (${s.lastLog})`); }
       if (s.x !== start.x || s.y !== start.y) movedEver = true;
       if (s.depth !== lastDepth) {
         depthChanged = true; stats.descents++; stats.maxDepth = Math.max(stats.maxDepth, s.depth);
@@ -124,7 +134,7 @@ async function playSeed(seed) {
       }
       if (elapsed - lastLogAt >= 30) {
         lastLogAt = elapsed;
-        log(`t=${fmt(elapsed)} depth ${s.depth} pos ${s.x},${s.y} hp ${s.hp}/${s.maxHp} lvl ${s.level} xp ${s.xp} gold ${s.gold} kills ${s.kills} explored ${(s.exploredFrac * 100).toFixed(0)}% spells ${Object.entries(s.spells).filter(([, n]) => n).map(([k, n]) => `${k}:${n}`).join(',') || '-'} pot ${s.potions} status [${s.status}] ${s.exploring ? 'exploring' : ''} ${s.combat ? 'FIGHT' : ''} ${s.modal ? 'modal:' + s.modal : ''}${s.paused ? ' paused' : ''}`);
+        log(`t=${fmt(simBase + elapsed)} depth ${s.depth} pos ${s.x},${s.y} hp ${s.hp}/${s.maxHp} lvl ${s.level} xp ${s.xp} gold ${s.gold} kills ${s.kills} explored ${(s.exploredFrac * 100).toFixed(0)}% spells ${Object.entries(s.spells).filter(([, n]) => n).map(([k, n]) => `${k}:${n}`).join(',') || '-'} pot ${s.potions} status [${s.status}] ${s.exploring ? 'exploring' : ''} ${s.combat ? 'FIGHT' : ''} ${s.modal ? 'modal:' + s.modal : ''}${s.paused ? ' paused' : ''}`);
       }
       stats.kills = s.kills;
       // ---- game over: wait for the end screen, screenshot, Try again
@@ -134,12 +144,22 @@ async function playSeed(seed) {
         await step(200);
         log(`GAME OVER #${stats.deaths} at ${fmt(elapsed)} depth ${s.depth}: ${s.lastLog}`);
         await shot(`death${stats.deaths}`);
-        const btn = await page.$('.modal.death button.menu-item:has-text("Try again"), .modal.victory button.menu-item:has-text("Try again")');
-        if (!btn) { problems.push('no end screen / Try again button after game over'); break; }
-        await btn.click();
+        const again = stats.deaths === 1;
+        const btn = await page.$(`.modal.death button.menu-item:has-text("${again ? 'Try again' : 'New quest'}"), .modal.victory button.menu-item:has-text("${again ? 'Try again' : 'New quest'}")`);
+        if (!btn) { problems.push('no end screen / restart button after game over'); break; }
+        pending = null; await btn.click();
+        if (!again) {
+          // a different dungeon this time so the run keeps covering new ground
+          await page.waitForSelector('#ng-seed', { timeout: 5000 });
+          await page.fill('#ng-seed', String(seed * 1000 + stats.deaths));
+          await page.keyboard.press('Enter'); // Enter inside the seed field must begin the quest
+          stats.restarts++;
+        }
         await page.waitForFunction(() => window.__game.game && !window.__game.game.over && !window.__game.ui.menus.isOpen, null, { timeout: 5000 });
+        await page.evaluate(() => window.__game.debug.setLoop(false));
         const ns = await snap();
-        lastDepth = ns.depth; levelEnteredAt = ns.elapsed; lastPos = `${ns.x},${ns.y}`; exploreExhausted = false;
+        simBase += elapsed; elapsed = ns.elapsed; lastLogAt = 0;
+        lastDepth = ns.depth; levelEnteredAt = ns.elapsed; lastPos = `${ns.x},${ns.y}`; lastMoveAt = ns.elapsed; exploreExhausted = false;
         continue;
       }
       // ---- a menu is open (pause from blur, or one we opened): close it with Esc
@@ -151,15 +171,21 @@ async function playSeed(seed) {
       // ---- decide one action
       const near = s.adj[0];
       const adjacent = near && near.d <= 1 ? near : null;
-      const lowHp = s.hp < s.maxHp * 0.35;
+      const lowHp = s.hp < s.maxHp * 0.35, healthy = s.hp >= s.maxHp * 0.7;
       let tick = 400;
+      const scary = near && (near.band === 'deadly' || (near.band === 'hard' && s.hp < s.maxHp * 0.6) || near.special === 'mage' || near.special === 'demon');
       if (lowHp && s.potions > 0 && (adjacent || s.hp < s.maxHp * 0.2)) { await press('q'); stats.potions++; await step(150); continue; }
-      if (adjacent && s.hp < s.maxHp * 0.25 && s.spells.teleport > 0 && chance(0.7)) { await press(chance(0.5) ? '1' : 't'); stats.spells++; await step(300); continue; }
+      if (adjacent && (s.hp < s.maxHp * 0.25 || scary) && s.spells.teleport > 0 && chance(0.7)) { await press(chance(0.5) ? '1' : 't'); stats.spells++; await step(300); continue; }
+      if (adjacent && s.spells.invisibility > 0 && scary && !s.status.includes('invisible')) { await press(chance(0.5) ? '4' : 'i'); stats.spells++; await step(100); continue; }
       if (adjacent && s.spells.shield > 0 && !s.status.includes('shield')) { await press(chance(0.5) ? '2' : 'Shift+S'); stats.spells++; await step(100); continue; }
+      if (near && near.d <= 2 && scary && !s.combat && s.flee && chance(0.85)) {
+        // back away from something that would kill us (it may still catch us: that is the game)
+        await press(dirKey(s.flee.dx, s.flee.dy)); stats.flees++; await step(170); continue;
+      }
       if (adjacent) {
         // bump-attack: hold the direction for a few rounds, then release (disengages a fight we started)
         const k = dirKey(adjacent.dx, adjacent.dy);
-        await page.keyboard.down(k); await step(chance(0.5) ? 350 : 700); await page.keyboard.up(k);
+        await keyDown(k); await step(chance(0.5) ? 350 : 700); await page.keyboard.up(k);
         fightTicks++;
         continue;
       }
@@ -171,10 +197,11 @@ async function playSeed(seed) {
       if (s.spells.drift > 0 && s.pit.length && chance(0.5)) { await press(chance(0.5) ? '6' : 'f'); stats.spells++; await step(100); continue; }
       if (s.onTemple && s.gold > 0) { await press(chance(0.5) ? ' ' : 'Enter'); stats.sacrifices++; await step(300); continue; }
       if (s.climbable && chance(0.05)) { await press(' '); await step(1500); continue; }
+      if (!healthy && !near && !s.exploring && s.exploredFrac > 0.3 && chance(0.6)) { await press('z'); await step(700); continue; }
       if (s.tile === 3 /* STAIRS_DOWN */) {
         const rest = s.hp < s.maxHp * 0.5 && !near;
         if (rest && chance(0.7)) { await press('z'); await step(600); continue; }
-        if (chance(0.5)) await press(' '); else { const c = await page.evaluate((t) => window.__bot.tileToClient(t), { x: s.x, y: s.y }); await page.mouse.click(c.cx, c.cy); stats.clicks++; }
+        if (chance(0.5)) await press(' '); else { const c = await page.evaluate((t) => window.__bot.tileToClient(t), { x: s.x, y: s.y }); await click(c.cx, c.cy); }
         await step(1500); continue;
       }
       if (s.pit.length && s.hp > s.maxHp * 0.7 && chance(0.02)) { const d = s.pit[0]; await press(dirKey(d.dx, d.dy)); stats.pits++; await step(800); continue; }
@@ -213,13 +240,13 @@ async function playSeed(seed) {
       // navigation: temple when carrying gold, stairs when the level is explored enough or we linger
       const linger = elapsed - levelEnteredAt;
       if (s.templeStep && s.gold >= 30 && chance(0.8)) { await press(dirKey(s.templeStep.dx, s.templeStep.dy)); await step(170); continue; }
-      const wantStairs = s.stairsKnown && (exploreExhausted || s.exploredFrac > 0.55 || linger > 100 || lowHp);
+      const wantStairs = s.stairsKnown && ((healthy && (exploreExhausted || s.exploredFrac > 0.7 || linger > 150)) || linger > 300 || (lowHp && near && s.stairsStep && s.stairsStep.len <= 3));
       if (wantStairs && s.stairsStep) {
         if (s.stairsStep.len > 3 && chance(0.15)) {
           // click-to-move onto the stairs (real mouse) when they are on screen
           const target = await page.evaluate(() => { const lv = window.__game.game.level; const p = window.__game.game.player; const all = (lv.stairsDownAll && lv.stairsDownAll.length ? lv.stairsDownAll : [lv.stairsDown]).filter((t) => lv.isExplored(t.x, t.y)); all.sort((a, b) => Math.max(Math.abs(a.x - p.x), Math.abs(a.y - p.y)) - Math.max(Math.abs(b.x - p.x), Math.abs(b.y - p.y))); return all[0]; });
           const c = await page.evaluate((t) => window.__bot.tileToClient(t), target);
-          if (c.inside) { await page.mouse.click(c.cx, c.cy); stats.clicks++; await step(1200); continue; }
+          if (c.inside) { await click(c.cx, c.cy); await step(1200); continue; }
         }
         await press(dirKey(s.stairsStep.dx, s.stairsStep.dy)); await step(170); continue;
       }
@@ -229,7 +256,7 @@ async function playSeed(seed) {
         // nothing to explore and no known stairs path: wander / click somewhere explored
         if (chance(0.3)) {
           const t = await page.evaluate(() => { const lv = window.__game.game.level; const p = window.__game.game.player; const opts = []; for (let dy = -6; dy <= 6; dy++) for (let dx = -6; dx <= 6; dx++) { const x = p.x + dx, y = p.y + dy; if (lv.isExplored(x, y) && lv.isWalkable(x, y) && !lv.isHazard(x, y)) opts.push({ x, y }); } return opts[Math.floor(opts.length / 2)] || null; });
-          if (t) { const c = await page.evaluate((t) => window.__bot.tileToClient(t), t); if (c.inside) { await page.mouse.click(c.cx, c.cy); stats.clicks++; await step(800); continue; } }
+          if (t) { const c = await page.evaluate((t) => window.__bot.tileToClient(t), t); if (c.inside) { await click(c.cx, c.cy); await step(800); continue; } }
         }
         const dirs = ['w', 'a', 's', 'd', 'y', 'u', 'b', 'n'];
         await press(dirs[Math.floor(rnd() * dirs.length)]); await step(170); continue;
@@ -239,19 +266,21 @@ async function playSeed(seed) {
     }
 
     // ---- Save & quit -> Continue round-trip (real menu clicks)
+    for (let i = 0; i < 20; i++) { const s = await snap(); if (s.over) break; if (s.modal) { await press('Escape'); await step(100); continue; } if (s.transition || !s.inputEnabled) { await step(300); continue; } break; }
     const before = await snap();
     if (!before.over) {
       await press('Escape'); await step(100);
       await page.waitForSelector('.modal button.menu-item:has-text("Save & quit")', { timeout: 5000 });
-      await page.click('.modal button.menu-item:has-text("Save & quit")');
+      pending = null; await page.click('.modal button.menu-item:has-text("Save & quit")');
       await page.waitForSelector('#title', { timeout: 5000 });
       await step(300);
       const cont = await page.$('#title button.menu-item:has-text("Continue")');
       const disabled = cont ? await cont.getAttribute('disabled') : 'missing';
       if (disabled !== null) problems.push(`Continue is ${disabled === 'missing' ? 'missing' : 'disabled'} after Save & quit`);
       else {
-        await cont.click();
+        pending = null; await cont.click();
         await page.waitForFunction(() => !document.getElementById('title') && window.__game.game, null, { timeout: 5000 });
+        await page.evaluate(() => window.__game.debug.setLoop(false));
         await step(200);
         const after = await snap();
         if (after.depth !== before.depth || after.x !== before.x || after.y !== before.y || after.xp !== before.xp || after.gold !== before.gold) problems.push(`Continue restored depth ${after.depth} pos ${after.x},${after.y} xp ${after.xp} gold ${after.gold}; expected depth ${before.depth} pos ${before.x},${before.y} xp ${before.xp} gold ${before.gold}`);
