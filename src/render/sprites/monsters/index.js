@@ -5,8 +5,10 @@
 // ONE GROUP PER FILE. To add a group: drop `./<group>.js` exporting a plain map of builders, then
 // make TWO targeted edits here — an import line and a spread in MONSTER_SPRITES. Never rewrite this
 // file: other agents are adding their own groups to it at the same time.
+import { BEAST_SPRITES } from './beasts.js';
 import { BOSS_SPRITES } from './boss.js';
 import { CASTER_SPRITES } from './caster.js';
+import { HUMAN_BUILDERS } from './humans.js';
 import { HUMANOID_BUILDERS } from './humanoid.js';
 import { UNDEAD_SPRITES } from './undead.js';
 import { VERMIN_SPRITES } from './vermin.js';
@@ -16,7 +18,9 @@ export const MONSTER_SPRITES = {
   ...VERMIN_SPRITES,
   ...CASTER_SPRITES,
   ...HUMANOID_BUILDERS,
+  ...HUMAN_BUILDERS,
   ...UNDEAD_SPRITES,
+  ...BEAST_SPRITES,
   ...BOSS_SPRITES,
 };
 

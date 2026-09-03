@@ -718,6 +718,41 @@ export const scenarios = {
   },
 
   /**
+   * The six trained fighters as HD-2D pixel sprites: a labelled row in a lit hall facing the
+   * camera, hero at the head of the rank for scale (sprites/monsters/humans.js). Every type here
+   * is a real MONSTER_TABLE type; the point of the shot is that no two silhouettes are alike.
+   */
+  async 'bestiary-fighters'(ctx) {
+    const g = ctx.reset();
+    const W = 22, H = 12, depth = 4;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 2, y: 5 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');
+    const types = [['dwarven-guard', 'Dwarven Guard'], ['mercenary', 'Mercenary'], ['swordsman', 'Swordsman'],
+      ['monk', 'Monk'], ['dark-warrior', 'Dark Warrior'], ['war-lord', 'War Lord']];
+    const placed = [{ label: 'Hero', x: 2, y: 5 }];
+    types.forEach(([t, label], i) => {
+      const x = 5 + i * 2 + (i === 5 ? 1 : 0), y = 5;
+      const m = g.spawnMonster(t, x, y, { depth: 12, state: 'idle' });
+      if (!m) return;
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(9.2, 5.3, 18.0, 9.6, { elevation: 32 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
+  },
+
+  /** The same six at the ordinary gameplay camera, walking and swinging, seen over the hero's shoulder. */
+  async 'bestiary-fighters-close'(ctx) {
+    lineup(ctx, ['dwarven-guard', 'mercenary', 'swordsman', 'monk', 'dark-warrior', 'war-lord']);
+  },
+
+  /**
    * The spellcasters and tricksters as HD-2D pixel sprites: a labelled row in a lit hall facing
    * the camera, with the hero at the end of the rank for scale (sprites/monsters/caster.js).
    * `sprite` and `wizard` are not rolled by the generator, so they are placed by overriding the
@@ -804,6 +839,41 @@ export const scenarios = {
     ctx.renderer.cameraRig.snap();
     ctx.step(600);
     nameplates(ctx, placed);
+  },
+
+  /**
+   * The four beasts as HD-2D pixel sprites (sprites/monsters/beasts.js): a labelled row in a lit
+   * hall facing the camera with the hero at the head of the rank for scale. Every type in the row
+   * is a real MONSTER_TABLE entry — dire wolf, gargoyle, werebear, troll — so what is on screen is
+   * exactly what the generator can put in front of the player.
+   */
+  async 'bestiary-beast-sprites'(ctx) {
+    const g = ctx.reset();
+    const W = 20, H = 12, depth = 5;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 2, y: 5 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');    // one lit rank, no fog gradient across the row
+    const types = [['dire-wolf', 'Dire Wolf'], ['gargoyle', 'Gargoyle'], ['werebear', 'Werebear'], ['troll', 'Troll']];
+    const placed = [{ label: 'Hero', x: 2, y: 5 }];
+    types.forEach(([t, label], i) => {
+      const x = 5 + i * 3, y = 5;
+      const m = g.spawnMonster(t, x, y, { depth, state: 'idle' });
+      if (!m) return;
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(9.0, 5.4, 15.0, 8.4, { elevation: 32 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
+  },
+
+  /** The same four beasts at the ordinary gameplay camera, closing on the hero: the real read test. */
+  async 'beasts-in-play'(ctx) {
+    lineup(ctx, ['dire-wolf', 'gargoyle', 'werebear', 'troll', 'dire-wolf', 'gargoyle']);
   },
 
   // ---------------------------------------------------------------- HD-2D hero sprite
