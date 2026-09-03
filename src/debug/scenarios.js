@@ -59,6 +59,29 @@ function findDepthWith(game, tile, from = 1, to = 12) {
 
 function freeze(m) { m.speed = 0; m.moveTimer = 0; }
 
+/** Empty, visible floor tiles at Chebyshev distance rMin..rMax from (x,y), nearest ring first. */
+function ringTiles(level, x, y, rMin, rMax, { visible = true } = {}) {
+  const out = [];
+  for (let r = rMin; r <= rMax; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+    const tx = x + dx, ty = y + dy;
+    if (!level.isEmptyFloor(tx, ty) || (visible && !level.isVisible(tx, ty))) continue;
+    out.push({ x: tx, y: ty, r });
+  }
+  return out;
+}
+
+/** Spawn a hunting monster that already knows where the hero is (scenario helper). */
+function hunter(g, type, s, { depth, speed = 1.5, timer = 0.95 } = {}) {
+  const m = g.spawnMonster(type, s.x, s.y, { depth: depth ?? g.depth, state: 'hunt' });
+  if (!m) return null;
+  const p = g.player;
+  m.lastSeen = { x: p.x, y: p.y }; m.target = m.lastSeen; m.hadPrey = true;
+  m.facing = { dx: Math.sign(p.x - s.x), dy: Math.sign(p.y - s.y) };
+  m.speed = speed; m.moveTimer = timer;
+  return m;
+}
+
 /** Depth in [from,to] whose level shows off the generator best (shape variety, water, pillars, temple chambers). */
 function pickShowcaseDepth(game, from, to) {
   let best = from, bestScore = -Infinity;
@@ -188,6 +211,35 @@ export const scenarios = {
     ctx.step(400);
   },
 
+  /** Audio showcase: unseen threats in the dark (captioned in the log), low HP heartbeat, water drips, deep-level score. */
+  async 'audio-cues'(ctx) {
+    const g = ctx.reset();
+    g.goToDepth(6);
+    clearStart(g);
+    const p = g.player, lv = g.level;
+    p.hp = Math.max(1, Math.floor(p.maxHp * 0.2));
+    g.emit('player:hp', { hp: p.hp, maxHp: p.maxHp });
+    // hidden floor tiles 3-6 tiles away (Chebyshev), nearest first
+    const hidden = [];
+    for (let y = 0; y < lv.height; y++) for (let x = 0; x < lv.width; x++) {
+      const d = Math.max(Math.abs(x - p.x), Math.abs(y - p.y));
+      const t = lv.get(x, y);
+      if (d < 3 || d > 7 || !lv.isWalkable(x, y) || (t !== TILE.FLOOR && t !== TILE.CORRIDOR) || lv.entityAt(x, y)) continue;
+      hidden.push({ x, y, d, seen: lv.isVisible(x, y) ? 1 : 0 });
+    }
+    hidden.sort((a, b) => a.seen - b.seen || a.d - b.d); // unseen first, then nearest
+    const unseen = hidden.filter((h) => !h.seen);
+    const far = unseen[unseen.length - 1] || hidden[hidden.length - 1], near = unseen[0] || hidden[0];
+    const troll = far && g.spawnMonster('troll', far.x, far.y, { depth: 6, state: 'hunt' });
+    const rogue = near && near !== far && g.spawnMonster('rogue', near.x, near.y, { depth: 6, state: 'wander' });
+    if (troll) { freeze(troll); ctx.bus.emit('monster:noticed', { entity: troll }); }
+    ctx.step(300);
+    if (rogue) { freeze(rogue); ctx.bus.emit('monster:wander', { entity: rogue }); }
+    ctx.step(300);
+    if (troll) ctx.bus.emit('entity:moved', { entity: troll, fromX: troll.x, fromY: troll.y, toX: troll.x, toY: troll.y });
+    ctx.step(600);
+  },
+
   /** Whole level revealed and lit from a high camera. */
   async 'dungeon-overview'(ctx) {
     const g = ctx.reset();
@@ -208,27 +260,105 @@ export const scenarios = {
     ctx.step(600);
   },
 
-  /** Three monsters adjacent, mid-fight, damage numbers flying. */
+  /** A live brawl on depth 6: a pack closes in and surrounds the hero while a warlock kites and hurls bolts from range. */
   async 'combat'(ctx) {
     const g = ctx.reset();
+    g.goToDepth(6);
     const p = g.player;
-    p.maxHp = 260; p.hp = 260; p.skill = 42;
+    p.maxHp = 420; p.hp = 420; p.skill = 40; p.level = 5; p.xp = 1700; // mid-run hero: a kill here will not trigger a level-up flash
+    for (const m of g.level.monsters) freeze(m);
     g.give('light', 1); g.castSpell('light');
-    const spots = neighbours(g.level, p.x, p.y);
-    const types = ['werebear', 'gargoyle', 'swordsman'];
-    const ms = [];
-    spots.sort((a, b) => (b.y - p.y) - (a.y - p.y));
-    for (let i = 0; i < Math.min(3, spots.length); i++) {
-      const s = spots[i];
-      const m = g.spawnMonster(types[i], s.x, s.y, { depth: 8, state: 'hunt' });
-      if (m) { m.lastSeen = { x: p.x, y: p.y }; m.facing = { dx: Math.sign(p.x - s.x), dy: Math.sign(p.y - s.y) }; m.moveTimer = 0.9; ms.push(m); }
+    const lv = g.level;
+    const near = ringTiles(lv, p.x, p.y, 2, 3).sort((a, b) => (b.y - p.y) - (a.y - p.y) || Math.abs(a.x - p.x) - Math.abs(b.x - p.x));
+    const types = ['werebear', 'hobgoblin', 'hobgoblin', 'swordsman'];
+    for (let i = 0; i < types.length && near.length; i++) {
+      // spread them around the ring so they arrive from different sides
+      const s = near.splice(Math.floor((i * near.length) / types.length) % near.length, 1)[0];
+      hunter(g, types[i], s, { depth: 9, speed: 1.6, timer: 0.95 - i * 0.12 });
     }
-    if (ms.length) {
-      const m = ms[0];
-      g.move(m.x - p.x, m.y - p.y);
-      g.setHeld(m.x - p.x, m.y - p.y);
+    const los = (s) => { const dx = Math.abs(s.x - p.x), dy = Math.abs(s.y - p.y); let ok = true; for (let k = 1; k < Math.max(dx, dy); k++) { const x = p.x + Math.round((s.x - p.x) * k / Math.max(dx, dy)), y = p.y + Math.round((s.y - p.y) * k / Math.max(dx, dy)); if (lv.isOpaque(x, y)) ok = false; } return ok; };
+    const far = ringTiles(lv, p.x, p.y, 3, 4).filter((s) => s.y <= p.y && los(s)).sort((a, b) => b.r - a.r || Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
+    if (far) hunter(g, 'warlock', far, { depth: 14, speed: 1.1, timer: 0.9 });
+    // let them close in until the first blows land, then the hero answers the nearest attacker with a held swing
+    const adjacent = () => lv.monsters.filter((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) <= 1);
+    for (let t = 0; t < 3000 && adjacent().length < 2; t += 100) ctx.step(100);
+    const adj = adjacent().sort((a, b) => (b.y - p.y) - (a.y - p.y))[0];
+    if (adj) { g.move(adj.x - p.x, adj.y - p.y); g.setHeld(adj.x - p.x, adj.y - p.y); }
+    ctx.step(380);
+  },
+
+  /** Dragon breath: a fyre drake charges a searing breath down a hall and lets it loose at the hero; a wyvern spits venom from the flank. */
+  async 'combat-breath'(ctx) {
+    const g = ctx.reset();
+    const W = 18, H = 14, depth = 12;
+    bestiaryHall(g, W, H, depth);
+    const px = W >> 1, py = H - 4;
+    g.enterLevel(depth, 'teleport', { arrival: { x: px, y: py } });
+    const p = g.player; p.facing = { dx: 0, dy: -1 };
+    p.maxHp = 900; p.hp = 900; p.skill = 220;
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    // timed against the shot tool's 1.5 s advance: the drake inhales at ~0.9 s and lets loose at ~1.57 s, the wyvern just before it
+    const drake = hunter(g, 'fyre-drake', { x: px, y: py - 4 }, { depth, speed: 1.5, timer: -0.35 });
+    const wyv = hunter(g, 'wyvern', { x: px - 3, y: py - 3 }, { depth, speed: 1.5, timer: -0.1 });
+    if (drake) drake.cooldowns.ranged = 0;
+    if (wyv) wyv.cooldowns.ranged = 0;
+    ctx.step(300);
+  },
+
+  /** Pack tactics on depth 1: a dire wolf catches sight of the hero and howls; its kin come running from the dark. */
+  async 'combat-pack'(ctx) {
+    const g = ctx.reset();
+    const p = g.player;
+    p.maxHp = 80; p.hp = 80; p.skill = 14;
+    for (const m of g.level.monsters) freeze(m);
+    g.give('light', 1); g.castSpell('light');
+    const lv = g.level;
+    const spots = ringTiles(lv, p.x, p.y, 3, 5).sort((a, b) => a.r - b.r || (b.y - p.y) - (a.y - p.y));
+    const wolves = [];
+    for (let i = 0; i < 5 && spots.length; i++) {
+      // the first wolf is nearest and looking our way; the rest are further off, facing away, until the howl
+      const s = i === 0 ? spots.shift() : spots.splice(Math.floor(((i - 1) * spots.length) / 4) % spots.length, 1)[0];
+      const w = g.spawnMonster('dire-wolf', s.x, s.y, { state: 'wander' });
+      if (!w) continue;
+      w.speed = 1.4; w.moveTimer = i === 0 ? 0.98 : 0.3 + i * 0.15;
+      w.facing = i === 0 ? { dx: Math.sign(p.x - s.x), dy: Math.sign(p.y - s.y) } : { dx: -Math.sign(p.x - s.x) || 1, dy: -Math.sign(p.y - s.y) };
+      wolves.push(w);
     }
-    ctx.step(700);
+    // run until the pack is on top of the hero (at least two wolves within reach)
+    const close = () => wolves.filter((w) => w.state !== 'dead' && Math.max(Math.abs(w.x - p.x), Math.abs(w.y - p.y)) <= 1).length;
+    for (let t = 0; t < 3000 && close() < 2; t += 200) ctx.step(200);
+    ctx.step(150);
+  },
+
+  /** A rogue snatches the hero's purse and bolts for the dark: coins fly, the log screams, the chase is on. */
+  async 'combat-thief'(ctx) {
+    const g = ctx.reset();
+    const p = g.player;
+    p.maxHp = 40; p.hp = 40; p.skill = 12;
+    for (const m of g.level.monsters) freeze(m);
+    g.give('light', 1); g.castSpell('light');
+    g.give('gold', 85);
+    clearStart(g); // off the archway so the snatch is in plain view
+    const s = neighbours(g.level, p.x, p.y).sort((a, b) => (b.y - p.y) - (a.y - p.y) || Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
+    // the snatch lands ~1.2 s from now: the shot tool's 1.5 s advance catches the coins in the air and the rogue turning to run
+    if (s) hunter(g, 'rogue', s, { speed: 1.6, timer: -0.9 });
+    ctx.step(16);
+  },
+
+  /** Sanctuary: the hero rests on the temple while hunters prowl its edge, unable to enter. */
+  async 'combat-sanctuary'(ctx) {
+    const g = ctx.reset();
+    const found = findDepthWith(g, TILE.TEMPLE, 2, 6);
+    if (found) { if (found.depth !== g.depth) g.goToDepth(found.depth); g.teleportTo(found.tiles[0].x, found.tiles[0].y); g.updateFov(); }
+    const p = g.player;
+    p.maxHp = 120; p.hp = 70; p.skill = 30;
+    for (const m of g.level.monsters) freeze(m);
+    g.give('light', 1); g.castSpell('light');
+    const spots = ringTiles(g.level, p.x, p.y, 2, 3);
+    const types = ['ogre', 'hobgoblin', 'mercenary'];
+    types.forEach((t, i) => { const s = spots[Math.floor((i * spots.length) / types.length) % spots.length]; if (s) hunter(g, t, s, { speed: 1.5, timer: 0.9 - i * 0.2 }); });
+    ctx.step(2000);
   },
 
   /** The temple altar, glowing, with the player beside it carrying gold. */
