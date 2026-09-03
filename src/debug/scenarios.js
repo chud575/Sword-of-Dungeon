@@ -693,6 +693,103 @@ export const uiScenarios = {
     ctx.step(100);
   },
 
+  /** Click-to-move: a committed golden route with its destination reticle and a hovered alternative. */
+  async 'qol-path'(ctx) {
+    const g = midRun(ctx, { depth: 4 });
+    g.revealAll();
+    for (const m of g.level.monsters) g.level.removeEntity(m); // a monster coming into view would (rightly) cancel the walk
+    ctx.step(2600); // let midRun's level-up banners fade
+    const inp = ctx.debug.input, p = g.player, lv = g.level;
+    let best = null;
+    for (let y = 0; y < lv.height; y++) for (let x = 0; x < lv.width; x++) {
+      const dx = Math.abs(x - p.x), dy = Math.abs(y - p.y), d = Math.max(dx, dy);
+      const t = lv.get(x, y);
+      if (d < 4 || dx > 7 || dy > 5 || !lv.isWalkable(x, y) || lv.isHazard(x, y) || lv.entityAt(x, y) || (t !== TILE.FLOOR && t !== TILE.CORRIDOR)) continue;
+      const path = g.pathTo(x, y);
+      if (!path || path.length < 4 || path.length > 13) continue;
+      const score = path.length >= 6 && path.length <= 11 ? 100 + path.length : path.length; // prefer a winding route that stays on screen
+      if (!best || score > best.score) best = { x, y, path, score };
+    }
+    if (best) { inp.preview.commit(best.path); ctx.bus.emit('input:click', { x: best.x, y: best.y, button: 0, shift: false }); }
+    ctx.step(380);
+    // hover a second tile off to the side for the dim preview
+    let hover = null;
+    for (let y = 0; y < lv.height && !hover; y++) for (let x = 0; x < lv.width; x++) {
+      const d = Math.max(Math.abs(x - p.x), Math.abs(y - p.y));
+      if (d < 4 || d > 6 || !lv.isWalkable(x, y) || lv.isHazard(x, y) || lv.entityAt(x, y)) continue;
+      if (best && Math.max(Math.abs(x - best.x), Math.abs(y - best.y)) < 5) continue;
+      hover = { x, y }; break;
+    }
+    if (hover) inp.preview.setHover(hover);
+    inp.preview.update(0.4);
+    ctx.step(16);
+  },
+
+  /** Auto-explore: the teal route to the next frontier, mid-walk. */
+  async 'qol-explore'(ctx) {
+    const g = ctx.reset();
+    g.goToDepth(3);
+    for (const m of g.level.monsters) g.level.removeEntity(m); // a sighting would (rightly) stop the exploration
+    ctx.step(200);
+    ctx.bus.emit('ui:explore', { on: true }); // scenarios run frozen (main.js ignores input), so light the mode directly
+    ctx.step(300);
+    ctx.debug.input.preview.update(0.3);
+    ctx.step(16);
+  },
+
+  /** Undo-safe prompt: Space on the stairs down while carrying the Sword. */
+  async 'qol-confirm'(ctx) {
+    const g = midRun(ctx, { depth: 12 });
+    g.give('sword');
+    g.state.quest.timer = 1234;
+    const sd = g.level.stairsDown;
+    if (sd) g.teleportTo(sd.x, sd.y);
+    ctx.step(300);
+    ctx.debug.input.press('interact');
+    ctx.step(200);
+  },
+
+  /** Touch controls: the thumb pad and action cluster over a mid-run dungeon. */
+  async 'qol-touch'(ctx) {
+    const g = midRun(ctx, { depth: 5 });
+    const inp = ctx.debug.input;
+    inp.settings.touchControls = 'on';
+    inp.update(0.016);
+    const spots = neighbours(g.level, g.player.x, g.player.y);
+    if (spots[0]) { const m = g.spawnMonster('hobgoblin', spots[0].x, spots[0].y, { depth: 5, state: 'hunt' }); if (m) freeze(m); }
+    ctx.step(2600); // let the level-up banners from midRun fade
+    inp.touch.setExploring(false);
+    const arrow = inp.touch.arrows.find((a) => a.d.dx === 1 && a.d.dy === 0);
+    if (arrow) arrow.el.classList.add('lit');
+    inp.touch.pad.classList.add('active');
+    inp.touch.thumb.style.transform = 'translate(28px, 0)';
+    ctx.step(16);
+  },
+
+  /** Rebindable keys: the controls sheet, one row listening for a new key. */
+  async 'qol-controls'(ctx) {
+    midRun(ctx, { depth: 4 });
+    ctx.step(200);
+    const inp = ctx.debug.input;
+    inp.controls.open();
+    inp.controls.sel = inp.controls.rows.findIndex((r) => r.action.id === 'explore');
+    inp.controls.highlight();
+    inp.controls.startListening();
+    ctx.step(100);
+  },
+
+  /** Run statistics sheet after a busy descent. */
+  async 'qol-stats'(ctx) {
+    const g = midRun(ctx, { depth: 9 });
+    const st = g.stats;
+    Object.assign(st, { damageDealt: 412, damageTaken: 197, maxHitDealt: 23, maxHitTaken: 14, potions: 3, spells: 5, sacrifices: 2, buried: 60, fled: 2, fights: 11, longestFight: 9, wanderers: 4, trapsSprung: 2, lowestHp: 6, treasures: 6, goldFound: 340, goldSacrificed: 210, levelsVisited: 9, steps: 1830 });
+    st.depthTime = { 1: 95, 2: 140, 3: 210, 4: 88, 5: 260, 6: 175, 7: 120, 8: 64, 9: 42 };
+    g.state.elapsed = 1194; g.state.time = 1194;
+    ctx.step(100);
+    ctx.debug.input.statsSheet.open();
+    ctx.step(100);
+  },
+
   /** The minimap enlarged over a well-explored level with monsters in view. */
   async 'minimap'(ctx) {
     const g = midRun(ctx, { depth: 4 });

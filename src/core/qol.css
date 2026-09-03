@@ -1,0 +1,113 @@
+/* Quality-of-life overlays owned by core/input.js: confirmation prompts, touch controls, the
+   key-rebinding sheet, the run-statistics sheet and small status chips. Uses the design tokens
+   from ui/styles.css (--gold, --ink, --parchment, --font-display ...). */
+
+/* ---------- centre prompt (undo-safe confirmations) ---------- */
+.qol-prompt { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: auto; z-index: 34; background: radial-gradient(ellipse at center, rgba(8, 6, 4, .25) 0%, rgba(4, 3, 2, .7) 100%); animation: qolFade .2s var(--ease); }
+.qol-prompt .box { position: relative; width: min(30rem, 92vw); padding: 1.35rem 1.6rem 1.1rem; text-align: center; }
+.qol-prompt .box::before { opacity: .35; }
+.qol-prompt .sigil { display: grid; place-items: center; width: 2.4rem; height: 2.4rem; margin: -2.55rem auto .5rem; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #4a3a20, #1a130c 70%); border: 1px solid var(--gold); box-shadow: 0 0 0 4px #0a0704, 0 0 20px var(--gold-glow); color: var(--gold-bright); font-family: var(--font-display); font-size: 1.15rem; }
+.qol-prompt.danger .sigil { border-color: var(--blood-bright); color: var(--blood-bright); background: radial-gradient(circle at 40% 35%, #3a1410, #12070a 70%); box-shadow: 0 0 0 4px #0a0704, 0 0 20px rgba(255, 74, 61, .55); }
+.qol-prompt .eyebrow { font-family: var(--font-display); font-size: .56rem; letter-spacing: .32em; text-transform: uppercase; color: var(--parchment-faint); }
+.qol-prompt h1 { margin: .15rem 0 .45rem; font-family: var(--font-display); font-weight: 600; font-size: 1.32rem; letter-spacing: .08em; color: var(--gold-bright); text-shadow: 0 1px 0 #000, 0 0 18px var(--gold-glow); }
+.qol-prompt p { margin: 0 auto .9rem; max-width: 26rem; font-size: .92rem; line-height: 1.45; color: var(--parchment); }
+.qol-prompt .clock { display: inline-block; margin: -.4rem 0 .8rem; padding: .18rem .7rem; border: 1px solid rgba(232, 193, 90, .35); border-radius: 2px; font-family: var(--font-mono); font-size: .78rem; letter-spacing: .12em; color: var(--gold); background: rgba(0, 0, 0, .35); }
+.qol-prompt .btns { display: flex; gap: .6rem; justify-content: center; }
+#ui-root .qol-prompt .btns button, .qol-prompt .btns button { position: relative; min-width: 9rem; padding: .55rem 1rem .5rem; border: 1px solid var(--gold-dim); border-radius: 2px; background: linear-gradient(180deg, rgba(50, 38, 22, .9), rgba(24, 17, 10, .95)); font-family: var(--font-display); font-size: .74rem; letter-spacing: .18em; text-transform: uppercase; color: var(--parchment); transition: transform .12s var(--ease), box-shadow .12s, border-color .12s; }
+.qol-prompt .btns button kbd { display: inline-block; margin-left: .5rem; padding: 0 .35rem; border: 1px solid rgba(232, 193, 90, .4); border-radius: 2px; font: .58rem var(--font-mono); color: var(--gold); vertical-align: 1px; }
+#ui-root .qol-prompt .btns button.primary, .qol-prompt .btns button.primary { border-color: var(--gold); color: var(--ink); background: linear-gradient(180deg, var(--gold-bright), var(--gold) 55%, #b48a2e); text-shadow: 0 1px 0 rgba(255, 255, 255, .35); }
+.qol-prompt .btns button.primary kbd { color: #2a1f0e; border-color: rgba(0, 0, 0, .35); background: rgba(255, 255, 255, .22); }
+.qol-prompt .btns button:hover, .qol-prompt .btns button:focus-visible { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0, 0, 0, .5), 0 0 0 1px var(--gold-dim); outline: none; }
+.qol-prompt .btns button.selected { box-shadow: 0 0 0 1px var(--gold), 0 0 16px var(--gold-glow); }
+.qol-prompt .foot { margin-top: .75rem; font-family: var(--font-display); font-size: .52rem; letter-spacing: .22em; text-transform: uppercase; color: var(--parchment-faint); }
+@keyframes qolFade { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- status chips ---------- */
+.qol-chip { position: absolute; left: 50%; top: 7.2rem; transform: translate(-50%, -6px); padding: .32rem .9rem .28rem; pointer-events: none; z-index: 12; font-family: var(--font-display); font-size: .58rem; letter-spacing: .26em; text-transform: uppercase; color: var(--parchment); white-space: nowrap; opacity: 0; transition: opacity .25s, transform .25s var(--ease); }
+.qol-chip.show { opacity: 1; transform: translate(-50%, 0); }
+.qol-chip .dot { display: inline-block; width: 6px; height: 6px; margin: 0 .5rem 1px 0; transform: rotate(45deg); background: var(--gold); box-shadow: 0 0 8px var(--gold-glow); }
+.qol-chip.magic .dot { background: var(--magic); box-shadow: 0 0 8px rgba(127, 212, 255, .7); }
+.qol-chip.danger .dot { background: var(--danger); box-shadow: 0 0 8px rgba(255, 90, 72, .7); }
+
+/* ---------- touch controls ---------- */
+.qol-touch { position: absolute; inset: 0; pointer-events: none; z-index: 14; display: none; }
+.qol-touch.on { display: block; }
+.qol-touch .pad { position: absolute; left: max(18px, env(safe-area-inset-left)); bottom: calc(9.9rem + 22px); width: 11.5rem; height: 11.5rem; pointer-events: auto; touch-action: none; border-radius: 50%; background: radial-gradient(circle at 50% 45%, rgba(40, 30, 18, .62) 0%, rgba(18, 13, 9, .78) 62%, rgba(18, 13, 9, .1) 100%); box-shadow: 0 0 0 1px rgba(232, 193, 90, .35), inset 0 0 0 1px rgba(0, 0, 0, .7), 0 10px 30px rgba(0, 0, 0, .5); -webkit-user-select: none; user-select: none; }
+.qol-touch .pad::before { content: ''; position: absolute; inset: 34%; border-radius: 50%; border: 1px solid rgba(232, 193, 90, .35); background: radial-gradient(circle, rgba(232, 193, 90, .18), transparent 70%); }
+.qol-touch .pad .arrow { position: absolute; left: 50%; top: 50%; width: 1.35rem; height: 1.35rem; margin: -.675rem; display: grid; place-items: center; font-family: var(--font-display); font-size: 1.05rem; color: var(--parchment-dim); transform: rotate(var(--a)) translateY(-4.05rem) rotate(calc(-1 * var(--a))); transition: color .08s, text-shadow .08s; }
+.qol-touch .pad .arrow.diag { font-size: .72rem; opacity: .7; }
+.qol-touch .pad .arrow.lit { color: var(--gold-bright); text-shadow: 0 0 10px var(--gold-glow), 0 0 2px #000; }
+.qol-touch .pad .thumb { position: absolute; left: 50%; top: 50%; width: 3.2rem; height: 3.2rem; margin: -1.6rem; border-radius: 50%; background: radial-gradient(circle at 40% 35%, #5a4628, #2a1f12 70%); box-shadow: 0 0 0 1px var(--gold-dim), 0 4px 12px rgba(0, 0, 0, .6); transition: transform .06s; }
+.qol-touch .pad.active .thumb { box-shadow: 0 0 0 1px var(--gold), 0 0 16px var(--gold-glow), 0 4px 12px rgba(0, 0, 0, .6); }
+.qol-touch .cluster { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: calc(9.9rem + 22px); width: 11.5rem; height: 11.5rem; pointer-events: none; }
+#ui-root .qol-touch .tb, .qol-touch .tb { position: absolute; width: 3.7rem; height: 3.7rem; display: grid; place-items: center; gap: 0; pointer-events: auto; touch-action: manipulation; border-radius: 50%; border: 1px solid var(--gold-dim); background: radial-gradient(circle at 40% 35%, rgba(60, 46, 26, .9), rgba(20, 14, 9, .95) 70%); box-shadow: 0 0 0 1px rgba(0, 0, 0, .8), 0 6px 16px rgba(0, 0, 0, .55); color: var(--parchment); font-family: var(--font-display); font-size: .5rem; letter-spacing: .14em; text-transform: uppercase; -webkit-user-select: none; user-select: none; }
+.qol-touch .tb .g { font-size: 1.25rem; line-height: 1; color: var(--gold); text-shadow: 0 0 8px var(--gold-glow); }
+#ui-root .qol-touch .tb.act, .qol-touch .tb.act { right: 0; bottom: 3.9rem; width: 4.4rem; height: 4.4rem; border-color: var(--gold); box-shadow: 0 0 0 1px rgba(0, 0, 0, .8), 0 0 18px var(--gold-glow), 0 6px 16px rgba(0, 0, 0, .55); }
+.qol-touch .tb.potion { right: 4.6rem; bottom: 0; }
+.qol-touch .tb.potion .g { color: #ff7a9a; text-shadow: 0 0 8px rgba(255, 122, 154, .6); }
+.qol-touch .tb.explore { right: 4.6rem; bottom: 4.4rem; }
+.qol-touch .tb.explore .g { color: var(--magic); text-shadow: 0 0 8px rgba(127, 212, 255, .6); }
+.qol-touch .tb.rest { right: 0; bottom: 0; width: 3.4rem; height: 3.4rem; }
+.qol-touch .tb.teleport { right: 4.6rem; bottom: 8.4rem; }
+.qol-touch .tb.teleport .g { color: var(--sp-teleport); text-shadow: 0 0 8px rgba(78, 225, 255, .6); }
+#ui-root .qol-touch .tb:active, #ui-root .qol-touch .tb.down, .qol-touch .tb.down { transform: scale(.94); background: radial-gradient(circle at 40% 35%, rgba(90, 70, 40, .95), rgba(30, 22, 12, .95) 70%); }
+#ui-root .qol-touch .tb.on, .qol-touch .tb.on { border-color: var(--magic); box-shadow: 0 0 0 1px rgba(0, 0, 0, .8), 0 0 18px rgba(127, 212, 255, .5); }
+.qol-touch .hint { position: absolute; left: 50%; bottom: calc(9.9rem + 26px); transform: translateX(-50%); font-family: var(--font-display); font-size: .52rem; letter-spacing: .26em; text-transform: uppercase; color: var(--parchment-faint); white-space: nowrap; }
+@media (max-width: 900px) { .qol-touch .pad, .qol-touch .cluster { bottom: 7.6rem; } }
+
+/* ---------- sheets (controls / statistics) ---------- */
+.qol-sheet { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: auto; z-index: 33; background: radial-gradient(ellipse at center, rgba(8, 6, 4, .5) 0%, rgba(4, 3, 2, .86) 100%); animation: qolFade .22s var(--ease); }
+.qol-sheet .box { position: relative; width: min(58rem, 94vw); max-height: 88vh; display: flex; flex-direction: column; padding: 1.2rem 1.5rem 1rem; }
+.qol-sheet .box::before { opacity: .4; }
+.qol-sheet .head { text-align: center; margin-bottom: .7rem; }
+.qol-sheet .head .eyebrow { font-family: var(--font-display); font-size: .56rem; letter-spacing: .34em; text-transform: uppercase; color: var(--parchment-faint); }
+.qol-sheet .head h1 { margin: .1rem 0 0; font-family: var(--font-display); font-weight: 600; font-size: 1.5rem; letter-spacing: .16em; text-transform: uppercase; color: var(--gold-bright); text-shadow: 0 1px 0 #000, 0 0 20px var(--gold-glow); }
+.qol-sheet .head .sub { font-size: .8rem; color: var(--parchment-dim); margin-top: .15rem; }
+.qol-sheet .rule { height: 1px; margin: .35rem auto .6rem; width: 70%; background: linear-gradient(90deg, transparent, var(--gold-dim), transparent); }
+.qol-sheet .body { position: relative; overflow: auto; scrollbar-width: thin; scrollbar-color: var(--gold-dim) transparent; padding: 0 .3rem; }
+.qol-sheet .foot { display: flex; justify-content: center; gap: 1.4rem; margin-top: .8rem; font-family: var(--font-display); font-size: .54rem; letter-spacing: .2em; text-transform: uppercase; color: var(--parchment-dim); }
+.qol-sheet .foot kbd, .qol-sheet .k kbd { display: inline-block; min-width: 1.25rem; padding: .1rem .38rem 0; border: 1px solid rgba(232, 193, 90, .4); border-bottom-width: 2px; border-radius: 3px; background: rgba(0, 0, 0, .45); font: .62rem var(--font-mono); color: var(--gold); text-align: center; }
+.qol-sheet .foot kbd { margin-right: .3rem; }
+#ui-root .qol-sheet .foot button, .qol-sheet .foot button, .qol-sheet .head button { padding: .1rem .5rem; border: 1px solid var(--gold-dim); border-radius: 2px; color: var(--parchment); font: inherit; letter-spacing: inherit; text-transform: inherit; }
+.qol-sheet .foot button:hover { border-color: var(--gold); color: var(--gold-bright); }
+
+/* controls sheet */
+.qol-controls .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 2rem; }
+.qol-controls h2 { margin: .5rem 0 .25rem; font-family: var(--font-display); font-weight: 600; font-size: .62rem; letter-spacing: .3em; text-transform: uppercase; color: var(--gold); }
+.qol-controls h2::after { content: ''; display: block; height: 1px; margin-top: .25rem; background: linear-gradient(90deg, var(--gold-dim), transparent); }
+.qol-controls .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .6rem; padding: .28rem .5rem; border-radius: 2px; cursor: pointer; font-size: .84rem; color: var(--parchment); }
+.qol-controls .row:hover, .qol-controls .row.selected { background: rgba(232, 193, 90, .1); box-shadow: inset 2px 0 0 var(--gold); }
+.qol-controls .row .k { display: flex; gap: .3rem; justify-content: flex-end; }
+.qol-controls .row .k kbd { min-width: 1.4rem; }
+.qol-controls .row .k kbd.alt { opacity: .55; }
+.qol-controls .row.listening .k { color: var(--magic); font-family: var(--font-display); font-size: .58rem; letter-spacing: .2em; text-transform: uppercase; animation: qolBlink 1s infinite; }
+.qol-controls .row.changed .k kbd:first-child { border-color: var(--magic); color: var(--magic); }
+.qol-controls .row.locked { opacity: .6; cursor: default; }
+.qol-controls .row.locked .k kbd { color: var(--parchment-dim); }
+.qol-controls .pad-note { grid-column: 1 / -1; margin: .6rem 0 0; padding: .5rem .7rem; font-size: .78rem; color: var(--parchment-dim); border-left: 2px solid var(--gold-dim); background: rgba(0, 0, 0, .25); }
+.qol-controls .pad-note b { color: var(--gold); font-weight: 600; }
+@keyframes qolBlink { 50% { opacity: .45; } }
+
+/* statistics sheet */
+.qol-stats .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: .6rem; margin-bottom: .8rem; }
+.qol-stats .tile { position: relative; padding: .55rem .7rem .45rem; border: 1px solid rgba(232, 193, 90, .22); border-radius: 2px; background: rgba(0, 0, 0, .28); }
+.qol-stats .tile .l { font-family: var(--font-display); font-size: .52rem; letter-spacing: .26em; text-transform: uppercase; color: var(--parchment-faint); }
+.qol-stats .tile .v { font-family: var(--font-display); font-size: 1.35rem; color: var(--gold-bright); text-shadow: 0 0 14px var(--gold-glow); line-height: 1.2; }
+.qol-stats .tile .v.blood { color: var(--blood-bright); text-shadow: 0 0 14px rgba(255, 74, 61, .4); }
+.qol-stats .tile .v.magic { color: var(--magic); text-shadow: 0 0 14px rgba(127, 212, 255, .4); }
+.qol-stats .tile .s { font-size: .7rem; color: var(--parchment-dim); }
+.qol-stats .cols { display: grid; grid-template-columns: 1.1fr 1fr; gap: 0 2rem; }
+.qol-stats h2 { margin: .3rem 0 .3rem; font-family: var(--font-display); font-weight: 600; font-size: .62rem; letter-spacing: .3em; text-transform: uppercase; color: var(--gold); }
+.qol-stats h2::after { content: ''; display: block; height: 1px; margin-top: .25rem; background: linear-gradient(90deg, var(--gold-dim), transparent); }
+.qol-stats .kv { display: grid; grid-template-columns: 1fr auto; gap: .12rem .8rem; font-size: .82rem; }
+.qol-stats .kv span:nth-child(odd) { color: var(--parchment-dim); }
+.qol-stats .kv span:nth-child(even) { font-family: var(--font-mono); font-size: .78rem; color: var(--parchment); text-align: right; }
+.qol-stats .bars { display: grid; grid-template-columns: auto 1fr auto; gap: .18rem .6rem; align-items: center; font-size: .76rem; }
+.qol-stats .bars .d { font-family: var(--font-display); font-size: .6rem; letter-spacing: .12em; color: var(--parchment-dim); }
+.qol-stats .bars .b { height: 7px; border-radius: 1px; background: linear-gradient(90deg, var(--gold-dim), var(--gold)); box-shadow: 0 0 8px var(--gold-glow); }
+.qol-stats .bars .b.now { background: linear-gradient(90deg, #2d7ea8, var(--magic)); box-shadow: 0 0 8px rgba(127, 212, 255, .5); }
+.qol-stats .bars .t { font-family: var(--font-mono); font-size: .68rem; color: var(--parchment-dim); }
+.qol-stats .career { margin-top: .6rem; padding-top: .5rem; border-top: 1px dashed rgba(232, 193, 90, .2); }
+.qol-stats .seedline { text-align: center; margin-top: .5rem; font-family: var(--font-mono); font-size: .7rem; letter-spacing: .1em; color: var(--parchment-faint); }
+.qol-stats .seedline b { color: var(--gold); font-weight: 600; }
+@media (max-width: 900px) { .qol-stats .tiles { grid-template-columns: repeat(2, 1fr); } .qol-stats .cols, .qol-controls .cols { grid-template-columns: 1fr; } }

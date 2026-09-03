@@ -15,6 +15,15 @@ import { aStar, bfsNearest } from '../world/pathfinding.js';
 
 const MAX_LOG = 200;
 
+/** Extra run statistics kept in state.stats (added to older states on load). */
+const STAT_DEFAULTS = {
+  damageDealt: 0, damageTaken: 0, potions: 0, spells: 0, sacrifices: 0, buried: 0, fled: 0, fights: 0,
+  longestFight: 0, wanderers: 0, autoSteps: 0, maxHitTaken: 0, maxHitDealt: 0, lowestHp: null, depthTime: {},
+};
+
+/** Held-direction pacing: after `rampStart` seconds of holding, steps shorten towards `minPace`. */
+const HOLD = { rampStart: 1.0, rampLength: 2.2, minPace: 0.62 };
+
 export class Game {
   /**
    * @param {{seed?:number|string, difficulty?:string, bus?:import('../core/events.js').EventBus, autoStart?:boolean}} opts
@@ -35,12 +44,39 @@ export class Game {
     };
     this.accumulator = 0;
     this.heldDir = null;
+    this.heldTime = 0;
     this.pendingMove = null;
     this.seenMonsterIds = [];
+    /** Quality-of-life options (Input pushes the player's settings here). */
+    this.options = { holdRepeatDelay: 0.12, holdAccel: true, guardPits: false }; // Input enables guardPits from the player's settings
+    /** One-shot confirmation token for guarded moves ({kind, x, y}). */
+    this.confirmed = null;
     this.player = createPlayer(this.rngs.main, this.balance);
     this.state.player = this.player;
     this.stats = this.state.stats;
+    this.ensureStats();
+    this.unsub = [
+      this.bus.on('entity:attacked', (p) => this.onAttacked(p)),
+      this.bus.on('combat:start', (p) => { if (p && p.entity && this.level && this.level.entities.includes(p.entity)) this.stats.fights++; }),
+    ];
     if (opts.autoStart !== false) this.start();
+  }
+
+  /** Stop listening on the bus (a replaced Game must not keep counting). */
+  dispose() { for (const u of this.unsub) u(); this.unsub = []; }
+
+  /** Add any statistics fields this build knows about to an (older) state. */
+  ensureStats() {
+    const st = this.state.stats;
+    for (const [k, v] of Object.entries(STAT_DEFAULTS)) if (!(k in st)) st[k] = typeof v === 'object' && v !== null ? { ...v } : v;
+    this.stats = st;
+  }
+
+  /** Damage bookkeeping for the run statistics. */
+  onAttacked({ attacker, damage }) {
+    if (attacker !== this.player) return; // damage taken is counted in player.js damagePlayer (covers traps too)
+    const st = this.stats, dmg = Math.max(0, damage | 0);
+    st.damageDealt += dmg; st.maxHitDealt = Math.max(st.maxHitDealt, dmg);
   }
 
   // ------------------------------------------------------------------ accessors
@@ -179,11 +215,21 @@ export class Game {
     s.time += dt; s.elapsed += dt;
     if (tickQuest(this, dt)) return;
 
-    // Player pacing: one tile per playerStepTime; queued or held direction.
+    // Player pacing: one tile per playerStepTime; queued or held direction. A held direction
+    // waits an extra `holdRepeatDelay` before it starts repeating (a tap never double-steps) and,
+    // when no monster is in sight, accelerates the longer it is held.
     p.moveTimer = Math.max(0, p.moveTimer - dt);
+    if (this.heldDir) this.heldTime += dt;
+    const st = this.stats;
+    st.depthTime[s.depth] = (st.depthTime[s.depth] || 0) + dt;
     if (p.moveTimer <= 0) {
-      const mv = this.pendingMove || this.heldDir;
-      if (mv) { this.pendingMove = null; this.performMove(mv.dx, mv.dy); }
+      const queued = this.pendingMove;
+      const mv = queued || this.heldDir;
+      const gated = !queued && mv && this.heldTime < this.options.holdRepeatDelay;
+      if (mv && !gated) {
+        this.pendingMove = null;
+        if (this.performMove(mv.dx, mv.dy) && !queued) p.moveTimer *= this.holdPace();
+      }
     }
     if (s.over) return;
 
@@ -218,6 +264,7 @@ export class Game {
     }
     if (!s.combat) this.checkIdleDeath();
     if (s.over) return;
+    if (st.lowestHp === null || p.hp < st.lowestHp) st.lowestHp = p.hp;
 
     updateMonsters(this, dt);
     if (s.over) return;
@@ -260,12 +307,22 @@ export class Game {
   /** Hold a direction (real-time auto-repeat); pass (0,0) or null to release. Releasing disengages a fight you started. */
   setHeld(dx, dy) {
     if (dx === null || dx === undefined || (!dx && !dy)) {
-      this.heldDir = null;
+      this.heldDir = null; this.heldTime = 0;
       const c = this.state.combat;
       if (c && c.playerInitiated) this.endCombat('fled');
       return;
     }
-    this.heldDir = { dx: Math.sign(dx), dy: Math.sign(dy) };
+    const nd = { dx: Math.sign(dx), dy: Math.sign(dy) };
+    if (!this.heldDir || this.heldDir.dx !== nd.dx || this.heldDir.dy !== nd.dy) this.heldTime = 0;
+    this.heldDir = nd;
+  }
+
+  /** Step-time multiplier for auto-repeated held movement (1 = normal pace). */
+  holdPace() {
+    if (!this.options.holdAccel || this.state.combat || this.heldTime < HOLD.rampStart) return 1;
+    if (this.visibleMonsters().length) return 1;
+    const k = Math.min(1, (this.heldTime - HOLD.rampStart) / HOLD.rampLength);
+    return 1 - (1 - HOLD.minPace) * k * k * (3 - 2 * k);
   }
 
   /** Stand still for a moment (lets regeneration tick). */
@@ -302,6 +359,12 @@ export class Game {
       return true;
     }
     if (!level.canStep(p.x, p.y, dx, dy)) return false;
+    // Undo-safe guard: with the Sword, a pit means losing levels against Umla's clock — ask first.
+    if (this.options.guardPits && p.hasSword && level.get(nx, ny) === TILE.PIT && !this.takeConfirmation('pit', nx, ny)) {
+      this.heldDir = null; this.heldTime = 0; this.pendingMove = null;
+      this.emit('confirm:needed', { kind: 'pit', x: nx, y: ny, dx, dy, title: 'Climb into the pit?', text: `Pits drop you 2–5 levels. With the Sword every level down is time lost against Umla's clock.` });
+      return false;
+    }
     if (c) this.endCombat('fled');
     this.moveEntity(p, nx, ny);
     p.moveTimer = this.balance.playerStepTime;
@@ -492,7 +555,7 @@ export class Game {
     if (!this.level.isTemple(p.x, p.y) || p.gold <= 0) return false;
     const gold = p.gold;
     addGold(this, -gold);
-    this.stats.goldSacrificed += gold;
+    this.stats.goldSacrificed += gold; this.stats.sacrifices++;
     this.log(`SACRIFICE OF GOLD! ${gold} gold offered for ${gold} experience.`, 'quest');
     this.emit('temple:sacrifice', { gold, xp: gold });
     this.emit('sfx:sacrifice', {});
@@ -509,15 +572,15 @@ export class Game {
     const gold = p.gold;
     addGold(this, -gold);
     level.addItem({ type: 'gold', x: p.x, y: p.y, qty: 1, gold, hidden: true });
-    level.buriedCount++;
+    level.buriedCount++; this.stats.buried += gold;
     this.log(`HIDING ${gold} GOLD P'S`, 'info');
     return true;
   }
 
   /** Use an inventory item (potion, beacon). */
-  useItem(type) { return useItemFn(this, type); }
+  useItem(type) { const ok = useItemFn(this, type); if (ok && type === 'potion') this.stats.potions++; return ok; }
   /** Cast a spell (teleport, shield, regeneration, invisibility, light, drift). */
-  castSpell(type) { return castSpellFn(this, type); }
+  castSpell(type) { const ok = castSpellFn(this, type); if (ok) this.stats.spells++; return ok; }
   /** Toggle an active Light spell. */
   toggleLight() { return toggleLightFn(this); }
 
@@ -543,6 +606,8 @@ export class Game {
     const c = this.state.combat;
     if (!c) return;
     this.state.combat = null;
+    this.stats.longestFight = Math.max(this.stats.longestFight, c.rounds | 0);
+    if (reason === 'fled' || reason === 'teleport') this.stats.fled++;
     if (hasStatus(this.player, 'shield')) { removeStatus(this.player, 'shield'); this.log('Your shield fades.', 'magic'); }
     this.emit('combat:end', { reason, monsterId: c.monsterId, rounds: c.rounds });
   }
@@ -578,13 +643,23 @@ export class Game {
     const p = this.player, s = this.state, q = s.quest;
     const victory = !!(s.outcome && s.outcome.victory);
     const remaining = q.timer === null ? 0 : Math.max(0, q.timer);
+    const st = this.stats;
+    const depthTime = Object.entries(st.depthTime || {}).map(([d, t]) => ({ depth: +d, seconds: t })).sort((a, b) => a.depth - b.depth);
+    const longest = depthTime.reduce((m, e) => (e.seconds > (m ? m.seconds : 0) ? e : m), null);
     return {
       xp: p.xp, level: p.level, deepest: s.deepest, kills: p.kills, hp: p.hp, maxHp: p.maxHp, skill: p.skill, gold: p.gold,
-      elapsed: s.elapsed, minutes: Math.floor(s.elapsed / 60), steps: this.stats.steps, treasures: this.stats.treasures,
-      goldSacrificed: this.stats.goldSacrificed, seed: this.seed, difficulty: this.balance.name,
+      elapsed: s.elapsed, minutes: Math.floor(s.elapsed / 60), steps: st.steps, treasures: st.treasures,
+      goldSacrificed: st.goldSacrificed, goldFound: st.goldFound, seed: this.seed, difficulty: this.balance.name,
       swordFound: q.swordFound, swordHeld: p.hasSword, timerRemaining: remaining, victory,
       cause: s.outcome ? s.outcome.cause : null, killer: s.outcome ? s.outcome.killer : null,
       score: p.xp + 1000 * s.deepest + (victory ? 25000 + Math.floor(remaining) * 10 : 0),
+      // quality-of-life run statistics
+      damageDealt: st.damageDealt, damageTaken: st.damageTaken, maxHitDealt: st.maxHitDealt, maxHitTaken: st.maxHitTaken,
+      potions: st.potions, spells: st.spells, sacrifices: st.sacrifices, buried: st.buried, fights: st.fights, fled: st.fled,
+      longestFight: st.longestFight, wanderers: st.wanderers, trapsSprung: st.trapsSprung, levelsVisited: st.levelsVisited,
+      autoSteps: st.autoSteps, lowestHp: st.lowestHp, depthTime, longestDepth: longest ? longest.depth : s.depth,
+      stepsPerMinute: s.elapsed > 0 ? Math.round((st.steps / s.elapsed) * 60) : 0,
+      enchant: p.enchant, sacks: p.inventory.sack || 0, daily: !!this.daily, depth: s.depth, time: s.time,
     };
   }
 
@@ -592,7 +667,35 @@ export class Game {
     paused = !!paused;
     if (this.state.paused === paused) return;
     this.state.paused = paused;
+    // Undo-safe: a pause forgets held and queued movement so the hero never walks into whatever caused it.
+    if (paused) { this.heldDir = null; this.heldTime = 0; this.pendingMove = null; }
     this.emit('game:paused', { paused });
+  }
+
+  /**
+   * Why taking these stairs deserves a second thought (null = go ahead). Used by the input layer
+   * before the stairs cinematic starts.
+   * @param {'down'|'up'} direction
+   * @returns {{kind:string, title:string, text:string}|null}
+   */
+  stairsWarning(direction) {
+    const p = this.player, q = this.state.quest;
+    if (!p.hasSword) return null;
+    if (direction === 'down') {
+      const left = q.timer === null ? null : Math.max(0, Math.floor(q.timer));
+      const clock = left === null ? '' : ` ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')} remain on Umla's clock.`;
+      return { kind: 'stairs-down', title: 'Descend with the Sword?', text: `The way out is up.${clock} Every level below is one more to climb back.` };
+    }
+    return null;
+  }
+
+  /** Grant a one-shot confirmation for a guarded action at a tile. */
+  confirm(kind, x, y) { this.confirmed = { kind, x, y }; }
+  /** Consume a matching confirmation token. */
+  takeConfirmation(kind, x, y) {
+    const c = this.confirmed;
+    if (c && c.kind === kind && c.x === x && c.y === y) { this.confirmed = null; return true; }
+    return false;
   }
 
   // ------------------------------------------------------------------ perception
@@ -655,26 +758,74 @@ export class Game {
     const level = this.level, p = this.player;
     if (!level || this.state.over) return null;
     const passable = (x, y) => level.isExplored(x, y) && level.isWalkable(x, y) && !this.hazardAt(x, y) && !level.isTemple(x, y);
+    // Loot first: visible gold, potions, spells and beacons lying in the open are picked up before the next frontier.
+    const loot = (x, y) => level.isExplored(x, y) && !this.hazardAt(x, y)
+      && level.items.some((it) => it.x === x && it.y === y && !it.hidden && it.type !== 'chest' && it.type !== SWORD_TYPE && (it.x !== p.x || it.y !== p.y));
     const frontier = (x, y) => {
       if (!level.isExplored(x, y) || !level.isWalkable(x, y) || this.hazardAt(x, y)) return false;
       for (const d of DIRS8) { const nx = x + d.dx, ny = y + d.dy; if (level.inBounds(nx, ny) && !level.explored[level.idx(nx, ny)]) return true; }
       return false;
     };
-    const path = bfsNearest(level, { x: p.x, y: p.y }, frontier, { passable });
+    let path = bfsNearest(level, { x: p.x, y: p.y }, loot, { passable });
+    let goal = 'loot';
+    if (!path || !path.length || path.length > 14) { path = bfsNearest(level, { x: p.x, y: p.y }, frontier, { passable }); goal = 'frontier'; }
     if (!path || !path.length) return null;
     const s = path[0];
-    return { x: s.x, y: s.y, dx: s.x - p.x, dy: s.y - p.y, path, target: path[path.length - 1] };
+    return { x: s.x, y: s.y, dx: s.x - p.x, dy: s.y - p.y, path, target: path[path.length - 1], goal };
   }
 
   /**
-   * Path from the player to (x,y) through explored, safe tiles.
+   * Path from the player to (x,y) through explored, safe tiles. When the tile itself cannot be
+   * reached (rock, unexplored, a pit) the nearest reachable explored tile within two squares is
+   * used instead, so a click "near enough" still walks you over.
+   * @param {number} x
+   * @param {number} y
+   * @param {{exact?:boolean}} [opts]
    * @returns {{x:number,y:number}[]|null}
    */
-  pathTo(x, y) {
+  pathTo(x, y, opts = {}) {
     const level = this.level, p = this.player;
-    if (!level || !level.inBounds(x, y) || !level.isWalkable(x, y)) return null;
-    const passable = (tx, ty) => level.isExplored(tx, ty) && !this.hazardAt(tx, ty) && !level.isTemple(tx, ty);
-    return aStar(level, { x: p.x, y: p.y }, { x, y }, { passable, maxNodes: 6000 });
+    if (!level || !level.inBounds(x, y)) return null;
+    const passable = (tx, ty) => level.isExplored(tx, ty) && !this.hazardAt(tx, ty) && (!level.isTemple(tx, ty) || (tx === x && ty === y));
+    const direct = level.isWalkable(x, y) ? aStar(level, { x: p.x, y: p.y }, { x, y }, { passable, maxNodes: 6000 }) : null;
+    if (direct || opts.exact) return direct;
+    const cands = [];
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      if (!dx && !dy) continue;
+      const tx = x + dx, ty = y + dy;
+      if (!level.isWalkable(tx, ty) || !passable(tx, ty) || (tx === p.x && ty === p.y)) continue;
+      cands.push({ x: tx, y: ty, d: dx * dx + dy * dy });
+    }
+    cands.sort((a, b) => a.d - b.d);
+    for (const c of cands.slice(0, 6)) {
+      const path = aStar(level, { x: p.x, y: p.y }, { x: c.x, y: c.y }, { passable, maxNodes: 4000 });
+      if (path && path.length) return path;
+    }
+    return null;
+  }
+
+  /**
+   * Path to a known landmark: 'stairs' (nearest explored stairs down), 'up' (stairs up), 'temple', 'beacon'.
+   * @returns {{path:{x:number,y:number}[], target:{x:number,y:number}, name:string}|null}
+   */
+  travelTo(kind) {
+    const level = this.level, p = this.player;
+    if (!level) return null;
+    const known = (t) => t && level.isExplored(t.x, t.y);
+    let spots = [], name = kind;
+    if (kind === 'stairs') { spots = (level.stairsDownAll && level.stairsDownAll.length ? level.stairsDownAll : (level.stairsDown ? [level.stairsDown] : [])); name = 'the stairs down'; }
+    else if (kind === 'up') { spots = level.stairsUp ? [level.stairsUp] : []; name = 'the stairs up'; }
+    else if (kind === 'temple') { spots = level.temples || []; name = 'the temple'; }
+    else if (kind === 'beacon') { spots = level.beacon ? [level.beacon] : []; name = 'your beacon'; }
+    spots = spots.filter(known).filter((t) => t.x !== p.x || t.y !== p.y);
+    if (!spots.length) return null;
+    const passable = (tx, ty) => level.isExplored(tx, ty) && !this.hazardAt(tx, ty) && (!level.isTemple(tx, ty) || kind === 'temple');
+    let best = null;
+    for (const t of spots) {
+      const path = aStar(level, { x: p.x, y: p.y }, { x: t.x, y: t.y }, { passable, maxNodes: 6000 });
+      if (path && path.length && (!best || path.length < best.path.length)) best = { path, target: { x: t.x, y: t.y }, name };
+    }
+    return best;
   }
 
   // ------------------------------------------------------------------ spawning / debug helpers
@@ -688,6 +839,7 @@ export class Game {
     if (!spot) return null;
     m.x = spot.x; m.y = spot.y; m.px = spot.x; m.py = spot.y; m.level = level.depth;
     level.addEntity(m);
+    this.stats.wanderers++;
     this.log('You hear something climbing in the dark...', 'danger');
     this.emit('monster:wander', { entity: m });
     return m;
@@ -752,7 +904,7 @@ export class Game {
       levels: [...this.levels.values()].map((lv) => lv.serialize()),
       rngs: Object.fromEntries(Object.entries(this.rngs).map(([k, r]) => [k, r.getState()])),
       accumulator: this.accumulator,
-      heldDir: this.heldDir, pendingMove: this.pendingMove,
+      heldDir: this.heldDir, heldTime: this.heldTime, pendingMove: this.pendingMove,
       seenMonsterIds: [...this.seenMonsterIds],
     };
   }
@@ -773,10 +925,14 @@ export class Game {
     for (const [k, v] of Object.entries(data.rngs)) { if (!this.rngs[k]) this.rngs[k] = createRng(0); this.rngs[k].setState(v); }
     this.accumulator = data.accumulator || 0;
     this.heldDir = data.heldDir || null;
+    this.heldTime = data.heldTime || 0;
     this.pendingMove = data.pendingMove || null;
+    this.confirmed = null;
     this.seenMonsterIds = [...(data.seenMonsterIds || [])];
+    this.ensureStats();
     const level = this.level;
-    if (level) { level.removeEntity('player'); level.addEntity(this.player); }
+    if (!level) throw new Error('save has no level for the current depth');
+    level.removeEntity('player'); level.addEntity(this.player);
     return this;
   }
 

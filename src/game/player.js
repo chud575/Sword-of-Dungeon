@@ -105,6 +105,8 @@ export function damagePlayer(game, amount, source = null) {
   amount = Math.max(0, Math.floor(amount));
   if (hasStatus(p, 'shield') && source !== 'trap:pit' && source !== 'trap:ceiling' && source !== 'fall') amount = 0;
   p.hp -= amount;
+  const st = game.stats;
+  if (st) { st.damageTaken = (st.damageTaken || 0) + amount; st.maxHitTaken = Math.max(st.maxHitTaken || 0, amount); }
   game.emit('player:hp', { hp: p.hp, maxHp: p.maxHp, delta: -amount, source });
   return amount;
 }
