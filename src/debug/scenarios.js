@@ -252,6 +252,20 @@ export const scenarios = {
     }
   },
 
+  /** Opening a chest: lid springs back, gold light spills out, coins fountain. */
+  async 'chest-open'(ctx) {
+    const g = ctx.reset();
+    clearStart(g);
+    const lv = g.level, p = g.player;
+    const s = ringSpots(g, 3)[0];
+    if (s) {
+      lv.addItem({ qty: 1, x: s.x, y: s.y, type: 'chest', hidden: false, trap: null, content: { item: 'potion' } });
+      ctx.step(200);
+      g.move(s.x - p.x, s.y - p.y);
+      ctx.step(g.balance.playerStepTime * 1000 + 40);
+    }
+  },
+
   /** A monster slain beside the player: ichor burst, soul motes, floor splat. */
   async 'monster-slain'(ctx) {
     const g = ctx.reset();
