@@ -1,18 +1,60 @@
-// spriteBillboard: an HD-2D character billboard. A Y-axis billboard quad (NearestFilter atlas,
-// alpha-tested) whose pixel art receives the scene lighting — hemisphere + moon + the lantern spots
-// + the torch/temple point-light pool (read straight from the scene each frame, flicker included) —
-// through a fake normal that faces the camera and tilts up, curving across the sprite so side
-// lights fall off across the body. Edge pixels get a rim from the nearest torch; fog-of-war darkens
-// at the feet; a per-depth tint and hurt flash sit on top. Under the hero: a soft elliptical blob
-// shadow plus a faint silhouette shadow stretched away from the nearest torch.
+// spriteBillboard: an HD-2D character billboard. A screen-aligned, texel-snapped quad (NearestFilter
+// atlas, alpha-tested) whose pixel art receives the scene lighting — hemisphere + moon + the lantern
+// spots + the torch/temple point-light pool (read straight from the scene each frame, flicker
+// included) — through a fake normal that faces the camera and tilts up, curving across the sprite so
+// side lights fall off across the body. Edge pixels get a warm rim from the nearest torch; fog-of-war
+// darkens at the feet; a per-depth tint and hurt flash sit on top. Under the hero: a two-lobe contact
+// shadow (tight core + faint ambient-occlusion halo, sized from the frame's real foot span) plus a
+// silhouette shadow stretched away from the nearest torch.
 //
-// Pixel scale: PX_PER_TILE sprite texels per world unit, so one texel is a constant world size.
-// The quad is stretched vertically by 1/cos(camera pitch) so texels stay square on screen from the
-// tilted diorama camera (the classic HD-2D trick); lighting uses the unstretched height.
+// ---------------------------------------------------------------------------------------------
+// TEXEL CRISPNESS — why the quad is built in screen space
+// ---------------------------------------------------------------------------------------------
+// A world-sized vertical quad under a pitched perspective camera cannot have square, evenly sized
+// texels: the top of a 1.4-unit-tall sprite sits ~1.1 units NEARER the camera than its feet, so the
+// perspective divide magnifies the helmet rows ~17% more than the boot rows. That, plus a
+// texel-to-pixel ratio that is not an integer, is what makes the art read as 3px/4px/3px mush.
+//
+// So the quad is placed like a UI element pinned to a world anchor:
+//
+//   1. anchor  = projectionMatrix * viewMatrix * modelMatrix * vec4(0,0,0,1)   (the pivot, at the feet)
+//   2. pixels per world unit at the anchor's depth, for a perspective camera of vertical field of
+//      view `fov` rendering into a buffer `H` device pixels tall:
+//
+//          ndc.y = y_view / (d * tan(fov/2))        (perspective divide, d = view-space depth)
+//          y_px  = ndc.y * H / 2
+//      =>   pxPerWorld = H * zoom / (2 * tan(fov/2) * d)
+//
+//   3. one sprite texel should cover `texelPx = pxPerWorld / PX_PER_TILE` screen pixels. That is
+//      4.4 at the showcase camera — a fraction, hence the uneven blocks. We ROUND it to an integer
+//      S (with a little hysteresis so it does not flip-flop mid-zoom) and derive the sprite's world
+//      size back from it: worldPerTexel = S / pxPerWorld. The billboard's world size is therefore a
+//      function of the camera, not a constant — exactly the trade HD-2D games make.
+//   4. the quad's corners are then offset from the anchor in DEVICE PIXELS (multiples of S) and
+//      converted to clip space as `ndcOffset * anchor.w`, which survives the perspective divide
+//      untouched. Every vertex shares the anchor's w, so the whole sprite is parallel to the image
+//      plane: no foreshortening across it, every texel exactly S x S pixels. Only gl_Position.z is
+//      faked back to that of an upright body standing on the anchor, so occlusion still behaves like
+//      a figure (his head draws in front of the staircase he is standing on) — depth does not touch
+//      the screen-space placement.
+//   5. sub-pixel alignment: the anchor's own pixel coordinate is rounded to a whole pixel in the
+//      vertex shader (`floor(apx + 0.5) - apx`). Frame pivots are integer texel coordinates, so once
+//      the pivot lands on a pixel corner every texel edge in the sprite lands on a pixel edge too.
+//
+// Because the quad is parallel to the image plane there is no 1/cos(pitch) stretch any more; the
+// old trick only approximated this under orthographic projection.
 import * as THREE from 'three';
 
 export const PX_PER_TILE = 32;
 const MAX_POINTS = 8, MAX_SPOTS = 2;
+
+/**
+ * Alpha an opaque sprite pixel writes into the HDR scene buffer. Every other opaque thing in the
+ * scene writes 1.0, so the grading pass (renderer.js) can read the alpha channel as a "this is
+ * hand-pixelled art" mask and keep film grain from crawling over the flat colours. The material
+ * blends with src=ONE/dst=ZERO while opaque so this tag is written, not composited.
+ */
+export const SPRITE_MASK_ALPHA = 0.35;
 
 const LIGHT_GLSL = `
 uniform vec3 uHemiSky, uHemiGround, uDirColor, uDirDir;
@@ -23,20 +65,35 @@ float distAtt(float d, float cutoff) {
   if (cutoff > 0.0) { float r = d / cutoff; float rr = r * r; f *= pow(clamp(1.0 - rr * rr, 0.0, 1.0), 2.0); }
   return f;
 }
-uniform float uGrade;
-vec3 grade(vec3 c) { float l = dot(c, vec3(0.299, 0.587, 0.114)); return mix(c, vec3(l) * vec3(1.12, 1.0, 0.84), uGrade); }
+uniform float uGradeAmb, uGradeCold, uGradeWarm;
+// Pull a light colour part-way toward a warm neutral of the same luminance.
+vec3 grade(vec3 c, float k) { float l = dot(c, vec3(0.299, 0.587, 0.114)); return mix(c, vec3(l) * vec3(1.12, 1.0, 0.84), k); }
+// Per-light grading, by how warm the light is. The dungeon's blue-white lantern and the cold fill
+// would turn hand-picked ramps into a blue statue, so they are pulled almost all the way to neutral;
+// a torch keeps nearly all of its orange, so it lands as a real warm key that models the form
+// instead of a flat tint over the whole sprite.
+vec3 tone(vec3 c) {
+  float warm = clamp((c.r - c.b) / max(1e-4, c.r + c.b), 0.0, 1.0);
+  return grade(c, mix(uGradeCold, uGradeWarm, smoothstep(0.12, 0.45, warm)));
+}
+// Wrapped diffuse for the room's lamps. A billboard has one fake normal facing the camera, so a
+// torch on the wall BEHIND the hero would otherwise contribute exactly nothing and he would read as
+// a sticker pasted over a lit room. Wrapping the falloff past the terminator lets a near torch spill
+// warm light around the silhouette the way a real figure picks up a room's bounce.
+uniform float uWrap;
+float wrapped(float nd) { return max(0.0, (nd + uWrap) / (1.0 + uWrap)); }
 vec3 lightAt(vec3 P, vec3 N) {
-  vec3 irr = mix(uHemiGround, uHemiSky, 0.5 + 0.5 * N.y);
-  irr += uDirColor * max(0.0, dot(N, uDirDir));
+  vec3 irr = vec3(0.0);
+  irr += tone(uDirColor) * max(0.0, dot(N, uDirDir));
   for (int i = 0; i < ${MAX_POINTS}; i++) {
     vec3 L = uPtPos[i].xyz - P; float d = length(L); L /= max(d, 1e-4);
-    irr += uPtCol[i] * max(0.0, dot(N, L)) * distAtt(d, uPtPos[i].w);
+    irr += tone(uPtCol[i]) * wrapped(dot(N, L)) * distAtt(d, uPtPos[i].w);
   }
   for (int i = 0; i < ${MAX_SPOTS}; i++) {
     vec3 L = uSpPos[i].xyz - P; float d = length(L); L /= max(d, 1e-4);
     float ang = dot(-L, uSpDir[i].xyz);
     float cone = smoothstep(uSpDir[i].w, uSpPos[i].w, ang);
-    irr += uSpCol[i] * max(0.0, dot(N, L)) * cone * distAtt(d, 0.0);
+    irr += tone(uSpCol[i]) * max(0.0, dot(N, L)) * cone * distAtt(d, 0.0);
   }
   return irr;
 }`;
@@ -45,14 +102,21 @@ function makeSpriteMaterial(texture, fog) {
   const u = {
     uMap: { value: texture }, uTexel: { value: new THREE.Vector2(1 / texture.image.width, 1 / texture.image.height) },
     uRect: { value: new THREE.Vector4(0, 0, 1, 1) }, uFlip: { value: 0 },
-    uSize: { value: new THREE.Vector2(1, 1) }, uPivot: { value: new THREE.Vector2(0.5, 0) }, uSquash: { value: new THREE.Vector2(1, 1) }, uStretch: { value: 1 },
+    uSizeTex: { value: new THREE.Vector2(48, 48) }, uPivot: { value: new THREE.Vector2(0.5, 0) }, uSquash: { value: new THREE.Vector2(1, 1) },
+    // screen-space placement (see the header): device pixels per texel, viewport in device pixels,
+    // and pixels per world unit at the anchor's depth (used to rebuild a world position for lighting)
+    uTexelPx: { value: 4 }, uViewport: { value: new THREE.Vector2(1600, 900) }, uPxPerWorld: { value: 128 }, uZLift: { value: 1.6 },
     uRight: { value: new THREE.Vector3(1, 0, 0) }, uForward: { value: new THREE.Vector3(0, 0, 1) },
-    uOpacity: { value: 1 }, uFlash: { value: 0 }, uFlashColor: { value: new THREE.Color(1, 0.55, 0.4) },
-    // a slight warm cast: the post grade splits shadows toward blue, and a character should stay a
-    // warm focal point against the cold stone rather than drifting periwinkle with it
-    uTint: { value: new THREE.Color(1.07, 1.0, 0.88) },
+    uOpacity: { value: 1 }, uAlphaOut: { value: SPRITE_MASK_ALPHA }, uFlash: { value: 0 }, uFlashColor: { value: new THREE.Color(1, 0.55, 0.4) },
+    // a whisper of warmth so the character stays a focal point against cold stone; the real warmth
+    // now comes from the torches themselves (see tone()), so this stays subtle
+    uTint: { value: new THREE.Color(1.03, 1.0, 0.94) },
     uRimDir: { value: new THREE.Vector3(0, 1, 0) }, uRimColor: { value: new THREE.Color(0, 0, 0) },
-    uGrade: { value: 0.8 }, uAmbientGain: { value: 1.6 }, uDirectGain: { value: 1.02 }, uFloor: { value: 0.1 }, uEmissive: { value: 0.9 },
+    uGradeAmb: { value: 0.88 }, uGradeCold: { value: 0.82 }, uGradeWarm: { value: 0.1 },
+    uAmbientGain: { value: 1.15 }, uDirectGain: { value: 1.25 }, uWrap: { value: 0.55 }, uFloor: { value: 0.07 }, uEmissive: { value: 0.9 },
+    // ceiling for non-emissive sprite pixels, kept under the bloom pass threshold so hand-pixelled
+    // colour never smears into a glow (renderer.js sets the matching threshold)
+    uBloomSafe: { value: 1.2 },
     uHemiSky: { value: new THREE.Color() }, uHemiGround: { value: new THREE.Color() }, uDirColor: { value: new THREE.Color() }, uDirDir: { value: new THREE.Vector3(0, 1, 0) },
     uPtPos: { value: Array.from({ length: MAX_POINTS }, () => new THREE.Vector4(0, 0, 0, 1)) }, uPtCol: { value: Array.from({ length: MAX_POINTS }, () => new THREE.Vector3()) },
     uSpPos: { value: Array.from({ length: MAX_SPOTS }, () => new THREE.Vector4(0, 0, 0, 1)) }, uSpCol: { value: Array.from({ length: MAX_SPOTS }, () => new THREE.Vector3()) },
@@ -61,24 +125,44 @@ function makeSpriteMaterial(texture, fog) {
   };
   const mat = new THREE.ShaderMaterial({
     uniforms: u, transparent: false, depthWrite: true, side: THREE.DoubleSide,
+    // opaque sprites overwrite the target (RGB and the mask alpha) instead of blending, so
+    // SPRITE_MASK_ALPHA reaches the post chain intact; update() swaps to normal blending on a fade
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.OneFactor, blendDst: THREE.ZeroFactor, blendEquation: THREE.AddEquation,
+    blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.ZeroFactor, blendEquationAlpha: THREE.AddEquation,
     vertexShader: `
-      uniform vec4 uRect; uniform float uFlip; uniform vec2 uSize, uPivot, uSquash; uniform float uStretch;
-      varying vec2 vUv; varying vec2 vTex; varying vec3 vLit; varying vec2 vFogXZ;
+      uniform vec4 uRect; uniform float uFlip; uniform vec2 uSizeTex, uPivot, uSquash;
+      uniform float uTexelPx, uPxPerWorld, uZLift; uniform vec2 uViewport; uniform vec3 uRight;
+      varying vec2 vUv; varying vec2 vTex; varying vec2 vFogXZ; varying vec3 vLit;
       void main() {
         vUv = uv;
         float ux = uFlip > 0.5 ? 1.0 - uv.x : uv.x;
         vTex = vec2(mix(uRect.x, uRect.z, ux), mix(uRect.y, uRect.w, uv.y));
-        vec3 p = vec3((uv.x - uPivot.x) * uSize.x * uSquash.x, (uv.y - uPivot.y) * uSize.y * uSquash.y * uStretch, 0.0);
-        vec3 pl = vec3(p.x, (uv.y - uPivot.y) * uSize.y * uSquash.y, 0.0);
-        vec4 w = modelMatrix * vec4(p, 1.0);
-        vLit = (modelMatrix * vec4(pl, 1.0)).xyz;
-        vFogXZ = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz;
-        gl_Position = projectionMatrix * viewMatrix * w;
+        // the pivot, projected: every vertex shares its w, so the quad is parallel to the screen
+        vec4 anchor = projectionMatrix * viewMatrix * modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        vec3 world = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+        vFogXZ = world.xz;
+        // corner offset in device pixels: whole texels, each exactly uTexelPx pixels
+        vec2 off = vec2((uv.x - uPivot.x) * uSizeTex.x * uSquash.x, (uv.y - uPivot.y) * uSizeTex.y * uSquash.y) * uTexelPx;
+        // sub-pixel snap: put the pivot on a whole pixel so every texel edge lands on a pixel edge
+        vec2 apx = (anchor.xy / max(1e-6, anchor.w) * 0.5 + 0.5) * uViewport;
+        off += floor(apx + 0.5) - apx;
+        // the world point this texel would occupy if the sprite were a real standing figure: used
+        // for lighting, and for DEPTH — the quad is flat in screen space but keeps the depth of an
+        // upright body, so the head still draws in front of the stairs or crates it is standing on
+        // while every texel stays exactly uTexelPx pixels.
+        vec2 offWorld = off / max(1e-4, uPxPerWorld);
+        vLit = world + uRight * offWorld.x + vec3(0.0, offWorld.y, 0.0);
+        // uZLift = 1/cos(pitch): the body the depth pretends to be is as tall as the sprite LOOKS on
+        // screen, which is what lets a hero standing on the stairs draw in front of their near frame.
+        vec4 upright = projectionMatrix * viewMatrix * vec4(world + uRight * offWorld.x + vec3(0.0, offWorld.y * uZLift, 0.0), 1.0);
+        float z = clamp(upright.z / max(1e-6, upright.w), -1.0, 1.0) * anchor.w;
+        gl_Position = vec4(anchor.xy + (off * 2.0 / uViewport) * anchor.w, z, anchor.w);
       }`,
     fragmentShader: `
       uniform sampler2D uMap; uniform vec2 uTexel; uniform vec4 uRect; uniform float uFlip;
-      uniform vec3 uRight, uForward; uniform float uOpacity, uFlash; uniform vec3 uFlashColor, uTint;
-      uniform vec3 uRimDir, uRimColor; uniform float uAmbientGain, uDirectGain, uFloor, uEmissive;
+      uniform vec3 uRight, uForward; uniform float uOpacity, uAlphaOut, uFlash; uniform vec3 uFlashColor, uTint;
+      uniform vec3 uRimDir, uRimColor; uniform float uAmbientGain, uDirectGain, uFloor, uEmissive, uBloomSafe;
       varying vec2 vUv; varying vec2 vTex; varying vec3 vLit; varying vec2 vFogXZ;
       ${fog.glsl()}
       ${LIGHT_GLSL}
@@ -90,13 +174,10 @@ function makeSpriteMaterial(texture, fog) {
         // fake normal: faces the camera, tilts up, and curves left/right across the sprite
         float sx = (uFlip > 0.5 ? 1.0 - vUv.x : vUv.x) - 0.5;
         vec3 N = normalize(uForward * 1.0 + vec3(0.0, 0.62, 0.0) + uRight * sx * 1.1);
-        // Sprite grading. The dungeon's fill is a deep blue hemisphere and the player's lantern is a
-        // cold blue-white spot; left alone they turn hand-picked pixel ramps into a blue statue.
-        // Pull the light a sprite receives part-way toward a warm neutral of the same luminance —
-        // the torches still model the form, but the artwork keeps its own local colour.
-        vec3 irr = grade(lightAt(vLit, N));
-        vec3 amb = grade(mix(uHemiGround, uHemiSky, 0.5 + 0.5 * N.y));
-        vec3 direct = irr - amb;
+        // Fill is pulled to a warm neutral (see tone() above); every direct light keeps as much of
+        // its own colour as its warmth deserves, so the room's torches key the character.
+        vec3 amb = grade(mix(uHemiGround, uHemiSky, 0.5 + 0.5 * N.y), uGradeAmb);
+        vec3 direct = lightAt(vLit, N);
         vec3 col = albedo * (amb * uAmbientGain + direct * uDirectGain) * 0.3183 + albedo * uFloor;
         // rim from the nearest torch on edge pixels facing it
         vec2 o = uTexel;
@@ -107,25 +188,48 @@ function makeSpriteMaterial(texture, fog) {
         if (dot(edge, edge) > 0.0) {
           vec2 ld = vec2(dot(uRimDir, uRight), uRimDir.y);
           float rim = max(0.0, dot(normalize(edge), normalize(ld + vec2(0.0, 0.25))));
-          col += uRimColor * rim * rim * rim * 0.5;   // tight: a wide rim eats the silhouette
+          col += uRimColor * rim * rim * (0.35 + 0.65 * rim);   // tight: a wide rim eats the silhouette
         }
         col += albedo * emissive * uEmissive;
         col *= uTint;
         col = applyFog(col, vFogXZ);
+        // Bloom guard: keep ordinary art below the bloom pass threshold with a soft knee (so the
+        // ramp keeps its order) — only genuinely emissive pixels and the hit flash are allowed to glow.
+        float lum = dot(col, vec3(0.299, 0.587, 0.114));
+        if (emissive < 0.5 && lum > uBloomSafe) col *= (uBloomSafe + (lum - uBloomSafe) * 0.15) / lum;
         col = mix(col, uFlashColor * 2.2, uFlash);
-        gl_FragColor = vec4(col, uOpacity);
+        gl_FragColor = vec4(col, uAlphaOut);
       }`,
   });
   return mat;
 }
 
+/**
+ * Contact shadow. Two lobes on one quad:
+ *  - a tight, dark CORE inside `uCore` (the frame's real foot span) with a fast exponential falloff,
+ *    darkest right under the boots — this is the bit that welds the character to the floor;
+ *  - a wide, faint ambient-occlusion HALO out to the quad's edge that just dirties the tile.
+ * The core drifts a little away from the key light so the grounding agrees with the cast shadow.
+ */
 function makeBlobMaterial(fog) {
   return new THREE.ShaderMaterial({
-    uniforms: { uStrength: { value: 0.5 }, fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint },
+    uniforms: {
+      uStrength: { value: 1 }, uCore: { value: 0.42 }, uOffset: { value: new THREE.Vector2(0, 0) },
+      fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint,
+    },
     transparent: true, depthWrite: false,
     vertexShader: `varying vec2 vUv; varying vec2 vFogXZ; void main() { vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vFogXZ = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `uniform float uStrength; varying vec2 vUv; varying vec2 vFogXZ; ${fog.glsl()}
-      void main() { float r = length((vUv - 0.5) * 2.0); float a = smoothstep(1.0, 0.25, r) * uStrength; vec2 f = fogMask(vFogXZ); a *= smoothstep(0.0, 1.0, f.r); gl_FragColor = vec4(0.02, 0.01, 0.04, a); }`,
+    fragmentShader: `uniform float uStrength, uCore; uniform vec2 uOffset; varying vec2 vUv; varying vec2 vFogXZ; ${fog.glsl()}
+      void main() {
+        vec2 p = (vUv - 0.5) * 2.0;
+        float rc = length((p - uOffset) / max(0.08, uCore));
+        float core = exp(-rc * rc * 2.0);          // near-opaque right under the boots
+        float mid = exp(-rc * rc * 0.45);          // fast but not abrupt shoulder
+        float halo = pow(max(0.0, 1.0 - length(p)), 2.4);   // faint ambient-occlusion skirt
+        float a = clamp(core * 0.78 + mid * 0.22 + halo * 0.14, 0.0, 1.0) * uStrength;
+        vec2 f = fogMask(vFogXZ); a *= smoothstep(0.0, 1.0, f.r);
+        gl_FragColor = vec4(0.018, 0.014, 0.022, a);
+      }`,
   });
 }
 
@@ -194,10 +298,10 @@ export class SpriteBillboard {
     this.mesh.frustumCulled = false; this.mesh.castShadow = false; this.mesh.receiveShadow = false;
     this.mesh.renderOrder = 2;
     this.root.add(this.mesh);
-    // blob shadow
+    // contact shadow
     this.blobMat = makeBlobMaterial(fog);
     this.blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.blobMat);
-    this.blob.rotation.x = -Math.PI / 2; this.blob.position.y = 0.012; this.blob.scale.set(0.8, 0.5, 1);
+    this.blob.rotation.x = -Math.PI / 2; this.blob.position.y = 0.012; this.blob.scale.set(1, 0.62, 1);
     this.blob.renderOrder = 1; this.blob.frustumCulled = false;
     this.root.add(this.blob);
     // stretched torch shadow: 4 dynamic vertices on the floor
@@ -215,9 +319,14 @@ export class SpriteBillboard {
     this.depthBias = 0.22;
     this.squash = new THREE.Vector2(1, 1);
     this.opacity = 1; this.flash = 0;
+    /** device pixels per sprite texel (snapped to an integer in sync()) and the world size of one texel */
+    this.texelPx = 4; this.texelWorld = 1 / this.px;
+    /** eased foot metrics for the contact shadow (see updateBlob) */
+    this._footW = 12; this._footCx = 0; this._footLift = 0; this._footInit = false;
     this.lights = null; this._lightCount = -1;
-    this._tmp = new THREE.Vector3(); this._tmp2 = new THREE.Vector3(); this._q = new THREE.Quaternion();
-    this.mesh.onBeforeRender = (renderer, scene, camera) => this.sync(scene, camera);
+    this._tmp = new THREE.Vector3(); this._tmp2 = new THREE.Vector3(); this._vp = new THREE.Vector2();
+    this._q = new THREE.Quaternion(); this._up = new THREE.Vector3(0, 1, 0); this._xAxis = new THREE.Vector3(1, 0, 0);
+    this.mesh.onBeforeRender = (renderer, scene, camera) => this.sync(renderer, scene, camera);
     this.setFrame(sheet.frames[0]);
   }
 
@@ -225,7 +334,7 @@ export class SpriteBillboard {
   setFrame(fr) {
     const u = this.material.uniforms;
     u.uRect.value.set(fr.u0, fr.v0, fr.u1, fr.v1);
-    u.uSize.value.set(fr.w / this.px, fr.h / this.px);
+    u.uSizeTex.value.set(fr.w, fr.h);
     u.uPivot.value.set(fr.px / fr.w, 1 - fr.py / fr.h);
     this.frame = fr;
   }
@@ -241,8 +350,14 @@ export class SpriteBillboard {
     u.uOpacity.value = this.opacity;
     u.uFlash.value = this.flash;
     const fade = this.opacity < 1;
-    if (this.material.transparent !== fade) { this.material.transparent = fade; this.material.needsUpdate = true; }
-    this.blobMat.uniforms.uStrength.value = 0.5 * this.opacity;
+    if (this.material.transparent !== fade) {
+      this.material.transparent = fade;
+      // while fading the sprite must composite normally; while opaque it overwrites so the mask tag
+      // in the alpha channel survives for the post chain
+      this.material.blending = fade ? THREE.NormalBlending : THREE.CustomBlending;
+      this.material.needsUpdate = true;
+    }
+    u.uAlphaOut.value = fade ? this.opacity : SPRITE_MASK_ALPHA;
     this.castMat.uniforms.uStrength.value = 0.28 * this.opacity;
   }
 
@@ -256,27 +371,44 @@ export class SpriteBillboard {
     this.lights = L; this._lightCount = scene.children.length;
   }
 
-  /** Orient toward the camera, stretch for the pitch, and read the live lights (called before each draw). */
-  sync(scene, camera) {
+  /**
+   * Size the quad in screen pixels, snap it to the pixel grid, and read the live lights.
+   * Called from `mesh.onBeforeRender`, i.e. after the frame's matrices are up to date and before
+   * the draw call uploads them — see the header for the projection maths.
+   */
+  sync(renderer, scene, camera) {
     const u = this.material.uniforms;
     const root = this.root;
     root.updateMatrixWorld(true);
     const wp = this._tmp.setFromMatrixPosition(root.matrixWorld);
-    // Y-axis billboard toward the camera
-    const cx = camera.position.x - wp.x, cz = camera.position.z - wp.z;
-    const yaw = Math.atan2(cx, cz);
-    this.mesh.quaternion.setFromAxisAngle(this._tmp2.set(0, 1, 0), yaw);
     // pull the quad a little toward the camera along the ground: a hero standing on the stairs (or
     // any prop sharing his tile) must read in front of it, not be sliced through the waist
+    const cx = camera.position.x - wp.x, cz = camera.position.z - wp.z;
+    const yaw = Math.atan2(cx, cz);
     const inv = 1 / (Math.hypot(cx, cz) || 1);
+    this.mesh.quaternion.identity();
     this.mesh.position.set(cx * inv * this.depthBias, 0, cz * inv * this.depthBias);
-    // square texels on screen: stretch by 1/cos(pitch)
-    const fwd = this._tmp2.set(0, 0, -1).applyQuaternion(camera.quaternion);
-    const pitch = Math.asin(Math.max(-1, Math.min(1, -fwd.y)));
-    u.uStretch.value = 1 / Math.max(0.35, Math.cos(pitch));
+    this.mesh.updateMatrix(); this.mesh.updateMatrixWorld(true);
     u.uRight.value.set(Math.cos(yaw), 0, -Math.sin(yaw));
     u.uForward.value.set(Math.sin(yaw), 0, Math.cos(yaw));
-    this.mesh.updateMatrix(); this.mesh.updateMatrixWorld(true);
+    // ---- texel snapping ----
+    const vp = renderer.getDrawingBufferSize(this._vp);
+    u.uViewport.value.copy(vp);
+    const fwd = this._tmp2.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    const ax = wp.x + this.mesh.position.x - camera.position.x;
+    const ay = wp.y - camera.position.y;
+    const az = wp.z + this.mesh.position.z - camera.position.z;
+    const depth = Math.max(0.05, ax * fwd.x + ay * fwd.y + az * fwd.z); // view-space depth of the pivot
+    const pxPerWorld = (vp.y * 0.5 * (camera.zoom || 1)) / (Math.tan(camera.fov * Math.PI / 360) * depth);
+    const pitch = Math.asin(Math.max(-1, Math.min(1, -fwd.y)));
+    u.uZLift.value = 1 / Math.max(0.35, Math.cos(pitch)); // depth-only: see the vertex shader
+    const want = pxPerWorld / this.px;
+    let S = Math.max(1, Math.round(want));
+    if (Math.abs(want - this.texelPx) < 0.62) S = this.texelPx; // hysteresis: no flip-flop mid-zoom
+    this.texelPx = S;
+    this.texelWorld = S / pxPerWorld;
+    u.uTexelPx.value = S;
+    u.uPxPerWorld.value = pxPerWorld;
     // lights
     this.collectLights(scene);
     const L = this.lights;
@@ -305,31 +437,72 @@ export class SpriteBillboard {
       dir.set(d.x, d.y, d.z, coneCos);
     }
     // rim + stretched shadow from the strongest warm light
+    let lx = 0, lz = 0;
     if (best) {
       const dx = best.position.x - wp.x, dy = best.position.y - (wp.y + 0.7), dz = best.position.z - wp.z;
       const len = Math.hypot(dx, dy, dz) || 1;
       u.uRimDir.value.set(dx / len, dy / len, dz / len);
-      const k = Math.min(0.7, bestW * 0.085);
+      const k = Math.min(0.85, bestW * 0.13);
       u.uRimColor.value.set(best.color.r * k, best.color.g * k, best.color.b * k);
+      const flat = Math.hypot(dx, dz) || 1;
+      lx = dx / flat; lz = dz / flat;
       this.updateCast(-dx, -dz, Math.hypot(dx, dz), best.position.y, k);
     } else { u.uRimColor.value.set(0, 0, 0); this.cast.visible = false; }
+    this.updateBlob(lx, lz, yaw);
+  }
+
+  /**
+   * Ground the character: the blob is sized from the frame's real foot span (packSheet measures it),
+   * so it hugs the boots instead of a guessed ellipse, and its core drifts away from the key light.
+   * The quad is turned to the camera's yaw so its squashed axis is the one the camera foreshortens.
+   */
+  updateBlob(lx, lz, yaw) {
+    const fr = this.frame; if (!fr) return;
+    const foot = fr.foot || { w: 12, cx: 0, drop: 0 };
+    const sq = Math.abs(this.squash.x) || 1;
+    // The measured span jumps frame to frame — one boot planted mid-stride, a cape hem swinging into
+    // the bottom rows — so ease it: the pool breathes with the gait instead of snapping, and it still
+    // grows properly as a dying body sprawls out.
+    const k = this._footInit ? 0.25 : 1; this._footInit = true;
+    this._footW += (foot.w - this._footW) * k;
+    this._footCx += (foot.cx - this._footCx) * k;
+    this._footLift += (Math.max(0, -foot.drop) - this._footLift) * k; // rows the feet are off the floor
+    const footW = Math.max(0.12, this._footW * this.texelWorld * sq); // world width of the boots
+    const halo = footW * 2.1;                                    // quad half-width: core + AO halo
+    // lay flat (x = camera right), then yaw with the billboard
+    this.blob.quaternion.setFromAxisAngle(this._xAxis, -Math.PI / 2).premultiply(this._q.setFromAxisAngle(this._up, yaw));
+    this.blob.scale.set(halo * 2, halo * 1.3, 1);
+    const rx = Math.cos(yaw), rz = -Math.sin(yaw);   // the quad's local +x in world
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);  // the quad's local +y in world
+    const offx = this._footCx * this.texelWorld * sq * (this.flip ? -1 : 1);
+    // centre it under the boots AS DRAWN: the quad is pulled `depthBias` toward the camera, which on
+    // a pitched camera moves the feet a good 20 screen pixels down. Without this the whole dark core
+    // hides behind the legs and only the faint outer skirt shows, which is what made the old blob
+    // read as a vague smudge instead of contact.
+    this.blob.position.set(rx * offx + this.mesh.position.x, 0.012, rz * offx + this.mesh.position.z);
+    const uB = this.blobMat.uniforms;
+    uB.uCore.value = Math.min(0.85, (footW * 0.95) / halo);
+    // the core sits a hair away from the key light, so it agrees with the stretched cast shadow
+    uB.uOffset.value.set(-(lx * rx + lz * rz) * 0.05, -(lx * fx + lz * fz) * 0.05);
+    uB.uStrength.value = this.opacity / (1 + this._footLift * 0.55); // a lifted boot casts less contact
   }
 
   /** Lay the silhouette shadow on the floor, away from the light, longer for low/near lights. */
   updateCast(ax, az, dist, lightH, strength) {
     const fr = this.frame; if (!fr) { this.cast.visible = false; return; }
-    const w = (fr.w / this.px) * 0.9, h = (fr.h / this.px) * 0.85;
+    const w = fr.w * this.texelWorld * 0.9, h = fr.h * this.texelWorld * 0.85;
     const len = Math.max(0.5, Math.min(1.8, h * (h / Math.max(0.6, lightH)) * (1.2 / Math.max(1, dist * 0.5))));
     const n = Math.hypot(ax, az) || 1; ax /= n; az /= n;
     const rx = -az, rz = ax; // right vector on the floor, perpendicular to the shadow direction
     const p = this.castPos, hw = w * 0.5, y = 0.014;
     const px0 = (this.frame.px / this.frame.w - 0.5) * w * (this.flip ? -1 : 1);
-    const set = (i, x, z) => { p[i * 3] = x; p[i * 3 + 1] = y; p[i * 3 + 2] = z; };
+    const bx = this.mesh.position.x, bz = this.mesh.position.z; // same offset as the drawn feet
+    const set = (i, x, z) => { p[i * 3] = x + bx; p[i * 3 + 1] = y; p[i * 3 + 2] = z + bz; };
     set(0, rx * (-hw - px0), rz * (-hw - px0)); set(1, rx * (hw - px0), rz * (hw - px0));
     set(2, rx * (-hw - px0) + ax * len, rz * (-hw - px0) + az * len); set(3, rx * (hw - px0) + ax * len, rz * (hw - px0) + az * len);
     this.castGeo.attributes.position.needsUpdate = true;
     this.cast.visible = strength > 0.02 && this.opacity > 0.05;
-    this.castMat.uniforms.uStrength.value = 0.32 * Math.min(1, strength * 1.5) * this.opacity;
+    this.castMat.uniforms.uStrength.value = 0.3 * Math.min(1, strength * 1.5) * this.opacity;
   }
 
   dispose() { this.material.dispose(); this.blobMat.dispose(); this.castMat.dispose(); this.castGeo.dispose(); this.mesh.geometry.dispose(); this.blob.geometry.dispose(); }

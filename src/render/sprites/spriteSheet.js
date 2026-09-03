@@ -7,7 +7,7 @@ import { toRGBA } from './pixelPainter.js';
 
 /**
  * @typedef {{name:string, facing:string, index:number, x:number, y:number, w:number, h:number, px:number, py:number,
- *   u0:number, v0:number, u1:number, v1:number, duration:number}} SheetFrame
+ *   u0:number, v0:number, u1:number, v1:number, duration:number, foot:{w:number, cx:number, drop:number}}} SheetFrame
  * @typedef {{width:number, height:number, data:Uint8ClampedArray, frames:SheetFrame[],
  *   anims:Object<string, Object<string, {frames:number[], durations:number[], loop:boolean, total:number}>>, rows:{label:string, y:number, h:number}[]}} Sheet
  */
@@ -58,12 +58,32 @@ export function packSheet(built, { pad = 1, order = null, facings = ['S', 'E', '
     // DataTexture rows start at the bottom: v runs upward
     fr.u0 = fr.x / W; fr.u1 = (fr.x + fr.w) / W;
     fr.v1 = 1 - fr.y / H; fr.v0 = 1 - (fr.y + fr.h) / H;
+    fr.foot = footMetrics(fr.pix, fr.px, fr.py);
     delete fr.pix;
   }
   return { width: W, height: H, data, frames, anims, rows };
 }
 
 function pow2(n) { let p = 1; while (p < n) p <<= 1; return p; }
+
+/** How many rows above the lowest opaque row still count as "the feet". */
+const FOOT_ROWS = 2;
+/**
+ * Contact-shadow metrics for one frame, in texels: the opaque span of the figure's bottom
+ * `FOOT_ROWS` rows (`w` wide, centred `cx` texels right of the pivot) and how far that lowest row
+ * sits below the pivot row (`drop`, usually 0 — the pivot is on the ground). spriteBillboard scales
+ * its blob shadow from this so the shadow hugs the actual boots at any animation frame.
+ * @param {import('./pixelPainter.js').Pix} pix @param {number} pivotX @param {number} pivotY
+ */
+function footMetrics(pix, pivotX, pivotY) {
+  let by = -1;
+  for (let y = pix.h - 1; y >= 0 && by < 0; y--) for (let x = 0; x < pix.w; x++) if (pix.d[y * pix.w + x]) { by = y; break; }
+  if (by < 0) return { w: 4, cx: 0, drop: 0 };
+  let x0 = pix.w, x1 = -1;
+  for (let y = Math.max(0, by - FOOT_ROWS + 1); y <= by; y++)
+    for (let x = 0; x < pix.w; x++) if (pix.d[y * pix.w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; }
+  return { w: x1 - x0 + 1, cx: (x0 + x1 + 1) / 2 - pivotX, drop: (by + 1) - pivotY };
+}
 
 /**
  * A crisp texture for the atlas.

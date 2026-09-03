@@ -19,26 +19,35 @@ import { CameraRig } from './camera.js';
 // Grading runs on the linear HDR frame (after bloom, before the ACES output pass): per-depth tint,
 // split toning (cool shadows / warm highlights), contrast about mid grey, saturation, vignette,
 // film grain (deterministic in time), flash/fade, and chromatic aberration (off unless uChroma > 0).
+//
+// CHARACTER MASK: hand-pixelled sprites write SPRITE_MASK_ALPHA into the frame's alpha channel
+// (see sprites/spriteBillboard.js); every other opaque thing writes 1. Film grain crawling over
+// flat pixel-art colour is the single loudest way to break the HD-2D illusion, so the grain is
+// almost entirely muted there while the room around the character keeps its full texture.
 const GradingShader = {
   uniforms: {
     tDiffuse: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uVignette: { value: 0.5 },
     uFlash: { value: new THREE.Color(0, 0, 0) }, uFlashAmt: { value: 0 }, uFade: { value: 0 }, uSat: { value: 1.05 }, uLift: { value: 0.004 },
     uContrast: { value: 1.05 }, uShadows: { value: new THREE.Color(0.55, 0.6, 0.8) }, uHighlights: { value: new THREE.Color(1, 0.95, 0.85) },
     uChroma: { value: 0 }, uGrain: { value: 0.02 }, uTime: { value: 0 }, uRes: { value: new THREE.Vector2(1600, 900) }, uPulse: { value: 0 },
+    uMaskLo: { value: 0.5 }, uMaskHi: { value: 0.8 },
   },
   vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
   fragmentShader: `
     uniform sampler2D tDiffuse; uniform vec3 uTint; uniform float uVignette; uniform vec3 uFlash; uniform float uFlashAmt; uniform float uFade; uniform float uSat; uniform float uLift;
-    uniform float uContrast; uniform vec3 uShadows; uniform vec3 uHighlights; uniform float uChroma; uniform float uGrain; uniform float uTime; uniform vec2 uRes; uniform float uPulse;
+    uniform float uContrast; uniform vec3 uShadows; uniform vec3 uHighlights; uniform float uChroma; uniform float uGrain; uniform float uTime; uniform vec2 uRes; uniform float uPulse; uniform float uMaskLo, uMaskHi;
     varying vec2 vUv;
     float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
     void main() {
       vec2 d = (vUv - 0.5) * vec2(1.15, 1.0);
+      vec4 src = texture2D(tDiffuse, vUv);
       vec3 col;
       if (uChroma > 0.0) {
         vec2 off = d * uChroma * dot(d, d);
-        col = vec3(texture2D(tDiffuse, vUv + off).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - off).b);
-      } else col = texture2D(tDiffuse, vUv).rgb;
+        col = vec3(texture2D(tDiffuse, vUv + off).r, src.g, texture2D(tDiffuse, vUv - off).b);
+      } else col = src.rgb;
+      // character mask: sprites tag themselves in alpha, everything else writes 1
+      float sprite = 1.0 - smoothstep(uMaskLo, uMaskHi, src.a);
       col = col * uTint + uLift;
       float lum = dot(col, vec3(0.299, 0.587, 0.114));
       // split toning (luminance-preserving): shadows take the depth band's cold cast, highlights stay warm
@@ -51,7 +60,7 @@ const GradingShader = {
       col *= mix(1.0, vig, uVignette + uPulse);
       // fine film grain, stronger in the darks (hides banding in the void)
       float g = hash(floor(vUv * uRes) + fract(uTime * 7.31) * 113.0) - 0.5;
-      col += g * uGrain * (0.25 + 0.75 * (1.0 - smoothstep(0.0, 0.6, lum)));
+      col += g * uGrain * (0.25 + 0.75 * (1.0 - smoothstep(0.0, 0.6, lum))) * mix(1.0, 0.1, sprite);
       col = mix(col, uFlash * 2.5, uFlashAmt * 0.6);
       col *= (1.0 - uFade);
       gl_FragColor = vec4(col, 1.0);
@@ -108,8 +117,16 @@ export class Renderer {
     const target = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: this.quality === 'low' ? 0 : 4 });
     this.composer = new EffectComposer(this.gl, target);
     this.renderPass = new RenderPass(this.scene, this.camera);
-    // Bloom threshold sits above lit stone (linear HDR ~0.3-0.9) so only emissive/hot things glow: gold, magic, flames, the Sword.
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.62, 0.6, 1.05);
+    // Bloom threshold sits well above lit stone and above anything the character sprites can reach
+    // (spriteBillboard clamps non-emissive art under it), so only genuinely hot things glow: flames,
+    // gold, magic, the Sword — the pixel art stays a crisp read instead of smearing into a halo.
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.62, 0.55, 1.3);
+    // ...and bloom adds only light: leave the alpha channel (the character mask) untouched so the
+    // grading pass can still tell sprite pixels from the room.
+    const bm = this.bloom.blendMaterial;
+    bm.blending = THREE.CustomBlending;
+    bm.blendSrc = THREE.OneFactor; bm.blendDst = THREE.OneFactor; bm.blendEquation = THREE.AddEquation;
+    bm.blendSrcAlpha = THREE.ZeroFactor; bm.blendDstAlpha = THREE.OneFactor; bm.blendEquationAlpha = THREE.AddEquation;
     this.grading = new ShaderPass(GradingShader);
     this.output = new OutputPass();
     this.composer.addPass(this.renderPass);
