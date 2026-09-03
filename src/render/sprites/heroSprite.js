@@ -2,35 +2,46 @@
 // part by part and composed into animation sheets.
 //
 // DESIGN NOTE
-//  Silhouette: chibi-heroic knight, ~2.8 heads tall on a 48×48 canvas (figure ≈ 30×45 px, feet on
-//  row 45, pivot x=24). A big rounded sallet helm with a tall crimson plume is the read at any
-//  distance; the plume leans back-left so the helm never looks like a ball. A straight longsword is
-//  the one dominant weapon shape — held point-up beside the head (south), diagonal up-forward (east)
-//  and rising above the shoulder (north) — with a white 1-px glint that winks in the idle. A round
-//  crimson buckler with a gold boss sits on the off arm; a crimson cloak hangs from the pauldrons
-//  and sways, streaming behind the hero when walking. Short legs, bulky boots, compact torso.
-//  Palette (5 ramps + outline, hue shifted: shadows toward violet, lights toward amber):
-//    steel 1234 (+5 glint)  · crimson abcd (plume, cloak, shield, hose)  · leather ijkl (belt, boots, grip)
-//    skin mno  · gold uvw (crest, guard, buckle, boss)  · magic xyz (cast glow)  · # outline  @ inner line
-//  Light: top-left. Outline: one dark violet-navy (never black); the top-left (lit) edge uses the
-//  lighter inner-line tone so the form breathes. Steel takes the glint; cloth stays matte.
-//  Facings: south (front, toward camera), east (side, mirrored for west), north (back — the cloak
-//  and plume carry it). Every facing is drawn deliberately.
+//  Silhouette: chibi-heroic knight, ~2.9 heads tall on a 48×48 canvas (figure ≈ 30×46 px, feet on
+//  row 45, pivot x=24). A big rounded sallet helm with a gold comb and a crimson plume is the read
+//  at any distance. A straight longsword is the one dominant weapon shape — held point-up beside the
+//  head (south), diagonal up-forward (east) and rising past the shoulder (north); its blade is
+//  marched, not line-drawn, so a diagonal never checkerboards. A round crimson buckler with a gold
+//  boss sits on the off arm; a crimson mantle falls from the pauldrons and shears from the shoulders
+//  down as the hero moves. Short legs, bulky boots, compact breastplate with a gold sternum boss.
+//
+//  THE BACK VIEW is drawn as a body wearing a cape, never as a cape wearing a helmet: the mantle is
+//  hung from a gold clasp on a visible steel back plate, is NARROWER than the shoulders, and the
+//  pauldrons, upper arms and gauntlets are composited ON TOP of it, with the boots below its hem.
+//
+//  Palette (6 ramps + outline, hue shifted: shadows toward violet, lights toward amber):
+//    steel 1234 (+5 specular)  · crimson eabcd (plume, mantle, buckler, hose)  · leather hijkl
+//    skin mno  · gold uvw (comb, guard, buckle, boss)  · tan pqr (cloth trim)  · magic xyz
+//    # outline (near-black violet)  @ lit-edge / inner line
+//  Ramp discipline: hue/sat shifts stay small on the warm ramps — a big shift turns dark gold into
+//  burnt red and skin shadow into clown blush at this size.
+//  Light: top-left. One dark outline, selectively softened to '@' on the lit (top-left) edge.
+//  Facings: south (front), east (side; west = mirrored east), north (back). Every facing is drawn
+//  deliberately; nothing is a rotation of anything else.
 import { Palette, paint, compose, mirrorLit, outline, line, setPx, solid, recolor, smearArc, makePix, shift, rotate90 } from './pixelPainter.js';
 
 export const HERO_W = 48, HERO_H = 48, HERO_PIVOT_X = 24, HERO_PIVOT_Y = 46;
 
 export const HERO_PALETTE = new Palette()
-  .set('#', '#221a30')          // outline: dark violet-navy
-  .set('@', '#463a5c')          // lit-edge / inner line
-  .ramp('1234', '#8f98b0', { step: 0.12 })  // steel
-  .set('5', '#f6f9ff')          // steel highlight
+  .set('#', '#1b1426')          // outline: near-black violet (never pure black)
+  .set('@', '#544a63')          // lit-edge / inner line (kept off-blue: a violet edge reads as a lilac glow under torchlight)
+  // steel: a near-neutral grey base so the plate still reads as steel under the dungeon's very blue
+  // ambient; the ramp does the hue work (shadows to violet, highlights to amber). Seated low enough
+  // that the armour keeps interior structure instead of blowing out to white near a torch.
+  .ramp('1234', '#848c9a', { step: 0.138, satShift: 0.14 })
+  .set('5', '#eaf0ff')          // steel specular (1-px edges only)
   .set('G', '#ffffff')          // sword glint (emissive)
-  .ramp('abcd', '#b32f3a', { step: 0.1 })   // crimson
-  .ramp('ijkl', '#6d4026', { step: 0.1 })   // leather
-  .ramp('mno', '#d99c72', { step: 0.1 })    // skin
-  .ramp('uvw', '#d6a23a', { step: 0.12 })   // gold
-  .set('E', '#1a1422')          // eye
+  .ramp('eabcd', '#b02f3a', { step: 0.082, mid: 2, hueShift: 0.016, satShift: 0.04 })  // crimson cloth (+ 'e' deep crease; shadows stay red, never magenta)
+  .ramp('pqr', '#b8925e', { step: 0.1 })    // cloak lining / cloth trim (warm tan)
+  .ramp('hijkl', '#6d4026', { step: 0.09, mid: 2 })   // leather (+ 'h' deep)
+  .ramp('mno', '#e2ab84', { step: 0.058, satShift: 0.0, hueShift: 0.015 })  // skin (gentle: a face this small must not blotch)
+  .ramp('uvw', '#d6a23a', { step: 0.105, hueShift: 0.012, satShift: 0.04 })  // gold (a big hue shift turns the dark tone burnt red, not gold)
+  .set('E', '#221a2e')          // eye
   .set('W', '#fff7ea')          // eye catch-light
   .set('F', '#fff4f0')          // hurt flash
   .ramp('xyz', '#7fd4ff', { step: 0.13 })   // magic glow
@@ -39,45 +50,45 @@ export const HERO_PALETTE = new Palette()
 // ------------------------------------------------------------------------------------------ SOUTH
 // Head: helm + face + plume. 18 wide. Placed at (15, 0).
 const HEAD_S = paint(`
-.......#c#........
-......#cdc#.......
-.....#bcdc#.......
-.....#bccd#.......
-.....#abc##.......
-.....##a#####.....
-....#44uvvv33#....
-...#4444uv4333#...
-..#54444uv433322#.
-..#44444uv433322#.
-.#444443343332221#
-.#443##########21#
-.#43#nmmmmmmmm#21#
-.#43#onEEnEEnm#21#
-.#43#onEWnEWnm#21#
-.#43#onnnmnnnm#21#
-.#43##onnnnnm##21#
-..##..#onnnm#..##.
+....#dc#..........
+...#cddc#.........
+...#bcddc#........
+....#bccdc#.......
+.....#abccb#......
+.....#abb##.......
+....#443uvw3#.....
+...#4443uvw333#...
+..#54443uvw33221#.
+.#544443uvw33221#.
+.#44443443332211#.
+.#43#@@@@@@@@#21#.
+.#43#mmnnnnmm#21#.
+.#43#nWEnnWEn#21#.
+.#43#nEEnnEEn#21#.
+.#33#onnmnnno#21#.
+.#43##onmmno##21#.
+..##..#onno#....##
 .......#####......`);
 
 // Torso: gorget, pauldrons, breastplate, belt, tassets. 20 wide. Placed at (14, 18).
 const TORSO_S = paint(`
-.......#34443#......
-..###..#34443#..###.
-.#544#44444433#322#.
-#5444#44444433#3221#
-#4443#44444333#2211#
-.#33#.#5444333#.#11#
-..##..#4444333#..##.
-......#4443332#.....
-......#3433322#.....
-......#lkkvjji#.....
+.......#3223#.......
+..###..#3223#..###..
+.#544#54443332#322#.
+#5444#54443322#3221#
+#4443#44443322#2211#
+.#33#.#4443222#.#11#
+..##..#444u322#..##.
+......#443uw22#.....
+......#4433222#.....
+......#hijuwji#.....
 .....#334433221#....
 .....#344332211#....
 .....#3#43#22#1#....
 .....##.##.##.##....`);
 
 // Legs (south): stand + walk poses. 14 wide, placed at (17, 32); feet on row 45.
-const LEGS_S = {
+const LEGS_S_RAW = {
   stand: paint(`
 ..#aaa#..#aaa#
 ..#bba#..#baa#
@@ -156,7 +167,56 @@ const LEGS_S = {
 #jjii#....#iiii#
 ####........####
 ..............`),
+  // going down: one knee planted, the other folded under
+  kneel: paint(`
+..............
+..............
+..............
+..#aaa#.#aaa#.
+..#443#.#332#.
+..#443#.#3322#
+..#343#.#322#.
+..#lkj#.#kj#..
+.#lkkj#.#kj#..
+.#lkkj##kkj#..
+.#kkjj#kkjj#..
+.#jjii#jjii#..
+.###########..
+..............`),
+  // down: both knees folded, the legs read only as boots under the body
+  down: paint(`
+..............
+..............
+..............
+..............
+..............
+.#aaa#..#aaa#.
+.#443#..#332#.
+.#kji#..#kji#.
+#kkji#..#kkji#
+#kkjii##jjii#.
+#jjiii##iiii#.
+##############
+..............
+..............`),
 };
+
+// The crimson hose under the tassets is in shadow: deepen it so it reads as cloth in the dark, not
+// as bright red shorts. (Applied to every pose so the ramp stays consistent across facings.)
+const shadeHose = (set) => Object.fromEntries(Object.entries(set).map(([k, p]) => [k, recolor(p, { b: 'a', a: 'e' })]));
+const LEGS_S = shadeHose(LEGS_S_RAW);
+
+// The cape pooled on the floor once the hero goes down: a low crimson ellipse, lit on the left,
+// with the folds still reading. Placed under the death heap at (10, 36).
+const CLOAK_POOL = paint(`
+........############........
+....#ccbbbaaaaaeeeeeeee#....
+..#cccbbbbaaaaaeeeeeeeeee#..
+.#cccbbbbaaaaaaeeeeeeeeeee#.
+#ccccbbbbbaaaaaaeeeeeeeeeee#
+.#cccbbbbaaaaaaeeeeeeeeeee#.
+..#ccbbbbaaaaaaeeeeeeeeee#..
+.....##################.....`);
 
 // Round buckler on the off arm (screen-right in front view). Placed at (30, 23).
 const SHIELD_S = paint(`
@@ -168,23 +228,52 @@ const SHIELD_S = paint(`
 .#3b2#.
 ..###..`);
 
-// Cloak seen from the front: a sliver behind each shoulder and the hem between/behind the legs.
-// Placed at (13, 19). Three sway variants shift the hem.
+// Cloak seen from the front: crimson panels falling outside each pauldron with the warm tan lining
+// ('q') showing where the cloth turns, and the hem running down between the legs. Placed at (11, 19).
+// Cloth moves from the shoulders down, so the sway variants shear the lower rows progressively.
 const CLOAK_S = paint(`
-.###..............###.
-#aba#............#aab#
-#aba#............#aab#
-#aab#............#aab#
-#aab#............#aaa#
-.#ab#............#aa#.
-.#ab#............#aa#.
-..#a#............#a#..
-..#a#............#a#..
-..#a###..#aaa#..##a#..
-...#aaa##aaaaa##aaa#..
-....#aaaaaaaaaaaaa#...
-.....#aaaaaaaaaaa#....
-......###########.....`);
+.....###..............###.....
+.....#c#..............#a#.....
+....#cc#..............#aa#....
+....#cc#..............#aa#....
+....#cbb#............#aae#....
+....#cbb#............#aae#....
+...#ccbb#............#aaee#...
+...#ccbb#............#aaee#...
+...#cbbb#............#aaee#...
+...#cbbb#............#aaee#...
+..#ccbbb#............#aaaee#..
+..#ccbbb#............#aaaee#..
+..#cbbbb#............#aaaee#..
+..#cbbbb#............#aaaee#..
+.#ccbbbb#............#aaaaee#.
+.#ccbbbb#....#ab#....#aaaaee#.
+.#cbbbbb#.....#ab#...#aaaaee#.
+.#cbbbbb#.....#ab#...#aaaaee#.
+.#bbbbbb#.....#ab#...#aaaeee#.
+.#bbbbbb#.....#ab#...#aaaeee#.
+..#bbbb#......#ab#....#aaee#..
+..#bbb#.......#ab#.....#aee#..
+...##.........#ab#......##....
+..............#ab#............`);
+
+/**
+ * Cloth swings from the top: shear a hanging Pix so each row below `from` slides a little further,
+ * which is how an animator draws a cape catching up with the body (never a rigid 1-px shove).
+ */
+function sway(p, dx, from = 6) {
+  const o = makePix(p.w, p.h);
+  const span = Math.max(1, p.h - from);
+  for (let y = 0; y < p.h; y++) {
+    const t = Math.max(0, (y - from) / span);
+    const s = Math.round(dx * t * t);
+    for (let x = 0; x < p.w; x++) { const k = p.d[y * p.w + x]; if (k) setPx(o, x + s, y, k); }
+  }
+  return o;
+}
+
+// idle drift / walk swing of the front cloak: 0 rest, 1 left, 2 right, 3 lifted (running)
+const CLOAK_S_SWAY = [CLOAK_S, sway(CLOAK_S, -2), sway(CLOAK_S, 2), sway(CLOAK_S, -1, 4)];
 
 // ------------------------------------------------------------------------------------------ EAST
 // Head (side): dome, plume streaming back, one eye, nose in profile. Placed at (15, 0).
@@ -201,33 +290,33 @@ const HEAD_E = paint(`
 ..#4444444333322#.
 ..#4444334333221#.
 ..#44433#######1#.
-..#44433#nmmmm#...
-..#44433#onEEn#...
-..#44333#onEWnn#..
-..#43333#onnnm#...
-...#3333##nnnm#...
+..#44433#nmmmn#...
+..#44333#nWEnno#..
+..#44333#nEEnno#..
+..#43333#onnmno#..
+...#3333##onnm#...
 ....####..#nnm#...
 ..........####....`);
 
 // Torso (side): the near pauldron, breastplate front to the right. 20 wide, placed at (14, 18).
 const TORSO_E = paint(`
-........#3443#......
-.......######.......
-.....##54443##......
-....#444444332#.....
-....#4444433221#....
-....#3#44433221#....
-.....##4443322#.....
-......#4433221#.....
-......#3433221#.....
-......#lkkjjvi#.....
-.....#344332211#....
+........#2112#......
+.......########.....
+.....##5444332##....
+....#44443332221#...
+....#444433322211#..
+....#3#4433322211#..
+.....##443332221#...
+......#44u33221#....
+......#443u3221#....
+......#hijuwji#.....
+.....#344332221#....
 .....#344332211#....
 .....#3#43#22#1#....
 .....##.##.##.##....`);
 
 // Legs (side). 14 wide, placed at (17, 32). Far leg is the darker column on the left.
-const LEGS_E = {
+const LEGS_E_RAW = {
   stand: paint(`
 ...#a#bba#....
 ...#a#bba#....
@@ -353,6 +442,7 @@ const LEGS_E = {
 ####..........
 ..............`),
 };
+const LEGS_E = shadeHose(LEGS_E_RAW);
 
 // Cloak (side): hangs from the back of the pauldron, a strip behind the body that flares at the hem
 // and streams back when walking (cloakDx). Placed at (13, 21).
@@ -386,75 +476,85 @@ const SHIELD_E = paint(`
 .##..`);
 
 // ------------------------------------------------------------------------------------------ NORTH
-// Head (back): the dome with its crest ridge, plume falling forward-left over it, neck guard. (15, 0)
+// Head (back): the dome seen from behind — the gold comb runs up the centre, the plume roots on top
+// and falls away from the camera, and a three-lame nape guard closes the neck. (15, 0)
 const HEAD_N = paint(`
-......#cc#........
-.....#cddc#.......
+.....#dc#.........
+....#cddc#........
 ....#bcddc#.......
-....#bccdc#.......
-....#abccc#.......
-.....#abb#####....
-....#4#a#vv433#...
-...#444#uvv4333#..
-..#54444uvv433322#
-..#44444uvv433322#
-.#4444444vv4333221#
-.#4444433vv3332221#
-.#4444433vv3332221#
-.#4444433uv3322221#
-.#444433@uv@322211#
-.#44333###3##22211#
-..#43333333322221#.
-..##333333322221##.
-....############..`);
+.....#bccb#.......
+.....#abb##.......
+.....#ab#.........
+....#443uvw3#.....
+...#4443uvw333#...
+..#444433uvw3321#.
+.#544433uvw33221#.
+.#544333uvw33221#.
+.#444333uvw33221#.
+.#443333uvw32211#.
+.#443333uvw32211#.
+.#44433333v322211#
+.#4@@@@@@@@@@@21#.
+..#443333322211#..
+..#@@@@@@@@@@@#...
+...############...`);
 
-// Torso from behind: pauldrons, the cloak covers the back. (14, 18)
+// Torso from behind: gorget, big pauldrons AND the hanging upper arms — drawn ON TOP of the mantle
+// so the back reads as a body wearing a cape rather than a cape wearing a helmet. (14, 18)
 const TORSO_N = paint(`
-.......#34443#......
-..###..#34443#..###.
-.#544#########322#..
-#5444#........#3221#
-#4443#........#2211#
-.#33#..........#11#.
-..##............##..`);
+.......#2112#.......
+..####.#3223#.####..
+.#5444#443322#3222#.
+#54444#443322#32221#
+#54443#443322#32211#
+#44433#4uvw32#22111#
+.#443#........#221#.
+.#43#..........#12#.
+.#43#..........#12#.
+.#33#..........#22#.
+.#kj#..........#jk#.
+.#kj#..........#jk#.
+.#32#..........#23#.
+.####..........####.`);
 
-// Cloak from behind: gathered at the shoulders, flaring to a scalloped hem, two long folds
-// (a lit ridge and a shadow crease) running down the back. Placed at (12, 20).
+// The mantle from behind: hung from the gold clasp on the back plate, NARROWER than the shoulders so
+// the pauldrons and arms flank it, falling to a scalloped knee-length hem. Four aligned folds — two
+// deep creases ('e') and a lit centre ridge ('c') — give it cloth over a body, not a flat red blob.
+// Placed at (12, 23).
 const CLOAK_N = paint(`
-.....##############..
-....#ddccccbbbbaa#...
-....#dcccccbbbbaaa#..
-...#dccccbcbbbabaaa#.
-...#ccccbccbbbabaaa#.
-...#ccccbccbbbabbaa#.
-..#cccccbccbbbabbaaa#
-..#cccccbccbbabbbaaa#
-..#ccccbbccbbabbbaaa#
-..#ccccbbccbbabbbaaa#
-..#ccccbbcccbabbbaaa#
-.#ccccbbcccbabbbbaaa#
-.#ccccbbcccbabbbbaaa#
-.#cccbbbcccbabbbbaaa#
-.#cccbbbccbbabbbbaaa#
-.#cccbbbccbbabbbbaaa#
-.#ccbbbbccbbaabbbaaa#
-.#ccbbbbccbbaabbbaaa#
-.#bbbbbbbbbbaabbaaaa#
-.#aaaaaaaaaaaaaaaaaa#
-..####.######.######.`);
+.......#ebbcbbbe#.......
+.....#baebbcbbbeaa#.....
+.....#baebbcbbbeaa#.....
+.....#baebbcbbbeaa#.....
+.....#baebbcbbbeaa#.....
+....#bbaebbcbbbeaaa#....
+....#bbaebbcbbbeaaa#....
+....#cbaebbcbbbeaaa#....
+....#cbaebbcbbbeaae#....
+....#cbaebbcbbbeaae#....
+....#cbaebbcbbbeaae#....
+..#ccbbaebbcbbbeaaaee#..
+..#ccbbaebbcbbbeaaaee#..
+..#ccbbaebbcbbbeaaaee#..
+..#cbbbaebbcbbbeaaaee#..
+..#cbbbaebbcbbbeaaaee#..
+..#cbb#aebb#cbbb#aaee#..
+...###..####..####..##..`);
 
-// Shield seen from behind (its back strap side), off the hero's left = screen-left. (12, 23)
+// walk/idle sway: cloth trails the body, so the whole mantle shears from the shoulders down
+const CLOAK_N_SWAY = [CLOAK_N, sway(CLOAK_N, -2), sway(CLOAK_N, 2), sway(CLOAK_N, -1, 3)];
+
+// Shield seen from behind (the strap side), on the hero's left = screen-left from the back. (11, 24)
 const SHIELD_N = paint(`
 .###..
-#43##.
-#4jk3#
-#4jj3#
-#3jj2#
-.#32#.
-..##..`);
+#432##
+#4jk32
+#4jj32
+#3jj21
+.#321#
+..###.`);
 
-// Legs from behind (boots point away: heels). 14 wide at (17, 32). Reuse the front walk poses
-// with the boots re-shaded (heel dark) — the cloak hides most of them.
+// Legs from behind (boots point away: heels). 14 wide at (17, 32).
 const LEGS_N = Object.fromEntries(Object.entries(LEGS_S).map(([k, p]) => [k, recolor(p, { l: 'k', k: 'j', j: 'i' })]));
 
 // ------------------------------------------------------------------------------------------ rig helpers
@@ -479,16 +579,25 @@ function swordPix(gx, gy, angle, { len = 16, glint = 0 } = {}) {
   const nx = -dy, ny = dx;                          // across the blade
   const r = (v) => Math.round(v);
   const gxs = gx + dx * 2, gys = gy + dy * 2;       // guard sits 2px above the grip centre
-  // blade: two parallel lines (lit edge '4', shadow edge '3') + a tip
-  const tipX = gxs + dx * len, tipY = gys + dy * len;
-  line(p, r(gxs + dx), r(gys + dy), r(tipX - dx), r(tipY - dy), '3');
-  line(p, r(gxs + dx - nx * 0.9), r(gys + dy - ny * 0.9), r(tipX - dx * 2 - nx * 0.9), r(tipY - dy * 2 - ny * 0.9), '4');
-  setPx(p, r(tipX), r(tipY), '4');
-  if (glint > 0) { const t = 0.35 + glint * 0.4; setPx(p, r(gxs + dx * len * t - nx * 0.9), r(gys + dy * len * t - ny * 0.9), 'G'); setPx(p, r(gxs + dx * len * t - nx * 0.9 + dx), r(gys + dy * len * t - ny * 0.9 + dy), 'G'); }
-  // guard
-  for (let k = -2; k <= 2; k++) setPx(p, r(gxs + nx * k), r(gys + ny * k), k === -2 ? 'w' : k === 2 ? 'u' : 'v');
+  // Blade: march densely along the axis stamping a 2-px cross-section — a lit edge and a darker
+  // fuller. (Two Bresenham lines interleave into a checkerboard on diagonals; marching does not.)
+  const bx = gxs + dx * 1.4, by = gys + dy * 1.4;
+  const steps = Math.max(4, Math.round(len * 2.4));
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps;
+    const cx = bx + dx * len * t, cy = by + dy * len * t;
+    setPx(p, r(cx - nx * 0.55), r(cy - ny * 0.55), '4');
+    if (t < 0.86) setPx(p, r(cx + nx * 0.55), r(cy + ny * 0.55), '2');
+  }
+  setPx(p, r(bx + dx * len), r(by + dy * len), '5');   // the point catches the light
+  if (glint > 0) {
+    const t = 0.3 + glint * 0.35;
+    for (let k = 0; k < 2; k++) setPx(p, r(bx + dx * len * t + dx * k - nx * 0.55), r(by + dy * len * t + dy * k - ny * 0.55), 'G');
+  }
+  // guard (gold, 5 across) — the light side reads warmest
+  for (let k = -2; k <= 2; k++) setPx(p, r(gxs + nx * k), r(gys + ny * k), k <= -1 ? 'w' : k === 0 ? 'v' : 'u');
   // grip + pommel
-  setPx(p, r(gx), r(gy), 'j'); setPx(p, r(gx - dx), r(gy - dy), 'k');
+  setPx(p, r(gx), r(gy), 'j'); setPx(p, r(gx - dx), r(gy - dy), 'i');
   setPx(p, r(gx - dx * 2), r(gy - dy * 2), 'v');
   return outline(p, '#', { lit: { x: -1, y: -1 }, litKey: '@' });
 }
@@ -541,7 +650,7 @@ function frame(f, o = {}) {
   // figure when the cut goes away from the camera), never over the body
   const smear = o.smear ? o.smear(makePix(HERO_W, HERO_H)) : null;
   if (f === 'S') {
-    layers.push(L(o.cloak === false ? null : CLOAK_S, 13 + cloakDx + bx, 19 + cloakDy + by));
+    layers.push(L(o.cloak === false ? null : (CLOAK_S_SWAY[o.cloakSway || 0] || CLOAK_S), 9 + cloakDx + bx, 19 + cloakDy + by));
     if (o.swordBehind && o.sword) layers.push(L(o.sword, 0, 0));
     layers.push(L(legPix, 17, 32 + legDy));
     layers.push(L(TORSO_S, 14 + bx, 18 + by));
@@ -562,13 +671,16 @@ function frame(f, o = {}) {
     if (o.arm) layers.push(L(armPix(o.arm.sx + bx, o.arm.sy + by, o.arm.hx + bx, o.arm.hy + by), 0, 0));
     if (o.sword && !o.swordBehind) layers.push(L(o.sword, 0, 0));
   } else {
+    // From behind, the mantle is the back — but it must sit UNDER the shoulders, the shield and the
+    // sword arm, or the hero is a cape with a helmet on top.
     if (smear) layers.push(L(smear, 0, 0));
-    if (o.sword) layers.push(L(o.sword, 0, 0));
-    if (o.arm) layers.push(L(armPix(o.arm.sx + bx, o.arm.sy + by, o.arm.hx + bx, o.arm.hy + by), 0, 0));
     layers.push(L(legPix, 17, 32 + legDy));
+    layers.push(L(o.cloak === false ? null : (CLOAK_N_SWAY[o.cloakSway || 0] || CLOAK_N), 12 + cloakDx + bx, 23 + cloakDy + by));
     layers.push(L(TORSO_N, 14 + bx, 18 + by));
-    if (o.shield !== false) layers.push(L(SHIELD_N, 12 + bx, 23 + by));
-    layers.push(L(o.cloak === false ? null : CLOAK_N, 12 + cloakDx + bx, 20 + cloakDy + by));
+    if (o.shield !== false) layers.push(L(SHIELD_N, 9 + bx + (o.shieldDx || 0), 25 + by + (o.shieldDy || 0)));
+    if (o.offArm) layers.push(L(armPix(o.offArm.sx + bx, o.offArm.sy + by, o.offArm.hx + bx, o.offArm.hy + by), 0, 0));
+    if (o.arm) layers.push(L(armPix(o.arm.sx + bx, o.arm.sy + by, o.arm.hx + bx, o.arm.hy + by), 0, 0));
+    if (o.sword) layers.push(L(o.sword, 0, 0));
     layers.push(L(HEAD_N, 15 + hdx, 0 + hdy));
   }
   if (o.orb) layers.push(L(orbPix(o.orb.cx + bx, o.orb.cy + by, o.orb.r), 0, 0));
@@ -578,11 +690,11 @@ function frame(f, o = {}) {
 }
 
 // Rest poses of the sword arm per facing: shoulder -> hand, and where the grip sits.
-const ARM_S = { sx: 20, sy: 24, hx: 16, hy: 27 };  // hero's right arm = screen-left
+const ARM_S = { sx: 20, sy: 24, hx: 15, hy: 27 };  // hero's right arm = screen-left
 const ARM_E = { sx: 25, sy: 24, hx: 29, hy: 28 };
 const ARM_N = { sx: 29, sy: 23, hx: 32, hy: 26 };
 
-const swordS = (g = 0, angle = -8, len = 16, dx = 0, dy = 0) => swordPix(ARM_S.hx + dx, ARM_S.hy + dy, angle, { len, glint: g });
+const swordS = (g = 0, angle = -13, len = 16, dx = 0, dy = 0) => swordPix(ARM_S.hx + dx, ARM_S.hy + dy, angle, { len, glint: g });
 const swordE = (g = 0, angle = 38, len = 15, dx = 0, dy = 0) => swordPix(ARM_E.hx + dx, ARM_E.hy + dy, angle, { len, glint: g });
 const swordN = (g = 0, angle = 12, len = 15, dx = 0, dy = 0) => swordPix(ARM_N.hx + dx, ARM_N.hy + dy, angle, { len, glint: g });
 
@@ -595,8 +707,8 @@ function idle(f) {
   // breathe (body 1px), cloak sway (hem 1px), sword glint on the third frame
   const A = f === 'S' ? ARM_S : f === 'E' ? ARM_E : ARM_N;
   const sw = f === 'S' ? swordS : f === 'E' ? swordE : swordN;
-  const mk = (dy, cloakDy, glint, cdx = 0) => frame(f, { dy, hdy: 0, cloakDy, cloakDx: cdx, legDy: 0, arm: armAt(A, 0, dy), sword: sw(glint, undefined, undefined, 0, dy) });
-  return { frames: [mk(0, 0, 0), mk(1, 0, 0, 0), mk(1, 1, 1, f === 'E' ? -1 : 0), mk(0, 1, 0, 0)], durations: [340, 260, 200, 300], loop: true };
+  const mk = (dy, cloakDy, glint, cdx = 0, sy = 0) => frame(f, { dy, hdy: 0, cloakDy, cloakDx: cdx, cloakSway: sy, legDy: 0, arm: armAt(A, 0, dy), sword: sw(glint, undefined, undefined, 0, dy) });
+  return { frames: [mk(0, 0, 0, 0, 0), mk(1, 0, 0, 0, 1), mk(1, 1, 1, f === 'E' ? -1 : 0, 1), mk(0, 1, 0, 0, 0)], durations: [340, 260, 200, 300], loop: true };
 }
 
 function walk(f) {
@@ -606,43 +718,47 @@ function walk(f) {
   const seq = f === 'E'
     ? [['c1', 0, -1, 0, 0], ['r1', 1, -1, 1, 1], ['p1', -1, -2, 1, 0], ['c2', 0, -1, 0, 0], ['r2', 1, 0, -1, 1], ['p2', -1, -1, -1, 0]]
     : [['lfwd', 0, 0, 0, 0], ['lfwd', 1, 1, 1, 1], ['pass', -1, 0, 1, 0], ['rfwd', 0, 0, 0, 0], ['rfwd', 1, 1, -1, 1], ['pass', -1, 0, -1, 0]];
-  const frames = seq.map(([legs, dy, cdy, hx, hy]) => frame(f, {
-    legs, dy, legDy: 0, cloakDy: cdy, cloakDx: f === 'E' ? -1 - Math.max(0, -cdy) : 0,
+  // the cape trails the stride: it lags a frame behind the legs and lifts on the passing poses
+  const swayIdx = [2, 2, 0, 1, 1, 0];
+  const frames = seq.map(([legs, dy, cdy, hx, hy], i) => frame(f, {
+    legs, dy, legDy: 0, cloakDy: cdy, cloakSway: swayIdx[i], cloakDx: f === 'E' ? -1 - Math.max(0, -cdy) : 0,
     arm: armAt(A, hx, dy + hy), sword: sw(0, undefined, undefined, hx, dy + hy),
   }));
   return { frames, durations: [90, 90, 90, 90, 90, 90], loop: true };
 }
 
 function attack(f) {
+  // Four beats: anticipation (coil + cock the blade), lunge (the cut, with a smear that TRAILS the
+  // real blade angle), follow-through, recover. The smear is a thin crescent shaded from the trailing
+  // edge ('1') to the leading edge ('4') and is kept clear of the helm — a fat bright arc over the
+  // face reads as a second weapon, not as speed.
   const frames = [];
   if (f === 'S') {
-    // anticipation: sword drawn up and back over the right shoulder, body coils
-    frames.push(frame('S', { dy: 1, hdx: 1, arm: { sx: 20, sy: 24, hx: 13, hy: 22 }, sword: swordPix(13, 22, -35, { len: 16 }), cloakDy: -1 }));
-    // lunge: the cut sweeps across the front with a smear arc, body forward (down-screen)
+    frames.push(frame('S', { dy: 1, hdx: 1, cloakSway: 2, arm: { sx: 20, sy: 24, hx: 16, hy: 22 }, sword: swordPix(16, 22, -32, { len: 14 }), cloakDy: -1 }));
     frames.push(frame('S', {
-      dy: -1, legs: 'lfwd', arm: { sx: 20, sy: 24, hx: 28, hy: 31 }, sword: swordPix(28, 31, 118, { len: 15 }),
-      smear: (px) => smearArc(px, 24, 30, 14, 18, -2.0, 0.85, ['2', '3', '4', '4', '4']),
+      dy: -1, legs: 'lfwd', cloakSway: 1, arm: { sx: 20, sy: 24, hx: 28, hy: 30 }, sword: swordPix(28, 30, 112, { len: 14 }),
+      smear: (px) => smearArc(px, 22, 27, 14, 17, -0.55, 0.45, ['1', '2', '4', '5']),
     }));
-    // follow-through: blade low and across, body forward
-    frames.push(frame('S', { dy: 0, legs: 'lfwd', arm: { sx: 20, sy: 24, hx: 31, hy: 33 }, sword: swordPix(31, 33, 130, { len: 14 }), cloakDy: 1 }));
-    // recover
-    frames.push(frame('S', { dy: 0, arm: { sx: 20, sy: 24, hx: 18, hy: 29 }, sword: swordPix(18, 29, 20, { len: 16 }), cloakDy: 1 }));
+    frames.push(frame('S', { dy: 0, legs: 'lfwd', cloakSway: 1, arm: { sx: 20, sy: 24, hx: 30, hy: 33 }, sword: swordPix(30, 33, 132, { len: 13 }), cloakDy: 1 }));
+    frames.push(frame('S', { dy: 0, cloakSway: 2, arm: { sx: 20, sy: 24, hx: 18, hy: 29 }, sword: swordPix(16, 28, -14, { len: 15 }), cloakDy: 1 }));
   } else if (f === 'E') {
-    frames.push(frame('E', { dx: -1, dy: 1, hdx: -1, arm: { sx: 25, sy: 24, hx: 21, hy: 18 }, sword: swordPix(21, 18, -40, { len: 15 }), cloakDx: -1, cloakDy: -1 }));
+    frames.push(frame('E', { dx: -1, dy: 1, hdx: -1, cloakSway: 2, arm: { sx: 25, sy: 24, hx: 23, hy: 19 }, sword: swordPix(23, 19, -34, { len: 14 }), cloakDx: -1, cloakDy: -1 }));
     frames.push(frame('E', {
-      dx: 3, dy: -1, legs: 'c1', arm: { sx: 28, sy: 24, hx: 38, hy: 24 }, sword: swordPix(38, 24, 100, { len: 14 }),
-      smear: (px) => smearArc(px, 29, 27, 12, 16, -2.05, 0.3, ['2', '3', '4', '4', '4']), cloakDx: -3, cloakDy: 0,
+      dx: 3, dy: -1, legs: 'c1', arm: { sx: 28, sy: 24, hx: 32, hy: 25 }, sword: swordPix(32, 25, 96, { len: 13 }),
+      smear: (px) => smearArc(px, 26, 24, 13, 16, -0.8, 0.1, ['1', '2', '4', '5']), cloakDx: -3, cloakDy: 0, cloakSway: 1,
     }));
-    frames.push(frame('E', { dx: 3, dy: 0, legs: 'c1', arm: { sx: 28, sy: 24, hx: 36, hy: 31 }, sword: swordPix(36, 31, 135, { len: 13 }), cloakDx: -3, cloakDy: 1 }));
-    frames.push(frame('E', { dx: 1, arm: { sx: 26, sy: 24, hx: 31, hy: 29 }, sword: swordPix(31, 29, 60, { len: 15 }), cloakDx: -1, cloakDy: 1 }));
+    frames.push(frame('E', { dx: 3, dy: 0, legs: 'c1', arm: { sx: 28, sy: 24, hx: 33, hy: 30 }, sword: swordPix(33, 30, 128, { len: 13 }), cloakDx: -3, cloakDy: 1, cloakSway: 1 }));
+    frames.push(frame('E', { dx: 1, cloakSway: 2, arm: { sx: 26, sy: 24, hx: 31, hy: 29 }, sword: swordPix(31, 29, 55, { len: 15 }), cloakDx: -1, cloakDy: 1 }));
   } else {
-    frames.push(frame('N', { dy: 1, arm: { sx: 29, sy: 23, hx: 34, hy: 26 }, sword: swordPix(34, 26, 30, { len: 15 }), cloakDy: -1 }));
+    // away from the camera: the chop rises over the shoulder, goes foreshortened above the helm, then
+    // comes down across the far side
+    frames.push(frame('N', { dy: 1, cloakSway: 2, arm: { sx: 29, sy: 23, hx: 34, hy: 21 }, sword: swordPix(34, 21, 22, { len: 14 }), cloakDy: -1 }));
     frames.push(frame('N', {
-      dy: -2, legs: 'lfwd', arm: { sx: 29, sy: 23, hx: 24, hy: 14 }, sword: swordPix(24, 14, -70, { len: 14 }),
-      smear: (px) => smearArc(px, 30, 24, 11, 15, -3.0, -1.35, ['2', '3', '4', '4', '4']), cloakDy: -1,
+      dy: -2, legs: 'lfwd', cloakSway: 1, arm: { sx: 29, sy: 22, hx: 34, hy: 17 }, sword: swordPix(34, 17, 8, { len: 13 }),
+      smear: (px) => smearArc(px, 26, 26, 12, 16, -2.1, -0.75, ['1', '2', '4', '5']), cloakDy: -1,
     }));
-    frames.push(frame('N', { dy: -1, legs: 'lfwd', arm: { sx: 29, sy: 23, hx: 20, hy: 18 }, sword: swordPix(20, 18, -100, { len: 13 }), cloakDy: 0 }));
-    frames.push(frame('N', { dy: 0, arm: armAt(ARM_N, 0, 1), sword: swordN(0, 12, 15, 0, 1), cloakDy: 1 }));
+    frames.push(frame('N', { dy: -1, legs: 'lfwd', cloakSway: 1, arm: { sx: 29, sy: 23, hx: 22, hy: 19 }, sword: swordPix(22, 19, -74, { len: 13 }), cloakDy: 0 }));
+    frames.push(frame('N', { dy: 0, cloakSway: 2, arm: armAt(ARM_N, 0, 1), sword: swordN(0, 12, 15, 0, 1), cloakDy: 1 }));
   }
   return { frames, durations: [110, 80, 110, 140], loop: false };
 }
@@ -656,19 +772,31 @@ function hurt(f) {
 }
 
 function death() {
-  // Facing-independent: stagger, buckle, topple onto the back, lie, lie (the material fades it).
-  const f1 = frame('S', { dy: 1, hdx: -1, hdy: 1, cloakDy: -1, arm: { sx: 20, sy: 24, hx: 14, hy: 30 }, sword: swordPix(14, 30, -20, { len: 15 }) });
-  const f2 = frame('S', { legs: 'squat', dy: 3, hdy: 4, hdx: -1, cloakDy: 2, arm: { sx: 20, sy: 27, hx: 12, hy: 34 }, sword: swordPix(12, 34, -35, { len: 14 }), shield: false, extra: [L(SHIELD_S, 31, 27)] });
-  // lying: the side-view figure turned a lossless quarter turn onto its back (head left, plume
-  // trailing), the cloak spread beneath it and the sword dropped in front.
-  const side = frame('E', { legs: 'stand', shield: false, cloak: true, arm: { sx: 25, sy: 24, hx: 28, hy: 30 }, sword: null });
-  const turned = rotate90(side, false);
-  const lying = compose(HERO_W, HERO_H, [
-    L(turned, 1, 9),
-    L(swordPix(30, 44, 96, { len: 14 }), 0, 0),
+  // Stagger, the knees buckle, down onto both knees, then a slump — the cape pools on the floor and
+  // the sword falls out of the hand and stands in the ground. Facing-independent; the material
+  // fades the held frames out. (A rotated side view read as an unidentifiable blob; a collapse
+  // toward the camera is what an animator draws for a 3/4 top-down diorama.)
+  const sw = (x, y, a, len) => swordPix(x, y, a, { len });
+  const f1 = frame('S', { dy: 1, hdx: -1, hdy: 1, cloakSway: 2, cloakDy: -1, arm: { sx: 20, sy: 24, hx: 13, hy: 29 }, sword: sw(13, 29, -22, 15) });
+  const f2 = frame('S', {
+    legs: 'squat', dy: 3, hdy: 4, hdx: -1, cloakDy: 2, cloakSway: 1, arm: { sx: 20, sy: 27, hx: 12, hy: 34 },
+    sword: sw(12, 34, -55, 14), shield: false, extra: [L(SHIELD_S, 31, 27)],
+  });
+  const f3 = frame('S', {
+    legs: 'kneel', legDy: 3, dy: 7, hdy: 9, hdx: -1, cloakDy: 6, cloakSway: 1, shield: false,
+    arm: { sx: 20, sy: 31, hx: 13, hy: 38 }, sword: sw(11, 40, -100, 12),
+  });
+  const heap = compose(HERO_W, HERO_H, [
+    L(CLOAK_POOL, 10, 36),
+    L(frame('S', { legs: 'down', legDy: 5, dy: 11, hdy: 13, hdx: -1, cloak: false, shield: false, arm: { sx: 20, sy: 35, hx: 12, hy: 42 } }), 0, 0),
+    L(sw(9, 43, -104, 12), 0, 0),
   ]);
-  const f3 = shift(lying, 0, -3);
-  return { frames: [f1, f2, f3, lying, lying], durations: [140, 160, 160, 700, 600], loop: false };
+  const settle = compose(HERO_W, HERO_H, [
+    L(CLOAK_POOL, 10, 37),
+    L(frame('S', { legs: 'down', legDy: 6, dy: 12, hdy: 14, hdx: -1, cloak: false, shield: false, arm: { sx: 20, sy: 36, hx: 12, hy: 43 } }), 0, 0),
+    L(sw(9, 44, -104, 12), 0, 0),
+  ]);
+  return { frames: [f1, f2, f3, heap, settle], durations: [140, 170, 200, 620, 700], loop: false };
 }
 
 function cast(f) {

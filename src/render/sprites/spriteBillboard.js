@@ -23,6 +23,8 @@ float distAtt(float d, float cutoff) {
   if (cutoff > 0.0) { float r = d / cutoff; float rr = r * r; f *= pow(clamp(1.0 - rr * rr, 0.0, 1.0), 2.0); }
   return f;
 }
+uniform float uGrade;
+vec3 grade(vec3 c) { float l = dot(c, vec3(0.299, 0.587, 0.114)); return mix(c, vec3(l) * vec3(1.12, 1.0, 0.84), uGrade); }
 vec3 lightAt(vec3 P, vec3 N) {
   vec3 irr = mix(uHemiGround, uHemiSky, 0.5 + 0.5 * N.y);
   irr += uDirColor * max(0.0, dot(N, uDirDir));
@@ -45,9 +47,12 @@ function makeSpriteMaterial(texture, fog) {
     uRect: { value: new THREE.Vector4(0, 0, 1, 1) }, uFlip: { value: 0 },
     uSize: { value: new THREE.Vector2(1, 1) }, uPivot: { value: new THREE.Vector2(0.5, 0) }, uSquash: { value: new THREE.Vector2(1, 1) }, uStretch: { value: 1 },
     uRight: { value: new THREE.Vector3(1, 0, 0) }, uForward: { value: new THREE.Vector3(0, 0, 1) },
-    uOpacity: { value: 1 }, uFlash: { value: 0 }, uFlashColor: { value: new THREE.Color(1, 0.55, 0.4) }, uTint: { value: new THREE.Color(1, 1, 1) },
+    uOpacity: { value: 1 }, uFlash: { value: 0 }, uFlashColor: { value: new THREE.Color(1, 0.55, 0.4) },
+    // a slight warm cast: the post grade splits shadows toward blue, and a character should stay a
+    // warm focal point against the cold stone rather than drifting periwinkle with it
+    uTint: { value: new THREE.Color(1.07, 1.0, 0.88) },
     uRimDir: { value: new THREE.Vector3(0, 1, 0) }, uRimColor: { value: new THREE.Color(0, 0, 0) },
-    uAmbientGain: { value: 1.0 }, uDirectGain: { value: 1.0 }, uFloor: { value: 0.035 }, uEmissive: { value: 0.9 },
+    uGrade: { value: 0.8 }, uAmbientGain: { value: 1.6 }, uDirectGain: { value: 1.02 }, uFloor: { value: 0.1 }, uEmissive: { value: 0.9 },
     uHemiSky: { value: new THREE.Color() }, uHemiGround: { value: new THREE.Color() }, uDirColor: { value: new THREE.Color() }, uDirDir: { value: new THREE.Vector3(0, 1, 0) },
     uPtPos: { value: Array.from({ length: MAX_POINTS }, () => new THREE.Vector4(0, 0, 0, 1)) }, uPtCol: { value: Array.from({ length: MAX_POINTS }, () => new THREE.Vector3()) },
     uSpPos: { value: Array.from({ length: MAX_SPOTS }, () => new THREE.Vector4(0, 0, 0, 1)) }, uSpCol: { value: Array.from({ length: MAX_SPOTS }, () => new THREE.Vector3()) },
@@ -85,8 +90,12 @@ function makeSpriteMaterial(texture, fog) {
         // fake normal: faces the camera, tilts up, and curves left/right across the sprite
         float sx = (uFlip > 0.5 ? 1.0 - vUv.x : vUv.x) - 0.5;
         vec3 N = normalize(uForward * 1.0 + vec3(0.0, 0.62, 0.0) + uRight * sx * 1.1);
-        vec3 irr = lightAt(vLit, N);
-        vec3 amb = mix(uHemiGround, uHemiSky, 0.5 + 0.5 * N.y);
+        // Sprite grading. The dungeon's fill is a deep blue hemisphere and the player's lantern is a
+        // cold blue-white spot; left alone they turn hand-picked pixel ramps into a blue statue.
+        // Pull the light a sprite receives part-way toward a warm neutral of the same luminance —
+        // the torches still model the form, but the artwork keeps its own local colour.
+        vec3 irr = grade(lightAt(vLit, N));
+        vec3 amb = grade(mix(uHemiGround, uHemiSky, 0.5 + 0.5 * N.y));
         vec3 direct = irr - amb;
         vec3 col = albedo * (amb * uAmbientGain + direct * uDirectGain) * 0.3183 + albedo * uFloor;
         // rim from the nearest torch on edge pixels facing it
@@ -98,7 +107,7 @@ function makeSpriteMaterial(texture, fog) {
         if (dot(edge, edge) > 0.0) {
           vec2 ld = vec2(dot(uRimDir, uRight), uRimDir.y);
           float rim = max(0.0, dot(normalize(edge), normalize(ld + vec2(0.0, 0.25))));
-          col += uRimColor * rim * rim * 0.9;
+          col += uRimColor * rim * rim * rim * 0.5;   // tight: a wide rim eats the silhouette
         }
         col += albedo * emissive * uEmissive;
         col *= uTint;
@@ -203,6 +212,7 @@ export class SpriteBillboard {
     this.root.add(this.cast);
     this.animator = new SpriteAnimator(sheet);
     this.flip = false;
+    this.depthBias = 0.22;
     this.squash = new THREE.Vector2(1, 1);
     this.opacity = 1; this.flash = 0;
     this.lights = null; this._lightCount = -1;
@@ -256,6 +266,10 @@ export class SpriteBillboard {
     const cx = camera.position.x - wp.x, cz = camera.position.z - wp.z;
     const yaw = Math.atan2(cx, cz);
     this.mesh.quaternion.setFromAxisAngle(this._tmp2.set(0, 1, 0), yaw);
+    // pull the quad a little toward the camera along the ground: a hero standing on the stairs (or
+    // any prop sharing his tile) must read in front of it, not be sliced through the waist
+    const inv = 1 / (Math.hypot(cx, cz) || 1);
+    this.mesh.position.set(cx * inv * this.depthBias, 0, cz * inv * this.depthBias);
     // square texels on screen: stretch by 1/cos(pitch)
     const fwd = this._tmp2.set(0, 0, -1).applyQuaternion(camera.quaternion);
     const pitch = Math.asin(Math.max(-1, Math.min(1, -fwd.y)));
@@ -295,7 +309,7 @@ export class SpriteBillboard {
       const dx = best.position.x - wp.x, dy = best.position.y - (wp.y + 0.7), dz = best.position.z - wp.z;
       const len = Math.hypot(dx, dy, dz) || 1;
       u.uRimDir.value.set(dx / len, dy / len, dz / len);
-      const k = Math.min(1, bestW * 0.16);
+      const k = Math.min(0.7, bestW * 0.085);
       u.uRimColor.value.set(best.color.r * k, best.color.g * k, best.color.b * k);
       this.updateCast(-dx, -dz, Math.hypot(dx, dz), best.position.y, k);
     } else { u.uRimColor.value.set(0, 0, 0); this.cast.visible = false; }
