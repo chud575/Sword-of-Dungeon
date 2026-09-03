@@ -9,6 +9,7 @@ import { TILE } from './core/constants.js';
 import { AudioEngine } from './core/audio.js';
 import { saveGame, loadSave, deleteSave, loadSettings } from './core/save.js';
 import { Hud } from './ui/hud.js';
+import { PanelCollapse } from './ui/collapse.js';
 import { MessageLog } from './ui/log.js';
 import { InventoryPanel } from './ui/inventory.js';
 import { Minimap } from './ui/minimap.js';
@@ -121,9 +122,10 @@ const app = {
   },
   save() { return game && !game.over ? saveGame(game) : false; },
 };
+const panelCollapse = new PanelCollapse(uiCtx);
 const menus = new Menus({ ...uiCtx, app, inventory, isAutoPaused: () => hud.autoPaused });
 const ui = {
-  hud, log, inventory, minimap, menus, tooltip, audio, settings, app,
+  hud, log, inventory, minimap, menus, tooltip, audio, settings, app, panelCollapse,
   panels: { hud, log, inventory, minimap, menus, tooltip },
   update(dt) { hud.update(dt); log.update(dt); inventory.update(dt); minimap.update(dt); tooltip.update(dt); menus.update(dt); },
 };

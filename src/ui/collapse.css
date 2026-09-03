@@ -1,0 +1,57 @@
+/* collapse: minimised HUD panels and their restore chips.
+   Each chip sits in the same screen corner as the panel it replaces, so the HUD keeps its layout
+   language when pieces are hidden. */
+
+.panel.collapsible { transition: opacity .18s var(--ease), transform .18s var(--ease); }
+
+/* The chevron handle: a small gold caret in the panel's top-right, out of the content's way. */
+.collapse-handle {
+  position: absolute; top: 2px; right: 2px; z-index: 3;
+  width: 1.15rem; height: 1.15rem; padding: 0; margin: 0;
+  display: grid; place-items: center;
+  background: transparent; border: 0; cursor: pointer;
+  opacity: 0; transition: opacity .15s var(--ease);
+}
+.panel.collapsible:hover .collapse-handle,
+.collapse-handle:focus-visible { opacity: 1; }
+.collapse-handle .chev {
+  width: .42rem; height: .42rem;
+  border-right: 1.5px solid var(--gold); border-bottom: 1.5px solid var(--gold);
+  transform: rotate(-135deg) translate(-1px, -1px);
+}
+.collapse-handle:hover .chev { border-color: var(--gold-bright); }
+.collapse-handle:focus-visible { outline: 1px solid var(--gold); outline-offset: 1px; opacity: 1; }
+
+/* A collapsed panel is removed from the layout; its chip takes over.
+   `!important` is deliberate: the panels set their own layout through id selectors
+   (`#log { display: flex }`, `#hud-hotbar`, `#hud-quick`), which outrank any class
+   selector here. This one utility rule has to win over all of them. */
+.panel.is-collapsed { display: none !important; }
+
+/* Restore chips — compact, same ornate language, anchored per panel. */
+.collapsed-chip {
+  display: none; align-items: center; gap: .4rem;
+  padding: .3rem .58rem; cursor: pointer;
+  font-family: var(--font-display); font-size: .62rem; letter-spacing: .16em;
+  text-transform: uppercase; color: var(--gold);
+  background: var(--panel-bg); border: 1px solid var(--panel-border);
+  line-height: 1; white-space: nowrap;
+}
+.collapsed-chip.show { display: inline-flex; }
+.collapsed-chip:hover { color: var(--gold-bright); border-color: var(--gold-dim); }
+.collapsed-chip:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+.collapsed-chip .ico { font-size: .8rem; line-height: 1; opacity: .9; }
+
+#hud-card-chip { top: 16px; left: 16px; }
+#hud-depth-chip { top: 14px; left: 50%; transform: translateX(-50%); }
+#hud-hotbar-chip { bottom: 16px; left: 50%; transform: translateX(-50%); }
+#hud-quick-chip { bottom: 16px; right: 16px; }
+#log-chip { bottom: 16px; left: 16px; }
+#minimap-chip { top: 16px; right: 16px; }
+
+/* When the character card is minimised its chip sits top-left; the status chips row follows it. */
+#hud-card.is-collapsed ~ #hud-status { top: 3.1rem; }
+
+@media (prefers-reduced-motion: reduce) {
+  .panel.collapsible, .collapse-handle { transition: none; }
+}
