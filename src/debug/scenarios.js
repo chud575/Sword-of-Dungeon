@@ -3,6 +3,7 @@
 import { TILE } from '../core/constants.js';
 import { Level } from '../world/level.js';
 import { MONSTER_TYPES } from '../game/monsters.js';
+import { addHallOfFameEntry, getHallOfFame } from '../core/save.js';
 
 /** Walkable tiles adjacent to (x,y) (8-way), nearest-first order as given by DIRS8. */
 function neighbours(level, x, y, { empty = true } = {}) {
@@ -473,12 +474,38 @@ export const uiScenarios = {
   async 'minimap'(ctx) {
     const g = midRun(ctx, { depth: 4 });
     g.revealAll();
-    const p = g.player;
-    const spots = neighbours(g.level, p.x, p.y);
+    const p = g.player, lv = g.level;
+    // leave the far third of the level unexplored so the map reads as a work in progress
+    const farSide = p.x < lv.width / 2 ? 1 : -1;
+    for (let y = 0; y < lv.height; y++) for (let x = 0; x < lv.width; x++) { const far = farSide > 0 ? x > lv.width * 0.72 : x < lv.width * 0.28; if (far) lv.explored[y * lv.width + x] = 0; }
+    lv.lit = false;
+    const spots = neighbours(lv, p.x, p.y);
     ['werebear', 'mercenary'].forEach((t, i) => { const s = spots[i]; if (s) { const m = g.spawnMonster(t, s.x, s.y, { depth: 4, state: 'hunt' }); if (m) freeze(m); } });
+    for (const m of lv.monsters) if (m.state !== 'hunt') m.state = 'wander';
+    // a beacon and a remembered monster that slipped back into the dark
+    const b = lv.randomFloorTile(g.rngs.world, { minDist: { x: p.x, y: p.y, d: 6 }, filter: (x, y) => lv.isExplored(x, y) });
+    if (b && lv.isExplored(b.x, b.y)) lv.beacon = { x: b.x, y: b.y };
+    const ghost = lv.randomFloorTile(g.rngs.world, { minDist: { x: p.x, y: p.y, d: 10 }, filter: (x, y) => lv.isExplored(x, y) });
+    if (ghost && lv.isExplored(ghost.x, ghost.y)) ctx.ui.minimap.seen.set('ghost', { x: ghost.x, y: ghost.y, t: ctx.ui.minimap.time - 4, hunt: false });
     ctx.ui.minimap.toggle(true);
     ctx.ui.minimap.big = true; ctx.ui.minimap.dirty = true;
-    ctx.step(500);
+    ctx.step(600);
+  },
+
+  /** Hover tooltip over a hunting monster: threat meter, combat maths and a lore line. */
+  async 'tooltip'(ctx) {
+    const g = midRun(ctx, { depth: 6 });
+    const p = g.player, lv = g.level;
+    g.updateFov();
+    const spots = ringSpots(g, 16).filter((s) => lv.isVisible(s.x, s.y));
+    spots.sort((a, b) => (Math.abs(b.dx) + Math.abs(b.dy)) - (Math.abs(a.dx) + Math.abs(a.dy)) || b.dy - a.dy);
+    const s = spots[0] || neighbours(lv, p.x, p.y)[0];
+    const m = s ? g.spawnMonster('dark-warrior', s.x, s.y, { depth: 10, state: 'hunt' }) : null;
+    if (m) { freeze(m); m.facing = { dx: Math.sign(p.x - m.x), dy: Math.sign(p.y - m.y) }; m.hp = Math.max(1, Math.round(m.maxHp * 0.7)); }
+    p.statusEffects = p.statusEffects.filter((e) => e.type !== 'shield'); // show real damage numbers
+    ctx.step(2200);
+    if (m) ctx.ui.tooltip.showAt({ x: m.x, y: m.y });
+    ctx.step(200);
   },
 
   /** Death screen: slain by a war lord deep down, with stats and the last-30-seconds timeline. */
@@ -487,6 +514,7 @@ export const uiScenarios = {
     const p = g.player;
     const s = neighbours(g.level, p.x, p.y)[0];
     const m = s ? g.spawnMonster('war-lord', s.x, s.y, { depth: 11, state: 'hunt' }) : null;
+    g.state.elapsed = 1534; g.stats.treasures = 9; g.stats.steps = 2310; g.stats.goldSacrificed = 640;
     g.log('YOU ARE ATTACKED BY AN EXPER WAR LORD', 'danger');
     g.log('HITS: 9 CLANG', 'combat'); g.log('HITS: 2 SLASH', 'combat');
     ctx.step(200);
@@ -510,6 +538,7 @@ export const uiScenarios = {
   /** Pause menu over the dungeon. */
   async 'pause'(ctx) {
     const g = midRun(ctx);
+    g.state.elapsed = 743;
     ctx.step(300);
     g.setPaused(true);
     ctx.step(100);
@@ -517,6 +546,40 @@ export const uiScenarios = {
 
   async 'help'(ctx) { midRun(ctx); ctx.step(200); ctx.ui.menus.showHelp(); ctx.step(100); },
   async 'settings'(ctx) { midRun(ctx); ctx.step(200); ctx.ui.menus.showSettings(); ctx.step(100); },
+
+  /** New quest screen: difficulty cards, name and seed, over the title backdrop. */
+  async 'new-game'(ctx) {
+    ctx.reset();
+    ctx.ui.app.toTitle();
+    ctx.step(200);
+    ctx.ui.menus.showNewGame({});
+    ctx.step(100);
+  },
+
+  /** Hall of fame with a believable roster (seeded into this browser's table). */
+  async 'hall-of-fame'(ctx) {
+    ctx.reset();
+    const heroes = [
+      ['Aldric', 'classic', 'victory', 18, 11, 212000, 12, 184, 3610, null, 1983],
+      ['Maeve', 'standard', 'victory', 17, 10, 96400, 10, 91, 2140, null, 42],
+      ['Brannoc', 'nightmare', 'slain', 14, 9, 41200, 8, 77, 1820, 'demon', 7],
+      ['Ysolde', 'classic', 'slain', 12, 8, 33800, 7, 58, 1533, 'war lord', 314],
+      ['Tobin', 'story', 'victory', 16, 9, 30100, 9, 64, 2980, null, 8],
+      ['Ranulf', 'standard', 'timeout', 15, 8, 22500, 7, 49, 2760, null, 99],
+      ['Ceridwen', 'classic', 'slain', 9, 6, 12700, 5, 31, 990, 'werebear', 2024],
+      ['Osric', 'nightmare', 'slain', 6, 4, 5400, 4, 17, 610, 'dark warrior', 1],
+    ];
+    const have = new Set(getHallOfFame().map((e) => e.name + ':' + e.seed));
+    for (const [name, difficulty, outcome, deepest, level, xp, , kills, elapsed, killer, seed] of heroes) {
+      if (have.has(name + ':' + seed)) continue; // localStorage persists between runs: seed once
+      const victory = outcome === 'victory';
+      addHallOfFameEntry({ score: xp + 1000 * deepest + (victory ? 25000 : 0), xp, level, deepest, kills, elapsed, seed, difficulty, victory, cause: victory ? null : outcome, killer }, { name, daily: seed === 42 });
+    }
+    ctx.ui.app.toTitle();
+    ctx.step(200);
+    ctx.ui.menus.showHall();
+    ctx.step(100);
+  },
 
   /** HUD under pressure: 3 hits left, the Sword's clock in the red, statuses, a hunter next door. */
   async 'hud-low-hp'(ctx) {
