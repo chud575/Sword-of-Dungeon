@@ -1,5 +1,8 @@
-// Message log: categorised colours, the last lines fade after a while, hover (or click) to expand
-// the scrollable history. Replays the game's stored log on start/load.
+// Message log: categorised colours with a glowing category mark, the newest line slides in with a
+// gold wash, older lines dim after a while; hover (or click to pin) expands the scrollable history.
+// Replays the game's stored log on start/load. Styles live in ./hud.css (imported by hud.js).
+import { icon } from './icons.js';
+
 const MAX_LINES = 120;
 const FADE_AFTER = 9; // seconds before a line dims
 
@@ -8,12 +11,16 @@ export class MessageLog {
   constructor(ctx) {
     this.ctx = ctx; this.bus = ctx.bus;
     this.el = document.createElement('div');
-    this.el.className = 'panel hud'; this.el.id = 'log';
-    this.el.innerHTML = '<div class="corners"><i></i><i></i><i></i><i></i></div><div class="lines"></div><div class="hint">hover to expand · click to pin</div>';
+    this.el.className = 'panel hud ornate'; this.el.id = 'log';
+    this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div><div class="lines"></div>
+      <div class="foot"><span class="pin">${icon('pin')}<span class="pin-t">Hover to expand · click to pin</span></span><span class="cnt"></span></div>`;
     this.lines = this.el.querySelector('.lines');
-    this.el.addEventListener('click', () => this.el.classList.toggle('expanded'));
+    this.pinText = this.el.querySelector('.pin-t');
+    this.count = this.el.querySelector('.foot .cnt');
+    this.el.addEventListener('click', () => { const on = this.el.classList.toggle('expanded'); this.pinText.textContent = on ? 'Pinned · click to release' : 'Hover to expand · click to pin'; });
     ctx.root.appendChild(this.el);
-    this.entries = []; // {el, time}
+    this.entries = []; // {el, time, old}
+    this.total = 0;
     this.unsub = [
       this.bus.on('log', (e) => this.add(e)),
       this.bus.on('game:start', () => this.replay()),
@@ -22,29 +29,35 @@ export class MessageLog {
 
   /** Rebuild from the current game's stored log. */
   replay() {
-    this.lines.innerHTML = ''; this.entries = [];
+    this.lines.innerHTML = ''; this.entries = []; this.total = 0;
     const g = this.ctx.getGame(); if (!g) return;
-    for (const e of g.state.log.slice(-40)) this.add(e, true);
+    const all = g.state.log;
+    this.total = Math.max(0, all.length - Math.min(40, all.length));
+    for (const e of all.slice(-40)) this.add(e, true);
   }
 
   add(entry, silent = false) {
     const g = this.ctx.getGame();
     const now = g ? g.state.time : 0;
+    const time = entry.time ?? now;
     const line = document.createElement('div');
     const shout = /^[A-Z0-9 !'.?:,\-()]+$/.test(entry.text) && entry.text.length < 32;
-    line.className = `line k-${entry.kind || 'info'}${shout ? ' shout' : ''}`;
-    line.innerHTML = `<span class="t">${fmt(entry.time ?? now)}</span>${escape(entry.text)}`;
+    line.className = `line k-${entry.kind || 'info'}${shout ? ' shout' : ''}${silent ? '' : ' fresh'}`;
+    line.innerHTML = `${escape(entry.text)}<span class="t">${fmt(time)}</span>`;
     this.lines.appendChild(line);
-    this.entries.push({ el: line, time: entry.time ?? now });
-    if (silent && now - (entry.time ?? 0) > FADE_AFTER) line.classList.add('old');
+    const rec = { el: line, time, old: false };
+    this.entries.push(rec);
+    if (silent && now - time > FADE_AFTER) { rec.old = true; line.classList.add('old'); }
     while (this.entries.length > MAX_LINES) { const e = this.entries.shift(); e.el.remove(); }
+    this.total++;
+    this.count.textContent = `${this.total} ${this.total === 1 ? 'entry' : 'entries'}`;
     this.lines.scrollTop = this.lines.scrollHeight;
   }
 
   update() {
     const g = this.ctx.getGame(); if (!g) return;
     const now = g.state.time;
-    for (const e of this.entries) { const old = now - e.time > FADE_AFTER; if (old !== e.old) { e.old = old; e.el.classList.toggle('old', old); } }
+    for (const e of this.entries) { const old = now - e.time > FADE_AFTER; if (old !== e.old) { e.old = old; e.el.classList.toggle('old', old); if (old) e.el.classList.remove('fresh'); } }
   }
 
   dispose() { for (const u of this.unsub) u(); this.el.remove(); }

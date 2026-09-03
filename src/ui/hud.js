@@ -1,15 +1,20 @@
-// HUD: character card (HP with damage trail, XP, gold count-up), depth banner + Sword countdown,
-// spell/item hotbar with counts and hotkeys, status-effect chips, quick buttons and the auto-pause
-// banner. Pure DOM; reads the Game on update() and reacts to bus events for one-shot animations.
-import { SPELL_TABLE, ITEM_TABLE } from '../game/items.js';
+// HUD: character card (level medal, HP gauge with damage trail, XP gauge, gold count-up), depth
+// banner + the Sword's countdown, spell/item hotbar with procedural icons, counts and hotkeys,
+// status-effect chips, quick buttons and the centre banner (auto-pause). Pure DOM: reads the Game
+// on update() and reacts to bus events for one-shot animations. Styles live in ./hud.css.
+import './hud.css';
+import { SPELL_TABLE } from '../game/items.js';
 import { xpForLevel } from '../core/constants.js';
 import { formatTime } from '../core/save.js';
+import { icon } from './icons.js';
 
 const SPELL_KEYS = { teleport: '1', shield: '2', regeneration: '3', invisibility: '4', light: '5', drift: '6' };
+const SPELL_SHORT = { teleport: 'Teleport', shield: 'Shield', regeneration: 'Regen', invisibility: 'Unseen', light: 'Light', drift: 'Drift' };
 const BANDS = [[5, 'The Upper Halls'], [12, 'The Cold Deep'], [18, 'The Black Roots'], [Infinity, "Umla's Domain"]];
 
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
-const corners = () => '<div class="corners"><i></i><i></i><i></i><i></i></div>';
+const corners = () => '<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div>';
+const fmtNum = (n) => Math.round(n).toLocaleString('en-US');
 
 export class Hud {
   /**
@@ -22,70 +27,83 @@ export class Hud {
     this.levelEnterTime = 0;
     this.bannerTimer = 0;
     this.unsub = [];
+    this.cache = {};
     this.build();
     this.bind();
   }
 
   build() {
     const root = this.ctx.root;
-    // character card
-    this.card = el('div', 'panel hud', corners() + `
-      <div class="head"><div class="medal"><span class="lv num">1</span><span class="lvl">LVL</span></div>
-        <div class="who"><div class="name">Warrior</div><div class="sub"><span>Skill <b class="skill-v num">8</b></span><span>Slain <b class="kills num">0</b></span></div></div></div>
-      <div class="bar hp"><div class="trail"></div><div class="fill"></div><div class="txt"><span class="cap">Hits</span><span class="hp-t num">12 / 12</span></div></div>
-      <div class="bar xp"><div class="fill"></div></div>
-      <div class="row"><span class="xp-t"><span class="label">Exp</span> <span class="num xp-v">0</span> <small style="color:var(--parchment-faint)">/ <span class="num xp-next">200</span></small></span>
-        <span class="gold"><span class="num gold-v">0</span><small>gp</small></span></div>`);
+    // --- character card
+    this.card = el('div', 'panel hud ornate', corners() + `<div class="flash"></div>
+      <div class="head">
+        <div class="medal"><span class="lv num">1</span><span class="lvl">Level</span><span class="ring"></span></div>
+        <div class="who"><div class="name">Warrior</div>
+          <div class="sub"><span title="Battle skill">${icon('skill')}Skill <b class="skill-v">8</b></span><span title="Monsters slain">${icon('skull')}Slain <b class="kills">0</b></span></div></div>
+      </div>
+      <div class="gauge hp"><div class="frame"><div class="trail"></div><div class="fill"></div><div class="ticks"></div>
+        <div class="txt"><span class="cap">Hits</span><span class="val"><span class="hp-t">12</span> <small>/ <span class="hp-m">12</span></small></span></div></div><i class="end l"></i><i class="end r"></i></div>
+      <div class="gauge xp"><div class="lab"><span class="cap-l">Experience</span><span class="num"><span class="xp-v">0</span> <small>/ <span class="xp-next">200</span></small></span></div>
+        <div class="frame"><div class="fill"></div></div><i class="end l"></i><i class="end r"></i></div>
+      <div class="purse"><span class="gold" title="Gold carried — sacrifice it at a temple for experience">${icon('coin')}<span class="num gold-v">0</span><small>gold</small></span>
+        <span class="next">Next level <b class="xp-togo">200</b></span></div>`);
     this.card.id = 'hud-card';
     root.appendChild(this.card);
-    this.q = (s) => this.card.querySelector(s);
-    // status chips
+    this.q = (s) => this.cache[s] || (this.cache[s] = this.card.querySelector(s));
+    // --- status chips
     this.status = el('div', 'hud'); this.status.id = 'hud-status'; root.appendChild(this.status);
-    // depth + timer
-    this.depth = el('div', 'panel hud', corners() + `
-      <div class="depth">DUNGEON LEVEL <span class="n num">1</span></div><div class="band">The Upper Halls</div><div class="seed"></div>
-      <div class="timer"><div class="cap">Umla's clock</div><div class="t num">33:20</div><div class="fuse"><div class="f"></div></div></div>`);
+    // --- depth + Sword timer
+    this.depth = el('div', 'panel hud ornate', corners() + `
+      <div class="depth">${icon('stairs')}<span>Dungeon level</span><span class="n num">1</span></div>
+      <div class="band">The Upper Halls</div><div class="seed"></div>
+      <div class="timer"><div class="cap">Umla's clock</div><div class="clock">${icon('hourglass')}<div class="t num">33:20</div></div><div class="fuse"><div class="f"></div></div></div>`);
     this.depth.id = 'hud-depth'; root.appendChild(this.depth);
-    // hotbar
-    this.hotbar = el('div', 'panel hud'); this.hotbar.id = 'hud-hotbar'; root.appendChild(this.hotbar);
+    this.dq = { n: this.depth.querySelector('.n'), band: this.depth.querySelector('.band'), seed: this.depth.querySelector('.seed'), t: this.depth.querySelector('.timer .t'), cap: this.depth.querySelector('.timer .cap'), fuse: this.depth.querySelector('.fuse .f') };
+    // --- hotbar
+    this.hotbar = el('div', 'panel hud ornate'); this.hotbar.id = 'hud-hotbar'; root.appendChild(this.hotbar);
     this.slots = {};
-    const mk = (id, name, key, color, action, isItem) => {
-      const s = el('button', 'slot' + (isItem ? ' item-slot' : ''), `<span class="key">${key}</span><span class="rune${isItem ? ' item' : ''}"></span><span class="nm">${name}</span><span class="cnt"></span>`);
+    const mk = (id, name, key, color, action, ico) => {
+      const s = el('button', 'slot', `<span class="key">${key}</span><span class="glyph">${icon(ico)}</span><span class="nm">${name}</span><span class="cnt"></span>`);
       s.style.setProperty('--c', color); s.title = name; s.dataset.id = id;
-      s.addEventListener('click', () => { this.bus.emit('sfx:ui', { kind: 'click' }); this.bus.emit('input:action', action); s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash'); });
+      s.addEventListener('click', () => { this.bus.emit('sfx:ui', { kind: 'click' }); this.bus.emit('input:action', action); this.flash(id); });
       s.addEventListener('mouseenter', () => this.bus.emit('sfx:ui', { kind: 'hover' }));
-      this.hotbar.appendChild(s); this.slots[id] = s; return s;
+      this.hotbar.appendChild(s); this.slots[id] = s;
+      return s;
     };
-    const SHORT = { teleport: 'Teleport', shield: 'Shield', regeneration: 'Regen', invisibility: 'Unseen', light: 'Light', drift: 'Drift' };
-    for (const [type, sp] of Object.entries(SPELL_TABLE)) { const s = mk(type, SHORT[type] || sp.name, SPELL_KEYS[type], `var(--sp-${type})`, { action: 'cast', spell: type }, false); s.title = `${sp.name} — ${sp.desc}`; }
+    for (const [type, sp] of Object.entries(SPELL_TABLE)) { const s = mk(type, SPELL_SHORT[type] || sp.name, SPELL_KEYS[type], `var(--sp-${type})`, { action: 'cast', spell: type }, type); s.title = `${sp.name} — ${sp.desc}`; }
     this.hotbar.appendChild(el('div', 'sep'));
-    mk('potion', 'Potion', 'Q', '#ff6b8a', { action: 'potion' }, true);
-    mk('beacon', 'Beacon', '+', 'var(--mm-beacon)', { action: 'beacon' }, true);
+    mk('potion', 'Potion', 'Q', '#ff6b8a', { action: 'potion' }, 'potion').title = 'Healing Potion — heals 20·rnd + 3·depth hits';
+    mk('beacon', 'Beacon', '+', 'var(--mm-beacon)', { action: 'beacon' }, 'beacon').title = 'Beacon — place it: teleports arrive here and monsters cannot see you on it';
     this.hotbar.appendChild(el('div', 'sep'));
-    mk('toggleLight', 'Lamp', 'O', 'var(--sp-light)', { action: 'toggleLight' }, true);
-    mk('bury', 'Bury', '⇧B', 'var(--loot)', { action: 'bury' }, true);
-    mk('wait', 'Rest', 'Z', 'var(--info)', { action: 'wait' }, true);
-    // quick buttons
-    this.quick = el('div', 'panel hud'); this.quick.id = 'hud-quick'; root.appendChild(this.quick);
+    mk('toggleLight', 'Lamp', 'O', 'var(--sp-light)', { action: 'toggleLight' }, 'lamp').title = 'Lamp — shutter or open your Light spell';
+    mk('bury', 'Bury', '⇧B', 'var(--loot)', { action: 'bury' }, 'bury').title = 'Bury gold here — safe from thieves, dig it up later';
+    mk('wait', 'Rest', 'Z', 'var(--info)', { action: 'wait' }, 'wait').title = 'Rest a moment (heals slowly outside a fight)';
+    // --- quick buttons
+    this.quick = el('div', 'panel hud ornate'); this.quick.id = 'hud-quick'; root.appendChild(this.quick);
     const qb = (id, name, key, action) => { const b = el('button', 'qb', `<span>${name}</span><kbd>${key}</kbd>`); b.dataset.id = id; b.addEventListener('click', () => { this.bus.emit('sfx:ui', { kind: 'click' }); this.bus.emit('input:action', action); }); this.quick.appendChild(b); return b; };
     this.exploreBtn = qb('explore', 'Explore', 'X', { action: 'explore' });
     qb('minimap', 'Map', 'M', { action: 'minimap' });
     qb('inventory', 'Inventory', 'Tab', { action: 'inventory' });
     qb('help', 'Help', '?', { action: 'help' });
     qb('pause', 'Menu', 'Esc', { action: 'pause' });
-    // banner
-    this.banner = el('div', 'panel hud', corners() + '<div class="mark">!</div><div class="why"></div><div class="hint"></div>');
+    // --- centre banner
+    this.banner = el('div', 'panel hud ornate', corners() + '<div class="mark">!</div><div class="why"></div><div class="hint"></div>');
     this.banner.id = 'hud-banner'; root.appendChild(this.banner);
+    // the log squeezes against the hotbar on narrow windows: publish the hotbar's width
+    this.measure();
+    if (typeof ResizeObserver !== 'undefined') { this.ro = new ResizeObserver(() => this.measure()); this.ro.observe(this.hotbar); }
   }
+
+  measure() { const w = this.hotbar.offsetWidth; if (w) this.ctx.root.style.setProperty('--hotbar-w', `${w}px`); }
 
   bind() {
     const on = (n, f) => this.unsub.push(this.bus.on(n, f));
-    on('player:hp', (p) => { if (p.delta < 0) { this.card.classList.remove('hurt'); void this.card.offsetWidth; this.card.classList.add('hurt'); } });
-    on('player:xp', (p) => { if (p.leveledUp) { const m = this.q('.medal'); m.classList.remove('levelup'); void m.offsetWidth; m.classList.add('levelup'); } });
-    on('player:gold', (p) => { if (p.delta > 0) { const g = this.q('.gold'); g.classList.remove('bump'); void g.offsetWidth; g.classList.add('bump'); } });
+    on('player:hp', (p) => { if (p.delta < 0) retrigger(this.card, 'hurt'); });
+    on('player:xp', (p) => { if (p.leveledUp) retrigger(this.q('.medal'), 'levelup'); });
+    on('player:gold', (p) => { if (p.delta > 0) retrigger(this.q('.gold'), 'bump'); });
     on('spell:cast', (p) => this.flash(p.spell));
     on('item:used', (p) => this.flash(p.item && p.item.type));
-    on('level:enter', () => { const g = this.ctx.getGame(); this.levelEnterTime = g ? g.state.time : 0; this.autoPaused = false; });
+    on('level:enter', () => { const g = this.ctx.getGame(); this.levelEnterTime = g ? g.state.time : 0; this.autoPaused = false; retrigger(this.depth, 'enter'); });
     on('monster:seen', (p) => this.onMonsterSeen(p));
     on('game:paused', (p) => { if (!p.paused && this.autoPaused) { this.autoPaused = false; this.hideBanner(); } }); // e.g. Esc resumes an auto-pause: drop the sticky banner
     on('game:start', () => { this.autoPaused = false; this.disp.hp = null; this.disp.trail = null; this.refreshStatic(); });
@@ -95,7 +113,7 @@ export class Hud {
     window.addEventListener('pointerdown', resume);
   }
 
-  flash(id) { const s = this.slots[id]; if (!s) return; s.classList.remove('flash'); void s.offsetWidth; s.classList.add('flash'); }
+  flash(id) { const s = this.slots[id]; if (s) retrigger(s, 'flash'); }
 
   /** Auto-pause when a new monster comes into view (setting), with a "!" banner. */
   onMonsterSeen({ entity, description }) {
@@ -127,97 +145,102 @@ export class Hud {
   refreshStatic() {
     const g = this.ctx.getGame(); if (!g) return;
     this.q('.name').textContent = this.settings.playerName || 'Warrior';
-    this.depth.querySelector('.seed').textContent = `${g.balance.name.toUpperCase()} · SEED ${g.seed}${g.daily ? ' · DAILY' : ''}`;
+    this.dq.seed.textContent = `${g.balance.name.toUpperCase()} · SEED ${g.seed}${g.daily ? ' · DAILY' : ''}`;
   }
 
   update(dt) {
     const g = this.ctx.getGame(); if (!g) return;
     const p = g.player, D = this.disp;
-    // --- HP with damage trail
+    // --- HP with damage trail (the pale trail lingers, then slides down to the new value)
     if (D.hp === null) { D.hp = p.hp; D.trail = p.hp; }
     const hpTarget = Math.max(0, p.hp);
     if (hpTarget > D.hp) { D.hp = hpTarget; D.trail = Math.max(D.trail, hpTarget); D.trailDelay = 0; }
     else if (hpTarget < D.hp) { D.hp = hpTarget; D.trailDelay = 0.45; }
     if (D.trail > D.hp) { if (D.trailDelay > 0) D.trailDelay -= dt; else D.trail += (D.hp - D.trail) * Math.min(1, dt * 4); if (D.trail - D.hp < 0.2) D.trail = D.hp; }
     const max = Math.max(1, p.maxHp);
-    const hpBar = this.q('.bar.hp');
-    hpBar.querySelector('.fill').style.transform = `scaleX(${Math.min(1, D.hp / max)})`;
-    hpBar.querySelector('.trail').style.transform = `scaleX(${Math.min(1, D.trail / max)})`;
-    hpBar.classList.toggle('low', p.hp / max < 0.3);
-    this.q('.hp-t').textContent = `${p.hp} / ${p.maxHp}`;
+    this.q('.gauge.hp .fill').style.transform = `scaleX(${Math.min(1, D.hp / max)})`;
+    this.q('.gauge.hp .trail').style.transform = `scaleX(${Math.min(1, D.trail / max)})`;
+    this.card.classList.toggle('low', p.hp / max < 0.3);
+    setText(this.q('.hp-t'), String(p.hp)); setText(this.q('.hp-m'), String(p.maxHp));
     // --- XP
     const lo = xpForLevel(p.level), hi = xpForLevel(p.level + 1);
     D.xp += (p.xp - D.xp) * Math.min(1, dt * 5); if (Math.abs(p.xp - D.xp) < 1) D.xp = p.xp;
-    this.q('.bar.xp .fill').style.transform = `scaleX(${Math.max(0, Math.min(1, (D.xp - lo) / Math.max(1, hi - lo)))})`;
-    this.q('.xp-v').textContent = Math.round(D.xp).toLocaleString('en-US');
-    this.q('.xp-next').textContent = hi.toLocaleString('en-US');
-    this.q('.lv').textContent = String(p.level);
-    this.q('.skill-v').textContent = String(p.skill);
-    this.q('.kills').textContent = String(p.kills);
+    this.q('.gauge.xp .fill').style.transform = `scaleX(${Math.max(0, Math.min(1, (D.xp - lo) / Math.max(1, hi - lo)))})`;
+    setText(this.q('.xp-v'), fmtNum(D.xp));
+    setText(this.q('.xp-next'), fmtNum(hi));
+    setText(this.q('.xp-togo'), fmtNum(Math.max(0, hi - p.xp)));
+    setText(this.q('.lv'), String(p.level));
+    setText(this.q('.skill-v'), String(p.skill));
+    setText(this.q('.kills'), String(p.kills));
     // --- gold count-up
     D.gold += (p.gold - D.gold) * Math.min(1, dt * 6); if (Math.abs(p.gold - D.gold) < 0.6) D.gold = p.gold;
-    this.q('.gold-v').textContent = String(Math.round(D.gold));
+    setText(this.q('.gold-v'), fmtNum(D.gold));
     // --- depth + timer
     const d = g.depth;
-    this.depth.querySelector('.n').textContent = d === 0 ? '—' : String(d);
-    this.depth.querySelector('.band').textContent = d === 0 ? 'The Surface' : (BANDS.find((b) => d <= b[0]) || BANDS[3])[1];
+    setText(this.dq.n, d === 0 ? '—' : String(d));
+    setText(this.dq.band, d === 0 ? 'The Surface' : (BANDS.find((b) => d <= b[0]) || BANDS[3])[1]);
     const q = g.state.quest;
     const showTimer = q.timer !== null && q.timer !== undefined;
     this.depth.classList.toggle('sword', showTimer);
     if (showTimer) {
       const rem = Math.max(0, q.timer), total = q.timerTotal || g.balance.swordTimer || 2000;
-      this.depth.querySelector('.timer .t').textContent = formatTime(rem);
-      this.depth.querySelector('.fuse .f').style.transform = `scaleX(${Math.max(0, Math.min(1, rem / total))})`;
+      setText(this.dq.t, formatTime(rem));
+      this.dq.fuse.style.transform = `scaleX(${Math.max(0, Math.min(1, rem / total))})`;
       this.depth.classList.toggle('low', rem < 300);
-      this.depth.querySelector('.timer .cap').textContent = p.hasSword ? "Umla's clock — climb!" : 'The sword was stolen — the clock still runs';
+      setText(this.dq.cap, p.hasSword ? "Umla's clock — climb!" : 'The sword was stolen — the clock still runs');
     } else this.depth.classList.remove('low');
     // --- hotbar counts
     for (const type of Object.keys(SPELL_TABLE)) {
-      const s = this.slots[type], n = p.spells[type] || 0;
-      s.querySelector('.cnt').textContent = n ? String(n) : '';
-      s.classList.toggle('empty', n === 0);
+      const n = p.spells[type] || 0;
       const st = p.statusEffects.find((e) => e.type === (type === 'invisibility' ? 'invisible' : type));
-      s.classList.toggle('active', !!st && (type !== 'light' || st.on));
+      this.setSlot(type, n, !!st && (type !== 'light' || st.on));
     }
-    this.slots.potion.querySelector('.cnt').textContent = p.inventory.potion ? String(p.inventory.potion) : '';
-    this.slots.potion.classList.toggle('empty', !p.inventory.potion);
-    this.slots.beacon.querySelector('.cnt').textContent = p.inventory.beacon ? String(p.inventory.beacon) : '';
-    this.slots.beacon.classList.toggle('empty', !p.inventory.beacon);
+    this.setSlot('potion', p.inventory.potion || 0, false);
+    this.setSlot('beacon', p.inventory.beacon || 0, false);
     const light = p.statusEffects.find((e) => e.type === 'light');
-    this.slots.toggleLight.classList.toggle('empty', !light);
-    this.slots.toggleLight.classList.toggle('active', !!(light && light.on));
-    this.slots.bury.classList.toggle('empty', p.gold <= 0);
+    this.setSlot('toggleLight', light ? -1 : 0, !!(light && light.on));
+    this.setSlot('bury', p.gold > 0 ? -1 : 0, false);
     // --- status chips
     this.updateStatus(g);
     if (this.bannerTimer > 0) { this.bannerTimer -= dt; if (this.bannerTimer <= 0) this.hideBanner(); }
+  }
+
+  /** count: >0 shows a badge, -1 = available without a badge, 0 = empty/greyed. */
+  setSlot(id, count, active) {
+    const s = this.slots[id];
+    setText(s.querySelector('.cnt'), count > 0 ? String(count) : '');
+    s.classList.toggle('empty', count === 0);
+    s.classList.toggle('active', !!active);
   }
 
   updateStatus(g) {
     const p = g.player;
     const chips = [];
     for (const st of p.statusEffects) {
-      if (st.type === 'shield') chips.push(['shield', 'Shielded', 'var(--sp-shield)', 'Takes no damage until the fight ends']);
-      else if (st.type === 'regeneration') chips.push(['regeneration', `Regeneration${st.stacks > 1 ? ' ×' + st.stacks : ''}`, 'var(--sp-regeneration)', 'Healing faster on this level']);
-      else if (st.type === 'invisible') chips.push(['invisible', 'Unseen', 'var(--sp-invisibility)', 'Monsters cannot track you']);
-      else if (st.type === 'light') chips.push(['light', st.on ? 'Light' : 'Light (off)', 'var(--sp-light)', 'Sight radius doubled; assassins revealed', !st.on]);
-      else if (st.type === 'drift') chips.push(['drift', 'Drift', 'var(--sp-drift)', 'Your next fall is gentle']);
+      if (st.type === 'shield') chips.push(['shield', 'Shielded', 'var(--sp-shield)', 'Takes no damage until the fight ends', false, 'shield']);
+      else if (st.type === 'regeneration') chips.push(['regeneration', `Regeneration${st.stacks > 1 ? ' ×' + st.stacks : ''}`, 'var(--sp-regeneration)', 'Healing faster on this level', false, 'regeneration']);
+      else if (st.type === 'invisible') chips.push(['invisible', 'Unseen', 'var(--sp-invisibility)', 'Monsters cannot track you', false, 'invisibility']);
+      else if (st.type === 'light') chips.push(['light', st.on ? 'Light' : 'Light (off)', 'var(--sp-light)', 'Sight radius doubled; assassins revealed', !st.on, 'light']);
+      else if (st.type === 'drift') chips.push(['drift', 'Drift', 'var(--sp-drift)', 'Your next fall is gentle', false, 'drift']);
     }
-    if (p.hasSword) chips.push(['sword', 'The Sword', 'var(--quest)', 'Any ambush steals it. Climb!']);
-    if (p.enchant > 0) chips.push(['enchant', `Weapon +${p.enchant}`, 'var(--combat)', '+1 damage per enchantment']);
-    if (p.maps.length) chips.push(['maps', `Maps: ${p.maps.map((m) => m).join(', ')}`, 'var(--magic)', 'Those levels will be lit on entry']);
-    if (g.playerOnTemple()) chips.push(['temple', 'Sanctuary', 'var(--loot)', 'Monsters ignore you; healing doubled']);
+    if (p.hasSword) chips.push(['sword', 'The Sword', 'var(--quest)', 'Any ambush steals it. Climb!', false, 'sword']);
+    if (p.enchant > 0) chips.push(['enchant', `Weapon +${p.enchant}`, 'var(--combat)', '+1 damage per enchantment', false, 'enchant']);
+    if (p.maps.length) chips.push(['maps', `Maps ${p.maps.join(', ')}`, 'var(--magic)', 'Those levels will be lit on entry', false, 'maps']);
+    if (g.playerOnTemple()) chips.push(['temple', 'Sanctuary', 'var(--loot)', 'Monsters ignore you; healing doubled', false, 'temple']);
     const key = chips.map((c) => c[0] + c[1] + (c[4] ? 'o' : '')).join('|');
     if (key === this.statusKey) return;
     this.statusKey = key;
     this.status.innerHTML = '';
-    for (const [id, name, color, tip, off] of chips) {
-      const c = el('div', 'status' + (off ? ' off' : ''), `<i></i><span>${name}</span>`);
+    for (const [id, name, color, tip, off, ico] of chips) {
+      const c = el('div', `status ${id}${off ? ' off' : ''}`, `${icon(ico)}<span>${name}</span>`);
       c.style.setProperty('--c', color); c.title = tip; c.dataset.id = id;
       this.status.appendChild(c);
     }
   }
 
-  dispose() { for (const u of this.unsub) u(); }
+  dispose() { for (const u of this.unsub) u(); if (this.ro) this.ro.disconnect(); }
 }
 
 function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+function setText(node, text) { if (node && node.textContent !== text) node.textContent = text; }
+function retrigger(node, cls) { if (!node) return; node.classList.remove(cls); void node.offsetWidth; node.classList.add(cls); }
