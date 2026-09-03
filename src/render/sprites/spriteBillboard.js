@@ -41,6 +41,18 @@
 //      vertex shader (`floor(apx + 0.5) - apx`). Frame pivots are integer texel coordinates, so once
 //      the pivot lands on a pixel corner every texel edge in the sprite lands on a pixel edge too.
 //
+// SCALE vs SQUASH — why a big monster is not a scaled-up quad
+// `scale` (a troll is 1.66x the hero: see sprites/style.js SCALE) is applied by CHOOSING A BIGGER
+// INTEGER TEXEL, S = round(want * scale), never by multiplying the quad. Multiplying would put a
+// fractional number of screen pixels on every texel again and hand back the 3px/4px/3px mush the
+// whole screen-space construction exists to avoid — which is exactly what happened while character
+// scale rode in on `uSquash`. So every sprite in the room, hero and troll alike, is drawn on its own
+// whole-pixel grid; only the size steps are quantised (a troll is 6 device pixels per texel where
+// the hero is 4), which is the trade every HD-2D game makes.
+// `squash` stays for the brief hit/attack deformation ONLY. It is allowed to be fractional for the
+// few frames a body pops or recoils, because a deforming body is not meant to look nailed to the
+// grid; nothing may park a non-integer value in it.
+//
 // Because the quad is parallel to the image plane there is no 1/cos(pitch) stretch any more; the
 // old trick only approximated this under orthographic projection.
 import * as THREE from 'three';
@@ -111,6 +123,13 @@ function makeSpriteMaterial(texture, fog) {
     // a whisper of warmth so the character stays a focal point against cold stone; the real warmth
     // now comes from the torches themselves (see tone()), so this stays subtle
     uTint: { value: new THREE.Color(1.03, 1.0, 0.94) },
+    // DEPTH-TINT CLAMP. The grading pass (renderer.js) multiplies the WHOLE frame by the depth
+    // band's tint and split-tone, which is right for stone and air and wrong for a creature: it
+    // turned the Shadow Dragon purple at depth 3 and navy at depth 18, so a player could not learn
+    // a species by its colour. This is the inverse of most of that cast, pre-applied here, so the
+    // sprite comes out of the post chain with its own palette while the room around it still turns.
+    // CharacterFactory sets it per level (style.js DEPTH_TINT_CLAMP); 1,1,1 = no compensation.
+    uGradeComp: { value: new THREE.Color(1, 1, 1) },
     uRimDir: { value: new THREE.Vector3(0, 1, 0) }, uRimColor: { value: new THREE.Color(0, 0, 0) },
     uGradeAmb: { value: 0.88 }, uGradeCold: { value: 0.82 }, uGradeWarm: { value: 0.1 },
     uAmbientGain: { value: 1.15 }, uDirectGain: { value: 1.25 }, uWrap: { value: 0.55 }, uFloor: { value: 0.07 }, uEmissive: { value: 0.9 },
@@ -163,6 +182,7 @@ function makeSpriteMaterial(texture, fog) {
       uniform sampler2D uMap; uniform vec2 uTexel; uniform vec4 uRect; uniform float uFlip;
       uniform vec3 uRight, uForward; uniform float uOpacity, uAlphaOut, uFlash; uniform vec3 uFlashColor, uTint;
       uniform vec3 uRimDir, uRimColor; uniform float uAmbientGain, uDirectGain, uFloor, uEmissive, uBloomSafe;
+      uniform vec3 uGradeComp;
       varying vec2 vUv; varying vec2 vTex; varying vec3 vLit; varying vec2 vFogXZ;
       ${fog.glsl()}
       ${LIGHT_GLSL}
@@ -192,6 +212,7 @@ function makeSpriteMaterial(texture, fog) {
         }
         col += albedo * emissive * uEmissive;
         col *= uTint;
+        col *= uGradeComp;   // keep this creature's palette through the per-depth grade
         col = applyFog(col, vFogXZ);
         // Bloom guard: keep ordinary art below the bloom pass threshold with a soft knee (so the
         // ramp keeps its order) — only genuinely emissive pixels and the hit flash are allowed to glow.
@@ -317,6 +338,9 @@ export class SpriteBillboard {
     this.animator = new SpriteAnimator(sheet);
     this.flip = false;
     this.depthBias = 0.22;
+    /** steady size relative to the hero (style.js SCALE) — applied by picking the integer texel size */
+    this.scale = 1;
+    /** transient hit/attack deformation only (see the header): 1,1 whenever nothing is deforming */
     this.squash = new THREE.Vector2(1, 1);
     this.opacity = 1; this.flash = 0;
     /** device pixels per sprite texel (snapped to an integer in sync()) and the world size of one texel */
@@ -329,6 +353,14 @@ export class SpriteBillboard {
     this.mesh.onBeforeRender = (renderer, scene, camera) => this.sync(renderer, scene, camera);
     this.setFrame(sheet.frames[0]);
   }
+
+  /**
+   * Pre-cancel most of the renderer's per-depth colour grade for this character, so its species
+   * palette survives the post chain (see `uGradeComp`). CharacterFactory computes the colour from
+   * `lighting.depthTint(depth)` and `style.DEPTH_TINT_CLAMP`.
+   * @param {THREE.Color} c
+   */
+  setGradeCompensation(c) { this.material.uniforms.uGradeComp.value.copy(c); }
 
   /** Point the material at a frame of the atlas. */
   setFrame(fr) {
@@ -402,7 +434,8 @@ export class SpriteBillboard {
     const pxPerWorld = (vp.y * 0.5 * (camera.zoom || 1)) / (Math.tan(camera.fov * Math.PI / 360) * depth);
     const pitch = Math.asin(Math.max(-1, Math.min(1, -fwd.y)));
     u.uZLift.value = 1 / Math.max(0.35, Math.cos(pitch)); // depth-only: see the vertex shader
-    const want = pxPerWorld / this.px;
+    // the creature's size rides in HERE, on the integer texel, not on the quad (see the header)
+    const want = (pxPerWorld / this.px) * this.scale;
     let S = Math.max(1, Math.round(want));
     if (Math.abs(want - this.texelPx) < 0.62) S = this.texelPx; // hysteresis: no flip-flop mid-zoom
     this.texelPx = S;

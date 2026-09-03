@@ -13,6 +13,8 @@ import { buildHero } from './sprites/heroSprite.js';
 import { packSheet, createSheetTexture } from './sprites/spriteSheet.js';
 import { SpriteBillboard } from './sprites/spriteBillboard.js';
 import { MONSTER_SPRITES } from './sprites/monsters/index.js';
+import { SCALE, sizeFor, measureFigure, DEPTH_TINT_CLAMP } from './sprites/style.js';
+import { depthTint } from './lighting.js';
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
@@ -35,10 +37,39 @@ export class CharacterFactory {
     /** The hero is an HD-2D pixel sprite (sprites/heroSprite.js). */
     this.hero = null;
     this.playerView = null;
+    /** every live billboard, so a change of depth can be pushed to all of them at once */
+    this.sprites = new Set();
+    /** the depth-tint compensation currently in force (see setDepth) */
+    this.gradeComp = new THREE.Color(1, 1, 1);
     this.unsub = [
       bus.on('spell:cast', () => this.action('cast', 0.72)),
       bus.on('item:picked', (p) => { if (p.entity && p.entity.kind === 'player' && p.item && p.item.type !== 'gold') this.action('pickup', 0.47); }),
+      bus.on('level:enter', (p) => this.setDepth(p && p.depth)),
     ];
+  }
+
+  /**
+   * DEPTH-TINT CLAMP. The renderer grades the whole frame per depth band — warm at 3, green at 18,
+   * violet below — which is the dungeon's mood and must stay. Applied to a character it is a bug:
+   * the Shadow Dragon came out purple on floor 3 and navy on floor 18, so its colour said nothing
+   * about what it was. Here we work out the colour cast that grade will apply, normalise it to
+   * luminance 1 (we cancel the HUE swing, never the depth's brightness or vignette) and hand each
+   * billboard the inverse at `DEPTH_TINT_CLAMP` strength. The room keeps its full grading; the
+   * creature standing in it keeps its species.
+   * @param {number} depth
+   */
+  setDepth(depth) {
+    if (!Number.isFinite(depth)) return;
+    const g = depthTint(depth).grade;
+    // the grading pass multiplies by `tint`, then by a split tone that runs shadows -> highlights
+    // across luminance; a character's paint lives in the middle of that range
+    const st = g.shadows.clone().lerp(g.highlights, 0.55);
+    const stL = st.r * 0.299 + st.g * 0.587 + st.b * 0.114 || 1;
+    const cast = new THREE.Color(g.tint.r * st.r / stL, g.tint.g * st.g / stL, g.tint.b * st.b / stL);
+    const castL = cast.r * 0.299 + cast.g * 0.587 + cast.b * 0.114 || 1;
+    const inv = (c) => Math.min(1.35, Math.max(0.75, 1 + (castL / c - 1) * DEPTH_TINT_CLAMP));
+    this.gradeComp.setRGB(inv(cast.r), inv(cast.g), inv(cast.b));
+    for (const sp of this.sprites) sp.setGradeCompensation(this.gradeComp);
   }
 
   /** Build (once) the hero sheet + texture. */
@@ -46,7 +77,7 @@ export class CharacterFactory {
     if (!this.hero) {
       const built = buildHero();
       const sheet = packSheet(built);
-      this.hero = { built, sheet, texture: createSheetTexture(sheet) };
+      this.hero = { built, sheet, texture: createSheetTexture(sheet), figurePx: measureFigure(sheet) };
     }
     return this.hero;
   }
@@ -57,7 +88,8 @@ export class CharacterFactory {
     if (!a) {
       const built = MONSTER_SPRITES[type]();
       const sheet = packSheet(built, { order: ['idle', 'walk', 'attack', 'hurt', 'death'] });
-      a = { built, sheet, texture: createSheetTexture(sheet) };
+      // measured once per type: how tall this art draws, which is what turns SCALE into a multiplier
+      a = { built, sheet, texture: createSheetTexture(sheet), figurePx: measureFigure(sheet) };
       this.monsterSheets.set(type, a);
     }
     return a;
@@ -69,14 +101,20 @@ export class CharacterFactory {
    * bulk is baked into the canvas size, so entity.size only nudges the scale.
    */
   createMonsterSprite(entity, type) {
-    const { built, sheet, texture } = this.monsterAssets(type);
+    const { built, sheet, texture, figurePx } = this.monsterAssets(type);
     const sprite = new SpriteBillboard({ sheet, texture, fog: this.fog });
+    this.sprites.add(sprite);
+    sprite.setGradeCompensation(this.gradeComp);
     const root = sprite.root;
     root.name = `char:${entity.id}`;
     const armR = new THREE.Object3D(); armR.position.set(0, 0.5, 0); root.add(armR);
     const view = {
       root, nodes: { root, armR }, material: sprite.material, sprite, mesh: sprite.mesh, kind: 'sprite', entity, type,
-      size: (1 + ((entity.size || 1) - 1) * 0.5) * (built.scale || 1), style: 'swing',
+      // ONE size law (sprites/style.js): SCALE[type] is the creature's height relative to the hero,
+      // and `sizeFor` turns it into the billboard multiplier for the height this art actually has.
+      // The billboard then applies it by choosing a bigger integer texel, so a troll is as crisp as
+      // the hero rather than a stretched copy of him.
+      size: sizeFor(type, figurePx), style: 'swing',
       // ground-locked stride: a rat's scurry cycles far faster than the hero's march
       stride: 0.45 + (built.h / 48) * 0.9,
       anim: { t: entity.id ? hash(entity.id) * 10 : 0, walk: 0, alert: 0, attack: 0, attackDir: 0, hurt: 0, dead: 0, spawn: 0, flash: 0, moving: false, dying: false, done: false, angle: 0, opacity: 1, facing: 'S', dist: 0, action: null, actionT: 0, actionRestart: false, restart: false },
@@ -84,6 +122,7 @@ export class CharacterFactory {
     };
     view.anim.angle = Math.atan2(entity.facing?.dx || 0, entity.facing?.dy || 1);
     view.anim.facing = facingOf(entity.facing?.dx || 0, entity.facing?.dy || 1);
+    sprite.scale = view.size;
     root.position.copy(view.pos);
     return view;
   }
@@ -96,19 +135,23 @@ export class CharacterFactory {
 
   /** Create the hero as a lit sprite billboard (same view shape as the rigged characters). */
   createSprite(entity) {
-    const { sheet, texture } = this.heroAssets();
+    const { sheet, texture, figurePx } = this.heroAssets();
     const sprite = new SpriteBillboard({ sheet, texture, fog: this.fog });
+    this.sprites.add(sprite);
+    sprite.setGradeCompensation(this.gradeComp);
     const root = sprite.root;
     root.name = `char:${entity.id}`;
     // the renderer parks the Sword's aura on the weapon hand
     const armR = new THREE.Object3D(); armR.position.set(-0.16, 0.86, 0.06); root.add(armR);
     const view = {
-      root, nodes: { root, armR }, material: sprite.material, sprite, mesh: sprite.mesh, kind: 'sprite', entity, type: 'player', size: entity.size || 1, style: 'chop',
+      root, nodes: { root, armR }, material: sprite.material, sprite, mesh: sprite.mesh, kind: 'sprite', entity, type: 'player',
+      size: sizeFor('player', figurePx) * (entity.size || 1), style: 'chop',
       anim: { t: 0, walk: 0, alert: 0, attack: 0, attackDir: 0, hurt: 0, dead: 0, spawn: 0, flash: 0, moving: false, dying: false, done: false, angle: 0, opacity: 1, facing: 'S', dist: 0, action: null, actionT: 0, actionRestart: false, restart: false },
       pos: new THREE.Vector3(entity.x, 0, entity.y), from: null, to: null, moveT: 1, moveDur: 0.2, _prev: new THREE.Vector3(entity.x, 0, entity.y),
     };
     view.anim.angle = Math.atan2(entity.facing?.dx || 0, entity.facing?.dy || 1);
     view.anim.facing = facingOf(entity.facing?.dx || 0, entity.facing?.dy || 1);
+    sprite.scale = view.size;
     root.position.copy(view.pos);
     this.playerView = view;
     return view;
@@ -160,7 +203,8 @@ export class CharacterFactory {
     root.add(mesh);
     root.updateMatrixWorld(true);
     mesh.bind(new THREE.Skeleton(bones));
-    const size = (entity.size || 1) * this.sizeMul;
+    // the same size law as the sprites: a Troll must loom whether it is pixels or polygons
+    const size = (SCALE[type] ?? entity.size ?? 1) * this.sizeMul;
     root.scale.setScalar(size);
     const kind = type === 'player' ? 'biped' : (ANIM_KIND[type] || 'biped');
     const view = {
@@ -547,8 +591,12 @@ export class CharacterFactory {
       root.position.x -= Math.sin(a.angle) * r * 0.12; root.position.z -= Math.cos(a.angle) * r * 0.12;
       sx += r * 0.14; sy -= r * 0.12;
     }
-    if (!a.moving && a.attack <= 0 && a.hurt <= 0 && !a.dying) { const b = Math.sin(a.t * 2.1) * 0.006; sy += b; sx -= b * 0.5; }
-    sp.squash.set(sx * view.size, sy * view.size);
+    // NO idle "breathing" squash here: a permanent fractional squash puts every texel edge a
+    // fraction of a pixel off the grid, which is the mush this whole billboard exists to avoid. The
+    // idle clip breathes in the ART, where it belongs. Steady size rides on `scale` (an integer
+    // texel choice); `squash` only ever carries the brief hit/attack deformation.
+    sp.scale = view.size;
+    sp.squash.set(sx, sy);
     sp.flash = a.flash * 0.7;
     // opacity: death fade after the body has lain still; invisibility shimmer
     let op = 1;
@@ -561,7 +609,7 @@ export class CharacterFactory {
   }
 
   dispose(view) {
-    if (view.sprite) { view.sprite.dispose(); if (this.playerView === view) this.playerView = null; return; }
+    if (view.sprite) { this.sprites.delete(view.sprite); view.sprite.dispose(); if (this.playerView === view) this.playerView = null; return; }
     view.material.dispose(); view.outline.dispose(); view.glow.dispose(); if (view.mesh.skeleton) view.mesh.skeleton.dispose();
   }
 }
