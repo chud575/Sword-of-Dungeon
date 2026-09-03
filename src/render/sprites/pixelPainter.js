@@ -1,0 +1,259 @@
+// pixelPainter: a small pixel-art toolkit for hand-authored sprites. No DOM, no THREE — pure data,
+// so sheets can be built (and inspected) from node as well as in the browser.
+//
+// A Pix is a w×h grid of palette *keys* (single characters; '.'/0 = transparent). Art is written as
+// rows of characters (see `paint`), shaded by hand with the keys of hue-shifted colour ramps, and
+// composed from layered parts with per-frame offsets. Colours are only resolved at the very end
+// (`toRGBA`), which keeps recolouring, outlining, mirroring and flashing trivial.
+
+/** @typedef {{w:number,h:number,d:Uint16Array}} Pix */
+
+const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+/** '#rrggbb' or 0xrrggbb -> [r,g,b] (0..255). */
+export function toRgb(c) {
+  if (typeof c === 'number') return [(c >> 16) & 255, (c >> 8) & 255, c & 255];
+  const s = c.replace('#', '');
+  return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+}
+
+export function rgbToHsl([r, g, b]) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h;
+  if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+  else if (max === g) h = ((b - r) / d + 2) / 6;
+  else h = ((r - g) / d + 4) / 6;
+  return [h, s, l];
+}
+
+export function hslToRgb([h, s, l]) {
+  h = ((h % 1) + 1) % 1; s = clamp01(s); l = clamp01(l);
+  if (s === 0) { const v = Math.round(l * 255); return [v, v, v]; }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = (t) => { t = ((t % 1) + 1) % 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; };
+  return [Math.round(f(h + 1 / 3) * 255), Math.round(f(h) * 255), Math.round(f(h - 1 / 3) * 255)];
+}
+
+/** Shortest signed distance between two hues (0..1 wrap). */
+const hueDelta = (from, to) => { let d = to - from; while (d > 0.5) d -= 1; while (d < -0.5) d += 1; return d; };
+
+/**
+ * A hue-shifted colour ramp: shadows drift toward a cool hue (purple/blue) and gain saturation,
+ * highlights drift toward a warm hue (yellow) and lose a little saturation — never a plain
+ * darken/lighten. `tones` colours from darkest to lightest around `base` (index `mid`).
+ * @param {string|number} base
+ * @param {{tones?:number, mid?:number, step?:number, shadowHue?:number, lightHue?:number, hueShift?:number, satShift?:number}} [o]
+ * @returns {number[][]} [r,g,b] list, darkest first
+ */
+export function makeRamp(base, o = {}) {
+  const tones = o.tones ?? 4, mid = o.mid ?? Math.floor((tones - 1) / 2);
+  const step = o.step ?? 0.11, shadowHue = o.shadowHue ?? 0.74, lightHue = o.lightHue ?? 0.13;
+  const hueShift = o.hueShift ?? 0.055, satShift = o.satShift ?? 0.12;
+  const [h, s, l] = rgbToHsl(toRgb(base));
+  const out = [];
+  for (let i = 0; i < tones; i++) {
+    const k = i - mid; // negative = darker
+    const toward = k < 0 ? shadowHue : lightHue;
+    const hh = h + hueDelta(h, toward) * Math.min(1, Math.abs(k) * hueShift * 3.2);
+    const ss = clamp01(s + (k < 0 ? 1 : -1) * Math.abs(k) * satShift * (s > 0.08 ? 1 : 0));
+    const ll = clamp01(l + k * step * (k < 0 ? 1 : 0.92));
+    out.push(hslToRgb([hh, ss, ll]));
+  }
+  return out;
+}
+
+/** Palette: maps single-character keys to colours. */
+export class Palette {
+  constructor() { /** @type {Map<string, number[]>} */ this.map = new Map(); }
+  /** Register one key. */
+  set(key, color) { this.map.set(key, Array.isArray(color) ? color : toRgb(color)); return this; }
+  /** Register a ramp: `keys` string (darkest first), one key per tone. */
+  ramp(keys, base, opts = {}) {
+    const cols = makeRamp(base, { tones: keys.length, ...opts });
+    for (let i = 0; i < keys.length; i++) this.map.set(keys[i], cols[i]);
+    return this;
+  }
+  get(key) { return this.map.get(key) || [255, 0, 255]; }
+  has(key) { return this.map.has(key); }
+}
+
+// ------------------------------------------------------------------------------------------ Pix
+
+export function makePix(w, h) { return { w, h, d: new Uint16Array(w * h) }; }
+
+/**
+ * Parse hand-drawn rows into a Pix. '.' and ' ' are transparent; rows are right-padded so a
+ * ragged block is fine. Leading/trailing blank lines are dropped.
+ * @param {string|string[]} rows
+ */
+export function paint(rows) {
+  const lines = (Array.isArray(rows) ? rows : rows.split('\n')).filter((l, i, a) => !(l.trim() === '' && (i === 0 || i === a.length - 1)));
+  const w = Math.max(...lines.map((l) => l.length)), h = lines.length;
+  const p = makePix(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < lines[y].length; x++) {
+    const c = lines[y][x];
+    if (c !== '.' && c !== ' ') p.d[y * w + x] = c.charCodeAt(0);
+  }
+  return p;
+}
+
+export function getPx(p, x, y) { return x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : p.d[y * p.w + x]; }
+export function setPx(p, x, y, key) { if (x >= 0 && y >= 0 && x < p.w && y < p.h) p.d[y * p.w + x] = typeof key === 'string' ? key.charCodeAt(0) : key; }
+export function clone(p) { return { w: p.w, h: p.h, d: new Uint16Array(p.d) }; }
+
+/** Horizontal mirror (a new Pix). */
+export function mirror(p) {
+  const o = makePix(p.w, p.h);
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) o.d[y * p.w + (p.w - 1 - x)] = p.d[y * p.w + x];
+  return o;
+}
+
+/** Mirror and swap key pairs (so lit/shadow tones stay on the lit/shadow side): swaps = 'ab' pairs. */
+export function mirrorLit(p, swaps = '') {
+  const o = mirror(p);
+  if (!swaps) return o;
+  const m = new Map();
+  for (let i = 0; i + 1 < swaps.length; i += 2) { m.set(swaps.charCodeAt(i), swaps.charCodeAt(i + 1)); m.set(swaps.charCodeAt(i + 1), swaps.charCodeAt(i)); }
+  for (let i = 0; i < o.d.length; i++) { const r = m.get(o.d[i]); if (r) o.d[i] = r; }
+  return o;
+}
+
+/** Copy `src` onto `dst` at (dx,dy); transparent source pixels are skipped. */
+export function blit(dst, src, dx, dy, { mirror: mir = false } = {}) {
+  for (let y = 0; y < src.h; y++) for (let x = 0; x < src.w; x++) {
+    const k = src.d[y * src.w + (mir ? src.w - 1 - x : x)];
+    if (k) setPx(dst, dx + x, dy + y, k);
+  }
+  return dst;
+}
+
+/**
+ * Compose layers (drawn in order) into a new w×h Pix.
+ * @param {number} w @param {number} h
+ * @param {Array<{p:Pix, x:number, y:number, mirror?:boolean}|null>} layers
+ */
+export function compose(w, h, layers) {
+  const out = makePix(w, h);
+  for (const L of layers) if (L && L.p) blit(out, L.p, L.x | 0, L.y | 0, { mirror: !!L.mirror });
+  return out;
+}
+
+/** Replace keys: map = { from: to, ... } (single chars). */
+export function recolor(p, map) {
+  const o = clone(p);
+  const m = new Map(Object.entries(map).map(([a, b]) => [a.charCodeAt(0), b.charCodeAt(0)]));
+  for (let i = 0; i < o.d.length; i++) { const r = m.get(o.d[i]); if (r !== undefined) o.d[i] = r; }
+  return o;
+}
+
+/** Every opaque pixel becomes `key` (hurt flash, silhouette). */
+export function solid(p, key) {
+  const o = clone(p), k = key.charCodeAt(0);
+  for (let i = 0; i < o.d.length; i++) if (o.d[i]) o.d[i] = k;
+  return o;
+}
+
+/** Lossless quarter turn (clockwise when `cw`); the result is h×w. */
+export function rotate90(p, cw = true) {
+  const o = makePix(p.h, p.w);
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+    const k = p.d[y * p.w + x];
+    if (!k) continue;
+    if (cw) o.d[x * o.w + (p.h - 1 - y)] = k; else o.d[(p.w - 1 - x) * o.w + y] = k;
+  }
+  return o;
+}
+
+/** Shift a Pix by (dx,dy) inside its own bounds (pixels falling off are dropped). */
+export function shift(p, dx, dy) { const o = makePix(p.w, p.h); blit(o, p, dx, dy); return o; }
+
+/**
+ * Selective outline: wraps every opaque pixel with `key` on transparent 4-neighbours, except on
+ * edges that face the light (`lit` = {x,y} direction toward the light, e.g. {x:-1,y:-1}) where
+ * `litKey` is used instead (or nothing when litKey is null) — the classic "outline lost on the
+ * lit edge". Pixels already holding an outline are left alone.
+ */
+export function outline(p, key = '#', { lit = null, litKey = null, keys = null } = {}) {
+  const o = clone(p), k = key.charCodeAt(0), lk = litKey ? litKey.charCodeAt(0) : 0;
+  const isOutline = (c) => c === k || (keys && keys.includes(String.fromCharCode(c)));
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+    if (p.d[y * p.w + x]) continue;
+    let ex = 0, ey = 0, any = false;
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const c = getPx(p, x + dx, y + dy);
+      if (c && !isOutline(c)) { any = true; ex -= dx; ey -= dy; }
+    }
+    if (!any) continue;
+    let use = k;
+    if (lit) { const facing = ex * lit.x + ey * lit.y; if (facing > 0) use = lk; }
+    if (use) o.d[y * p.w + x] = use;
+  }
+  return o;
+}
+
+/** Bresenham line of `key`. */
+export function line(p, x0, y0, x1, y1, key) {
+  const k = key.charCodeAt(0);
+  let dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx + dy;
+  for (;;) {
+    setPx(p, x0, y0, k);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+  return p;
+}
+
+/**
+ * Sword-smear arc: a crescent between radii r0..r1 over angles a0..a1 (radians, screen space, y down),
+ * shaded `keys` from the trailing edge (first key) to the leading edge (last key).
+ */
+export function smearArc(p, cx, cy, r0, r1, a0, a1, keys) {
+  const n = keys.length;
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+    const dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+    const r = Math.hypot(dx, dy);
+    if (r < r0 || r > r1) continue;
+    let a = Math.atan2(dy, dx);
+    let t = (a - a0) / (a1 - a0);
+    if (t < 0 || t > 1) { a += a > 0 ? -Math.PI * 2 : Math.PI * 2; t = (a - a0) / (a1 - a0); }
+    if (t < 0 || t > 1) continue;
+    const i = Math.min(n - 1, Math.floor(t * n));
+    // a thin crescent hugging the outer radius, tapering to a point at the trailing end
+    let thick = Math.max(1, (r1 - r0) * (0.15 + 0.85 * t));
+    if (t > 0.78) thick = Math.max(1, thick * (1 - (t - 0.78) / 0.22 * 0.75)); // and back to a point at the tip
+    if (r < r1 - thick) continue;
+    setPx(p, x, y, keys[i]);
+  }
+  return p;
+}
+
+/** Tight bounding box of opaque pixels, or null. */
+export function bounds(p) {
+  let x0 = p.w, y0 = p.h, x1 = -1, y1 = -1;
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) if (p.d[y * p.w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return x1 < 0 ? null : { x0, y0, x1, y1, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+/** Resolve keys to RGBA bytes (row 0 = top). Unknown keys come out magenta so they are noticed. */
+export function toRGBA(p, palette) {
+  const out = new Uint8ClampedArray(p.w * p.h * 4);
+  const cache = new Map();
+  for (let i = 0; i < p.d.length; i++) {
+    const k = p.d[i];
+    if (!k) continue;
+    let c = cache.get(k);
+    if (!c) { c = palette.get(String.fromCharCode(k)); cache.set(k, c); }
+    out[i * 4] = c[0]; out[i * 4 + 1] = c[1]; out[i * 4 + 2] = c[2]; out[i * 4 + 3] = 255;
+  }
+  return out;
+}
+
+/** Count the distinct keys used (palette discipline check). */
+export function usedKeys(p) { const s = new Set(); for (const k of p.d) if (k) s.add(String.fromCharCode(k)); return [...s].sort(); }

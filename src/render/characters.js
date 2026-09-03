@@ -8,6 +8,10 @@ import * as THREE from 'three';
 import { createCharacterMaterial } from './materials.js';
 import { RigBuilder, createOutlineMaterial } from './charParts.js';
 import { BUILDERS, ANIM_KIND } from './charBuilders.js';
+import { bus } from '../core/events.js';
+import { buildHero } from './sprites/heroSprite.js';
+import { packSheet, createSheetTexture } from './sprites/spriteSheet.js';
+import { SpriteBillboard } from './sprites/spriteBillboard.js';
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
@@ -25,6 +29,49 @@ export class CharacterFactory {
     this.fog = fog;
     this.geoCache = new Map();
     this.sizeMul = 1.2;
+    /** The hero is an HD-2D pixel sprite (sprites/heroSprite.js); monsters keep their low-poly rigs. */
+    this.hero = null;
+    this.playerView = null;
+    this.unsub = [
+      bus.on('spell:cast', () => this.action('cast', 0.72)),
+      bus.on('item:picked', (p) => { if (p.entity && p.entity.kind === 'player' && p.item && p.item.type !== 'gold') this.action('pickup', 0.47); }),
+    ];
+  }
+
+  /** Build (once) the hero sheet + texture. */
+  heroAssets() {
+    if (!this.hero) {
+      const built = buildHero();
+      const sheet = packSheet(built);
+      this.hero = { built, sheet, texture: createSheetTexture(sheet) };
+    }
+    return this.hero;
+  }
+
+  /** One-shot hero action (cast / pickup) for `dur` seconds. */
+  action(name, dur) {
+    const v = this.playerView; if (!v || v.anim.dying) return;
+    v.anim.action = name; v.anim.actionT = dur; v.anim.actionRestart = true;
+  }
+
+  /** Create the hero as a lit sprite billboard (same view shape as the rigged characters). */
+  createSprite(entity) {
+    const { sheet, texture } = this.heroAssets();
+    const sprite = new SpriteBillboard({ sheet, texture, fog: this.fog });
+    const root = sprite.root;
+    root.name = `char:${entity.id}`;
+    // the renderer parks the Sword's aura on the weapon hand
+    const armR = new THREE.Object3D(); armR.position.set(-0.16, 0.86, 0.06); root.add(armR);
+    const view = {
+      root, nodes: { root, armR }, material: sprite.material, sprite, mesh: sprite.mesh, kind: 'sprite', entity, type: 'player', size: entity.size || 1, style: 'chop',
+      anim: { t: 0, walk: 0, alert: 0, attack: 0, attackDir: 0, hurt: 0, dead: 0, spawn: 0, flash: 0, moving: false, dying: false, done: false, angle: 0, opacity: 1, facing: 'S', dist: 0, action: null, actionT: 0, actionRestart: false, restart: false },
+      pos: new THREE.Vector3(entity.x, 0, entity.y), from: null, to: null, moveT: 1, moveDur: 0.2, _prev: new THREE.Vector3(entity.x, 0, entity.y),
+    };
+    view.anim.angle = Math.atan2(entity.facing?.dx || 0, entity.facing?.dy || 1);
+    view.anim.facing = facingOf(entity.facing?.dx || 0, entity.facing?.dy || 1);
+    root.position.copy(view.pos);
+    this.playerView = view;
+    return view;
   }
 
   /** Build (or reuse) merged geometry per node for a type. */
@@ -43,6 +90,7 @@ export class CharacterFactory {
    * @returns {{root:THREE.Group, nodes:Object<string,THREE.Object3D>, material:THREE.Material, kind:string, entity:object, anim:object}}
    */
   create(entity) {
+    if (entity.kind === 'player') return this.createSprite(entity);
     const type = entity.kind === 'player' ? 'player' : entity.type;
     const spec = this.rigGeometry(type);
     const material = createCharacterMaterial(this.fog);
@@ -93,20 +141,28 @@ export class CharacterFactory {
     view.anim.moving = true;
     const dx = toX - fromX, dy = toY - fromY;
     if (dx || dy) view.anim.targetAngle = Math.atan2(dx, dy);
+    if (view.sprite && view.anim.action) view.anim.action = null; // a step cancels a cast/pickup pose
   }
 
   /** Snap the view to a tile (teleport/blink). */
   snap(view, x, y) { view.from = view.to = null; view.moveT = 1; view.pos.set(x, 0, y); }
 
-  attack(view, dx, dy) { view.anim.attack = 0.0001; view.anim.attackDir = Math.atan2(dx, dy); view.anim.targetAngle = view.anim.attackDir; }
-  hurt(view) { view.anim.hurt = 1; view.anim.flash = 1; }
-  die(view) { if (view.anim.dying) return; view.anim.dying = true; view.anim.dead = 0; view.material.transparent = true; view.glow.transparent = true; }
+  attack(view, dx, dy) {
+    if (view.sprite) { // held attacks: let a swing that just started finish its cut before restarting
+      if (view.anim.attack > 0.55) return;
+      view.anim.attack = 1; view.anim.restart = true; view.anim.attackDir = Math.atan2(dx, dy); view.anim.action = null; return;
+    }
+    view.anim.attack = 0.0001; view.anim.attackDir = Math.atan2(dx, dy); view.anim.targetAngle = view.anim.attackDir;
+  }
+  hurt(view) { view.anim.hurt = 1; view.anim.flash = 1; if (view.sprite) view.anim.restart = true; }
+  die(view) { if (view.anim.dying) return; view.anim.dying = true; view.anim.dead = 0; if (view.sprite) return; view.material.transparent = true; view.glow.transparent = true; }
   spawn(view) { view.anim.spawn = 0.0001; }
 
   /**
    * Advance animation. ctx: {invisible:boolean}
    */
   update(view, dt, ctx = {}) {
+    if (view.sprite) return this.updateSprite(view, dt, ctx);
     const a = view.anim, n = view.nodes, e = view.entity;
     a.t += dt;
     // position interpolation (ease so steps read as a push-off, not a slide)
@@ -394,8 +450,83 @@ export class CharacterFactory {
     if (k3 >= 1) a.done = true;
   }
 
-  dispose(view) { view.material.dispose(); view.outline.dispose(); view.glow.dispose(); if (view.mesh.skeleton) view.mesh.skeleton.dispose(); }
+  /** Sprite hero: tile interpolation, facing, clip selection, squash/stretch, lunge/knock-back, fade. */
+  updateSprite(view, dt, ctx = {}) {
+    const a = view.anim, e = view.entity, sp = view.sprite, root = view.root;
+    a.t += dt;
+    view._prev.copy(view.pos);
+    if (view.from && view.to) {
+      view.moveT = Math.min(1, view.moveT + dt / view.moveDur);
+      const k = view.moveT;
+      view.pos.lerpVectors(view.from, view.to, k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2);
+      if (k >= 1) { view.from = view.to = null; }
+    } else if (e) {
+      if (Math.abs(view.pos.x - e.x) > 1.5 || Math.abs(view.pos.z - e.y) > 1.5) view.pos.set(e.x, 0, e.y);
+    }
+    a.moving = !!(view.from && view.to);
+    if (e) { e.px = view.pos.x; e.py = view.pos.z; }
+    a.walk += ((a.moving ? 1 : 0) - a.walk) * Math.min(1, dt * 14);
+    // facing: the step direction while moving, the swing direction while attacking, else the entity's
+    let dx = 0, dy = 0;
+    if (a.moving) { dx = view.to.x - view.from.x; dy = view.to.z - view.from.z; }
+    else if (a.attack > 0) { dx = Math.sin(a.attackDir); dy = Math.cos(a.attackDir); }
+    else if (e && e.facing) { dx = e.facing.dx; dy = e.facing.dy; }
+    if (dx || dy) { a.facing = facingOf(dx, dy); a.angle = Math.atan2(dx, dy); }
+    // timers
+    if (a.attack > 0) a.attack = Math.max(0, a.attack - dt / 0.44);
+    if (a.hurt > 0) a.hurt = Math.max(0, a.hurt - dt / 0.26);
+    if (a.flash > 0) a.flash = Math.max(0, a.flash - dt / 0.18);
+    if (a.action) { a.actionT -= dt; if (a.actionT <= 0) a.action = null; }
+    if (a.dying) a.dead += dt;
+    // clip choice by priority
+    let clip = 'idle';
+    if (a.dying) clip = 'death';
+    else if (a.hurt > 0) clip = 'hurt';
+    else if (a.attack > 0) clip = 'attack';
+    else if (a.action) clip = a.action;
+    else if (a.moving) clip = 'walk';
+    const restart = a.restart || (a.action && a.actionRestart);
+    a.restart = false; a.actionRestart = false;
+    sp.animator.play(clip, a.facing, { restart });
+    if (clip === 'walk') { a.dist += view.pos.distanceTo(view._prev); sp.animator.setPhase(a.dist / 1.35); sp.animator.time -= dt * 1000; } // ground-locked: update() re-adds dt
+    // squash & stretch, lunge and knock-back
+    root.position.copy(view.pos);
+    let sx = 1, sy = 1;
+    if (a.attack > 0) {
+      const k = 1 - a.attack; // 0..1 through the swing
+      const lunge = Math.sin(Math.min(1, Math.max(0, (k - 0.2) / 0.6)) * Math.PI) * 0.22;
+      root.position.x += Math.sin(a.attackDir) * lunge; root.position.z += Math.cos(a.attackDir) * lunge;
+      const pop = Math.sin(Math.min(1, Math.max(0, (k - 0.22) / 0.3)) * Math.PI);
+      sx += pop * 0.1; sy -= pop * 0.08;
+      if (k < 0.22) { sx -= k / 0.22 * 0.06; sy += k / 0.22 * 0.05; } // anticipation: draw up
+    }
+    if (a.hurt > 0) {
+      const r = Math.sin(a.hurt * Math.PI);
+      root.position.x -= Math.sin(a.angle) * r * 0.12; root.position.z -= Math.cos(a.angle) * r * 0.12;
+      sx += r * 0.14; sy -= r * 0.12;
+    }
+    if (!a.moving && a.attack <= 0 && a.hurt <= 0 && !a.dying) { const b = Math.sin(a.t * 2.1) * 0.006; sy += b; sx -= b * 0.5; }
+    sp.squash.set(sx * view.size, sy * view.size);
+    sp.flash = a.flash * 0.7;
+    // opacity: death fade after the body has lain still; invisibility shimmer
+    let op = 1;
+    if (a.dying) { const k3 = Math.min(1, Math.max(0, (a.dead - 1.8) / 0.8)); op = 1 - k3; a.opacity = op; if (k3 >= 1) a.done = true; }
+    if (ctx.invisible) op = Math.min(op, 0.3 + 0.08 * Math.sin(a.t * 9));
+    sp.opacity = op;
+    sp.update(dt);
+    // the sword-aura node follows the hand of the current facing
+    const n = view.nodes.armR;
+    n.position.set(a.facing === 'E' ? 0.18 : a.facing === 'W' ? -0.18 : a.facing === 'N' ? 0.22 : -0.22, 0.86, 0.06);
+  }
+
+  dispose(view) {
+    if (view.sprite) { view.sprite.dispose(); if (this.playerView === view) this.playerView = null; return; }
+    view.material.dispose(); view.outline.dispose(); view.glow.dispose(); if (view.mesh.skeleton) view.mesh.skeleton.dispose();
+  }
 }
+
+/** Four-way facing from a direction: sideways wins on diagonals (the side view reads best). */
+function facingOf(dx, dy) { return Math.abs(dx) >= Math.abs(dy) && dx !== 0 ? (dx > 0 ? 'E' : 'W') : (dy > 0 ? 'S' : 'N'); }
 
 function hash(s) { let h = 0; for (let i = 0; i < String(s).length; i++) h = (h * 31 + String(s).charCodeAt(i)) >>> 0; return (h % 1000) / 1000; }
 

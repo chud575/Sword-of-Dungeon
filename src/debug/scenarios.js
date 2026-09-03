@@ -4,6 +4,7 @@ import { TILE } from '../core/constants.js';
 import { Level } from '../world/level.js';
 import { MONSTER_TYPES } from '../game/monsters.js';
 import { addHallOfFameEntry, getHallOfFame } from '../core/save.js';
+import { drawSheet } from '../render/sprites/spriteSheet.js';
 
 /** Walkable tiles adjacent to (x,y) (8-way), nearest-first order as given by DIRS8. */
 function neighbours(level, x, y, { empty = true } = {}) {
@@ -659,7 +660,177 @@ export const scenarios = {
   async 'bestiary-humans'(ctx) {
     lineup(ctx, ['rogue', 'barbarian', 'elvin-ranger', 'dwarven-guard', 'mercenary', 'swordsman', 'monk', 'dark-warrior', 'assassin', 'war-lord', 'mage']);
   },
+
+  // ---------------------------------------------------------------- HD-2D hero sprite
+  /** Every hero animation sheet (all facings, west mirrored from east) at 4x on a neutral grey overlay. */
+  async 'hero-sheet'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 0); },
+  async 'hero-sheet-p2'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 1); },
+  async 'hero-sheet-p3'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 2); },
+  async 'hero-sheet-p4'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 3); },
+  async 'hero-sheet-p5'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 4); },
+  /** Close-up next to a wall torch: the sprite lit by the torch and the lantern, idle breathing. */
+  async 'hero-showcase'(ctx) {
+    heroStage(ctx);
+    ctx.step(700);
+  },
+  /** Walking through the room (held direction, ground-locked stride). */
+  async 'hero-walk'(ctx) {
+    const g = heroStage(ctx);
+    const d = longestRun(g);
+    g.setHeld(d.dx, d.dy);
+    ctx.step(g.balance.playerStepTime * 1000 * 1.5);
+  },
+  /** Swinging at an adjacent hobgoblin (held direction keeps the cuts coming). */
+  async 'hero-attack'(ctx) {
+    const g = heroStage(ctx);
+    const p = g.player; p.skill = 1;
+    const s = neighbours(g.level, p.x, p.y).filter((n) => n.y === p.y).sort((a, b) => (b.x - p.x) - (a.x - p.x))[0] || neighbours(g.level, p.x, p.y)[0];
+    if (s) {
+      const m = g.spawnMonster('hobgoblin', s.x, s.y, { depth: 1, state: 'idle' });
+      if (m) { freeze(m); m.hp = 99999; m.maxHp = 99999; m.facing = { dx: Math.sign(p.x - s.x), dy: Math.sign(p.y - s.y) }; g.move(s.x - p.x, s.y - p.y); g.setHeld(s.x - p.x, s.y - p.y); }
+    }
+    ctx.step(120);
+  },
+  /** Taking a hit: white flash, recoil squash, knock-back. */
+  async 'hero-hurt'(ctx) {
+    const g = heroStage(ctx);
+    const p = g.player; p.maxHp = 9999; p.hp = 9999;
+    const s = neighbours(g.level, p.x, p.y).filter((n) => n.y === p.y).sort((a, b) => (b.x - p.x) - (a.x - p.x))[0] || neighbours(g.level, p.x, p.y)[0];
+    if (s) { const m = hunter(g, 'ogre', s, { depth: 8, speed: 2.4, timer: 0.05 }); if (m) { m.hp = 99999; m.maxHp = 99999; } }
+    ctx.step(200);
+    ctx.renderer.characters.hurt(ctx.renderer.playerView);
+    ctx.step(40);
+  },
+  /** Death: stagger, buckle, topple, lie still, fade (played on the view only; the game goes on). */
+  async 'hero-death'(ctx) {
+    const g = heroStage(ctx);
+    void g;
+    ctx.renderer.characters.die(ctx.renderer.playerView);
+    ctx.step(330);
+  },
+  /** Casting: the off hand rises with a growing glow. */
+  async 'hero-cast'(ctx) {
+    const g = heroStage(ctx);
+    g.give('shield', 1); g.castSpell('shield');
+    ctx.step(200);
+  },
+  /** The hero at the ordinary play distance (the 'default' framing). */
+  async 'hero-in-game'(ctx) {
+    ctx.reset();
+    ctx.step(400);
+  },
 };
+
+/** Stand the hero two tiles in front of a wall torch, facing the camera, zoomed so the sprite fills ~1/5 of the screen. */
+function heroStage(ctx) {
+  const g = ctx.reset();
+  const p = g.player, lv = g.level;
+  const spots = ctx.renderer.lighting.torchSpots.slice().sort((a, b) => Math.hypot(a.tx - p.x, a.ty - p.y) - Math.hypot(b.tx - p.x, b.ty - p.y));
+  for (const sp of spots) {
+    // beside the torch's wall, one tile out and one tile along, so the torch lights the hero from the side
+    const cands = [{ x: sp.tx + sp.nx * 2 + sp.nz, y: sp.ty + sp.nz * 2 + sp.nx }, { x: sp.tx + sp.nx * 2 - sp.nz, y: sp.ty + sp.nz * 2 - sp.nx }, { x: sp.tx + sp.nx * 2, y: sp.ty + sp.nz * 2 }];
+    const t = cands.find((c) => lv.isEmptyFloor(c.x, c.y) && lv.get(c.x, c.y) === TILE.FLOOR);
+    if (t) { g.teleportTo(t.x, t.y); g.updateFov(); break; }
+  }
+  p.facing = { dx: 0, dy: 1 };
+  for (const m of lv.monsters) freeze(m);
+  ctx.renderer.cameraRig.setZoomExact(1.3);
+  ctx.renderer.cameraRig.follow(ctx.renderer.playerView.pos, null);
+  ctx.renderer.cameraRig.snap();
+  return g;
+}
+
+/** Direction with the longest free straight run from the player (for walk shots). */
+function longestRun(g) {
+  const p = g.player, lv = g.level;
+  let best = { dx: 1, dy: 0, n: -1 };
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    let n = 0;
+    while (n < 8 && lv.isEmptyFloor(p.x + dx * (n + 1), p.y + dy * (n + 1))) n++;
+    if (n > best.n) best = { dx, dy, n };
+  }
+  return best;
+}
+
+let heroOverlayEl = null;
+/** Tight bounds of a frame's opaque pixels in the sheet. */
+function frameBounds(sheet, f) {
+  let x0 = f.w, y0 = f.h, x1 = -1, y1 = -1;
+  for (let y = 0; y < f.h; y++) for (let x = 0; x < f.w; x++) {
+    if (sheet.data[((f.y + y) * sheet.width + f.x + x) * 4 + 3] < 128) continue;
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  return x1 < 0 ? { x: 0, y: 0, w: 1, h: 1 } : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+/**
+ * Full-screen 2D canvas over the 3D view showing the hero sheet at 4x (nearest neighbour) with
+ * labels and frame timings. Rows flow left-to-right and wrap; `page` selects which screenful is
+ * drawn (the whole sheet is taller than one viewport). Removed when the next game starts.
+ */
+function heroOverlay(ctx, page = 0) {
+  const { sheet } = ctx.renderer.characters.heroAssets();
+  if (!heroOverlayEl) {
+    heroOverlayEl = document.createElement('canvas');
+    heroOverlayEl.id = 'hero-sheet-overlay';
+    Object.assign(heroOverlayEl.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh', zIndex: '9999', pointerEvents: 'none' });
+    document.body.appendChild(heroOverlayEl);
+    ctx.bus.on('game:start', () => { if (heroOverlayEl) { heroOverlayEl.remove(); heroOverlayEl = null; } });
+  }
+  const W = window.innerWidth, H = window.innerHeight;
+  heroOverlayEl.width = W; heroOverlayEl.height = H;
+  const c = heroOverlayEl.getContext('2d');
+  c.fillStyle = '#3c3c42'; c.fillRect(0, 0, W, H);
+  c.imageSmoothingEnabled = false;
+  const zoom = 4, gap = 6, labelH = 16, margin = 14;
+  const off = document.createElement('canvas'); off.width = sheet.width; off.height = sheet.height;
+  off.getContext('2d').putImageData(new ImageData(sheet.data, sheet.width, sheet.height), 0, 0);
+  // rows: packed (S, E, N) plus a mirrored west row after each east row
+  const items = [];
+  for (const r of sheet.rows) {
+    const frames = sheet.frames.filter((f) => f.y === r.y).map((f) => ({ f, b: frameBounds(sheet, f) }));
+    items.push({ label: r.label, frames, flip: false });
+    if (r.label.endsWith(' E')) items.push({ label: r.label.replace(/ E$/, ' W  (mirrored east)'), frames, flip: true });
+  }
+  // flow layout: each item is a box (label above its frames); wrap into lines, lines into pages
+  const boxes = items.map((it) => {
+    const fw = it.frames.map((x) => x.b.w * zoom + gap), fh = Math.max(...it.frames.map((x) => x.b.h * zoom));
+    return { it, w: Math.max(fw.reduce((a, b) => a + b, 0), 120) + 12, h: labelH + fh + 10, fw };
+  });
+  const lines = []; let line = [], lw = 0;
+  for (const b of boxes) { if (line.length && lw + b.w > W - margin * 2) { lines.push(line); line = []; lw = 0; } line.push(b); lw += b.w; }
+  if (line.length) lines.push(line);
+  const pages = []; let pg = [], ph = 0;
+  for (const ln of lines) { const h = Math.max(...ln.map((b) => b.h)); if (pg.length && ph + h > H - margin * 2 - 18) { pages.push(pg); pg = []; ph = 0; } pg.push(ln); ph += h; }
+  if (pg.length) pages.push(pg);
+  const draw = pages[Math.min(page, pages.length - 1)] || [];
+  let y = margin;
+  c.textBaseline = 'top';
+  for (const ln of draw) {
+    let x = margin;
+    const lh = Math.max(...ln.map((b) => b.h));
+    for (const b of ln) {
+      c.fillStyle = '#e2dcec'; c.font = 'bold 12px ui-monospace, Menlo, Consolas, monospace';
+      c.fillText(b.it.label, x, y);
+      let fx = x;
+      b.it.frames.forEach(({ f, b: bb }, j) => {
+        const fy = y + labelH;
+        c.fillStyle = '#46464e'; c.fillRect(fx, fy, bb.w * zoom, bb.h * zoom);
+        c.save();
+        if (b.it.flip) { c.translate(fx + bb.w * zoom, fy); c.scale(-1, 1); c.drawImage(off, f.x + bb.x, f.y + bb.y, bb.w, bb.h, 0, 0, bb.w * zoom, bb.h * zoom); }
+        else c.drawImage(off, f.x + bb.x, f.y + bb.y, bb.w, bb.h, fx, fy, bb.w * zoom, bb.h * zoom);
+        c.restore();
+        c.fillStyle = '#a49eb0'; c.font = '10px ui-monospace, Menlo, Consolas, monospace';
+        c.fillText(`${j} · ${f.duration}ms`, fx + 1, fy + bb.h * zoom + 1);
+        fx += b.fw[j];
+      });
+      x += b.w;
+    }
+    y += lh;
+  }
+  c.fillStyle = '#a49eb0'; c.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  c.fillText(`hero sheet · ${zoom}x nearest · page ${Math.min(page, pages.length - 1) + 1}/${pages.length} (scenarios hero-sheet, hero-sheet-p2 … p${pages.length}) · atlas ${sheet.width}x${sheet.height}, ${sheet.frames.length} frames`, margin, H - 16);
+  void drawSheet;
+}
 
 /** A believable mid-run state for HUD/menu shots: items, statuses, a log and a nearby monster. */
 function midRun(ctx, { depth = 6 } = {}) {
