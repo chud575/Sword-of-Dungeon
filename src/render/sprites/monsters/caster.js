@@ -47,12 +47,14 @@
 import {
   Palette, paint, compose, outline, makePix, setPx, getPx, line, solid,
 } from '../pixelPainter.js';
+import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
 export const MON_W = 40, MON_H = 44, PIVOT_X = 20, PIVOT_Y = 41;
+/** The row a caster's fills stop on: the hem, a staff ferrule and a hoof all land here, never below. */
+const FLOOR_Y = 40;
 
-const LIT = { x: -1, y: -1 };
 const L = (p, x = 0, y = 0) => (p ? { p, x, y } : null);
 /** Compose layers and lay the one selective silhouette outline on last (the house treatment). */
 const ink = (layers, w = MON_W, h = MON_H) => outline(compose(w, h, layers.filter(Boolean)), '#', { lit: LIT, litKey: '@' });
@@ -60,29 +62,45 @@ const ink = (layers, w = MON_W, h = MON_H) => outline(compose(w, h, layers.filte
 const edge = (p) => outline(p, '#', { lit: LIT, litKey: '@' });
 
 // ------------------------------------------------------------------------------------ palettes
+// Every ramp here is a slice of ONE seven-step house curve (`ramp()` in style.js) — the same curve
+// the humanoids, the fighters and the beasts are painted from, so a mage and a swordsman meeting in
+// the same corridor are lit by one law instead of two. `RAMP_PICK` says which steps of that curve a
+// material occupies: skin and cloth in the middle (pigment, not polish), metal up to the specular,
+// magic high because it is light rather than paint. Per-species `clothStep`/`magicStep` knobs are
+// gone; a species that genuinely needs a different slice passes `picks` instead.
+const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
+const RAMP_PICK = {
+  skin: [1, 3, 5], cloth: [0, 2, 4, 5], trim: [1, 4], metal: [1, 3, 5, 6],
+  accent: [1, 3, 5], magic: [2, 4, 6], shimmer: [2, 4, 6],
+};
+
 /**
  * One species palette over the shared key vocabulary.
  * @param {{skin:string, cloth:string, trim:string, metal:string, accent:string, magic:string,
- *   eye:string, spark?:string, shimmer?:string, voidCol?:string, outline?:string, litEdge?:string,
- *   clothStep?:number, magicStep?:number}} o
+ *   eye:string, spark?:string, shimmer?:string, voidCol?:string,
+ *   picks?:Object<string, number[]>}} o
  */
 export function casterPalette(o) {
-  return new Palette()
-    .set('#', o.outline || '#161020')
-    .set('@', o.litEdge || '#4a4157')
-    .ramp('123', o.skin, { step: 0.07, hueShift: 0.02, satShift: 0.05 })
-    .ramp('4567', o.cloth, { step: o.clothStep ?? 0.085, mid: 1, hueShift: 0.028, satShift: 0.06 })
-    .ramp('89', o.trim, { step: 0.1, hueShift: 0.03, satShift: 0.07 })
-    .ramp('abcd', o.metal, { step: 0.12, satShift: 0.13 })
-    .ramp('efg', o.accent, { step: 0.1, hueShift: 0.02, satShift: 0.06 })
-    .ramp('mno', o.magic, { step: o.magicStep ?? 0.135, satShift: 0.1 })
-    .ramp('stu', o.shimmer || '#8fd0ff', { step: 0.125, satShift: 0.09 })
+  const p = new Palette().set('#', INK).set('@', INK_LIT);
+  const put = (keys, base, which) => {
+    const r = ramp(base, 7, RAMP_OPTS);
+    const pick = (o.picks && o.picks[which]) || RAMP_PICK[which];
+    [...keys].forEach((k, i) => p.set(k, r[pick[i]]));
+  };
+  put('123', o.skin, 'skin');
+  put('4567', o.cloth, 'cloth');   // 4 is the deep crease, 7 the lit fold
+  put('89', o.trim, 'trim');
+  put('abcd', o.metal, 'metal');   // d is the specular, 1-px edges only
+  put('efg', o.accent, 'accent');
+  put('mno', o.magic, 'magic');
+  put('stu', o.shimmer || '#8fd0ff', 'shimmer');
+  return p
     .set('p', o.spark || '#fff6d8')
     .set('v', o.voidCol || '#170e28')
     .set('E', '#171020')
-    .set('W', '#fff6e8')
+    .set('W', '#e6dcc8')
     .set('Y', o.eye)
-    .set('G', '#ffffff')
+    .set('G', '#efe9dd')
     .set('F', '#fff4f0');
 }
 
@@ -537,14 +555,27 @@ function arms(S, f, hands, dy = 0, lean = 0) {
 }
 
 // ------------------------------------------------------------------------------------ clips
+/**
+ * Breathing on the spot. THE RULE: an idle never moves the contact row. The hem is nailed to the
+ * floor — `robePix` holds `bot` fixed while the waist and shoulders settle a pixel into it, so the
+ * cloth COMPRESSES and swings instead of the whole figure hopping; the staff foot stays planted
+ * (see the mage's `pose`) and only the grip slides on it. The old idle stacked `hdy` on top of `dy`
+ * and bobbed the head TWO pixels while everything the figure stands on came with it.
+ */
+const BREATH = [
+  { dy: 0, sway: 0.0, hands: [0, 0], hdx: 0 },   // rest, lungs full
+  { dy: 1, sway: 0.5, hands: [1, 0], hdx: 0 },   // exhale: waist and shoulders settle into the hem
+  { dy: 1, sway: 0.2, hands: [1, 1], hdx: 0 },   // the bottom of the breath
+  { dy: 0, sway: -0.5, hands: [0, 1], hdx: -1 }, // inhale: the hem swings back, the head turns in
+];
+
 function idleClip(S, f) {
   const mk = (i) => {
-    const dy = [0, 1, 1, 0][i], sway = [0, 0.8, 0.2, -0.7][i];
-    const R = RIG[f];
-    const hands = [[R.handL[0], R.handL[1] + (i === 1 ? 1 : 0)], [R.handR[0], R.handR[1] + (i === 2 ? 1 : 0)]];
-    const o = { dy, sway, hdy: i === 1 ? 1 : 0 };
+    const b = BREATH[i], R = RIG[f];
+    const hands = [[R.handL[0], R.handL[1] + b.hands[0]], [R.handR[0], R.handR[1] + b.hands[1]]];
+    const o = { dy: b.dy, sway: b.sway, hdx: b.hdx };
     S.pose(S, f, 'idle', i, o, hands);
-    return frame(S, f, { ...o, arms: arms(S, f, hands, dy), behind: o.behind, extra: o.extra });
+    return frame(S, f, { ...o, arms: arms(S, f, hands, b.dy), behind: o.behind, extra: o.extra });
   };
   return { frames: [mk(0), mk(1), mk(2), mk(3)], durations: [360, 300, 320, 300], loop: true };
 }
@@ -647,11 +678,14 @@ const MAGE = {
   scale: 1.06,
   cloth: '4567',
   palette: casterPalette({
-    skin: '#c99a72', cloth: '#33469b', trim: '#7d5a2c', metal: '#9aa2ad',
+    skin: '#c99a72', cloth: '#3d4fa8', trim: '#7d5a2c', metal: '#9aa2ad',
     accent: '#d8d3c6', magic: '#57c8ff', eye: '#bdefff', spark: '#f2fbff',
+    // the robe is most of the sprite, so it may not sit on the floor of its own ramp: lift the
+    // whole column a step and take the lit fold from the top of the curve instead of the middle
+    picks: { cloth: [1, 3, 4, 6] },
   }),
   head: { S: MAGE_HEAD_S, E: MAGE_HEAD_E, N: MAGE_HEAD_N },
-  headAt: { S: [7, 0], E: [7, 0], N: [7, 0] },
+  headAt: { S: [7, 3], E: [7, 3], N: [7, 3] },   // NOT 0: at 0 the hat peak overran the cell and lost its outline (the cast beat lifts the head another 2 rows)
   torso: {
     S: { top: 17, prof: [4, 6, 7, 7, 7, 6, 6, 6, 6, 6.5, 7], belt: 25 },
     E: { top: 17, prof: [3.5, 5, 5.5, 5.5, 5.5, 5, 5, 5, 5, 5.5, 6], belt: 25 },
@@ -664,10 +698,14 @@ const MAGE = {
   pose(S, f, clip, i, o, hands) {
     const side = f === 'N' ? -1 : 1;                 // seen from behind he holds it on the other side
     const gx = PIVOT_X + side * 8 + (o.lean || 0);
-    const gy = 29 + (o.dy || 0);
     const raised = clip === 'attack' && i >= 1;
-    const st = staffPix(gx, gy - (raised ? 2 : 0), side * 5, {
-      up: 20, down: 11, orb: 3.0, glow: raised ? 1 : 0,
+    const gy = 29 + (o.dy || 0) - (raised ? 2 : 0);
+    // The ferrule is planted on the floor row and STAYS there while he breathes: the grip slides up
+    // the shaft with his hand instead of the whole staff being carried an inch off the ground.
+    const st = staffPix(gx, gy, side * 5, {
+      // 16, not 20: at 20 the caged orb (and the six sparks of its glow ring) overran the top of the atlas cell on every raised-staff
+      // frame and came back with its crown sliced flat and un-inked
+      up: raised ? 15 : 17, down: FLOOR_Y - gy - (raised ? 3 : 0), orb: 3.0, glow: raised ? 1 : 0,
     });
     // the staff hand grips it; the free hand is the one the clips animate
     const hi = side > 0 ? 1 : 0;
@@ -692,7 +730,7 @@ const WARLOCK = {
   palette: casterPalette({
     skin: '#9d8f9c', cloth: '#4c2a63', trim: '#3a2136', metal: '#8b7f96',
     accent: '#cfc3a6', magic: '#b98cff', eye: '#ff7a3c', spark: '#f0dcff',
-    voidCol: '#150b26', clothStep: 0.09,
+    voidCol: '#150b26',
   }),
   head: { S: WAR_HEAD_S, E: WAR_HEAD_E, N: WAR_HEAD_N },
   headAt: { S: [9, 4], E: [9, 4], N: [9, 4] },
@@ -795,10 +833,15 @@ function makeGhosts(S) {
 // wings beat around it and a wake of motes trails behind — the wings and the wake are what makes
 // it findable at all, which is exactly its role in play.
 const SPR_W = 26, SPR_H = 30, SPR_PIVOT = { x: 13, y: 27 };
+// The pixie is nothing but refracted light, so on the house curve she goes fluorescent unless her
+// bases are pulled toward glass-grey and her shimmer takes a low, tight slice: a creature may carry
+// a hot accent, it may not BE one (style.js, CHROMA_MEAN_FRACTION). She is extended-bestiary art —
+// no MONSTER_TABLE type maps here — and still short of the five-tone minimum her body was drawn in.
 const SPRITE_PALETTE = casterPalette({
-  skin: '#bfe6ff', cloth: '#7fc9ff', trim: '#4f7fa8', metal: '#9fc4d8',
-  accent: '#d8f2ff', magic: '#8be8ff', eye: '#c9ff7a', spark: '#ffffff',
-  shimmer: '#a8e4ff', voidCol: '#26394f',
+  skin: '#a9c8da', cloth: '#7fa3bd', trim: '#4f7fa8', metal: '#9fc4d8',
+  accent: '#c6d8e2', magic: '#7fc8de', eye: '#c9ff7a', spark: '#ffffff',
+  shimmer: '#93b6c8', voidCol: '#26394f',
+  picks: { shimmer: [1, 3, 5], skin: [1, 3, 5], cloth: [0, 2, 3, 4], magic: [1, 3, 5] },
 });
 
 /** The pixie's body, solid — never drawn, only hollowed. */

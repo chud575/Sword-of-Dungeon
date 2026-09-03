@@ -8,6 +8,7 @@
 import { BEAST_SPRITES } from './beasts.js';
 import { BOSS_SPRITES } from './boss.js';
 import { CASTER_SPRITES } from './caster.js';
+import { DRAKE_SPRITES } from './drakes.js';
 import { HUMAN_BUILDERS } from './humans.js';
 import { HUMANOID_BUILDERS } from './humanoid.js';
 import { UNDEAD_SPRITES } from './undead.js';
@@ -22,6 +23,9 @@ export const MONSTER_SPRITES = {
   ...UNDEAD_SPRITES,
   ...BEAST_SPRITES,
   ...BOSS_SPRITES,
+  // last: the wyvern / shadow dragon / fyre drake / dimension spider each own a silhouette here
+  // (monsters/drakes.js) instead of sharing buildDragon() and the generic spider
+  ...DRAKE_SPRITES,
 };
 
 /** The builder for a monster type, or null when that type is still a low-poly mesh. */

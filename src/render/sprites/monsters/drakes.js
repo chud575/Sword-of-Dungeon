@@ -1,0 +1,759 @@
+// drakes: the three winged/scaled things of MONSTER_TABLE that used to SHARE ONE DRAWING, plus the
+// spider that comes through the wall. Before this file `wyvern`, `shadow-dragon` and `fyre-drake`
+// were all served by two builders (`buildDragon` twice, `buildSalamander` once) and
+// `dimension-spider` was the generic six-legged `buildSpider` — four MONSTER_TABLE entries, two
+// silhouettes. A bestiary in which the thing that kills you at depth 8 and the thing that kills you
+// at depth 20 are the same picture is not a bestiary.
+//
+// Everything here obeys sprites/style.js: the one INK, the one LIT (top-left) key light, house
+// `ramp()`s only, and `lint()` clean. The mass/limb/curve/crest/wingFan form-shading toolkit is
+// shared with the boss group (monsters/boss.js) so a drake turns like a form instead of pillowing.
+//
+// FOUR SILHOUETTES THAT CANNOT BE CONFUSED, at gameplay distance, before any colour:
+//   wyvern            TWO legs and nothing else: the wings ARE its arms, hooked up over the
+//                     shoulders like folded elbows, and a whip tail longer than the body ending in
+//                     a barbed spade. Dry olive-tan leather, rust membrane — the dusty one.
+//   shadow-dragon     FOUR legs planted under a wing span twice its own width, a long S-neck and a
+//                     lyre of horns. Violet-black scale with an inner glow: the light lives INSIDE
+//                     it and leaks out along the throat, the chest seams and the wing veins.
+//   fyre-drake        squat: a wide slab of a body a hand off the floor on four short thick legs,
+//                     a head almost as wide as its shoulders, no wings at all. Molten veins run its
+//                     flanks and the fire under it throws light UP onto the jaw and the belly.
+//   dimension-spider  EIGHT jointed legs, each one three tapering segments — knees above the body,
+//                     feet planted wide — and a violet echo of itself standing a pixel out of
+//                     register, because half of it is somewhere else.
+import { Palette, outline, makePix, setPx, getPx, blit } from '../pixelPainter.js';
+import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { mass, limb, curve, crest, wingFan, clips, flash, squashTo, tilt } from './boss.js';
+
+/** @typedef {import('../pixelPainter.js').Pix} Pix */
+
+const lerp = (a, b, t) => a + (b - a) * t;
+/** The one house outline: exactly one pixel of INK, softened to INK_LIT on the lit edges. */
+const ink = (p) => outline(p, '#', { lit: LIT, litKey: '@' });
+
+/**
+ * THE ATLAS CELL IS PART OF THE DRAWING. A wing tip, a tail barb or a horn that reaches the edge of
+ * its cell comes back with a flat un-inked cut across it, because `outline()` has nowhere to put the
+ * pixel. Every drake is therefore posed in a SCRATCH pix sized to the pose and then seated in a
+ * larger cell with a margin all round: `pad(w, h, dx, dy)` returns that seating function, and the
+ * frame's pivot moves with it.
+ * @param {number} w @param {number} h the real cell @param {number} dx @param {number} dy the margin
+ */
+const pad = (w, h, dx, dy) => (q) => ink(blit(makePix(w, h), q, dx, dy));
+
+/**
+ * WHERE A FORM SITS ON ITS RAMP.
+ * `tone()` (monsters/boss.js) quantises a lambert term onto a ramp, and it was tuned against the
+ * boss group's NARROW hand-rolled ramps. A style.js `ramp()` is deliberately much wider — its ends
+ * are `VALUE_RANGE_TARGET` apart — so the same lambert lands a form near the TOP of it and every
+ * creature comes out chalk. `TB` is the species' offset down its own ramp, set once at the top of
+ * each frame function; `M`/`C`/`LB` are mass/curve/limb with `TB` folded into the bias, so a drake
+ * is painted in the middle of its ramp with room to go lighter AND darker.
+ */
+let TB = 0;
+const M = (p, cx, cy, rx, ry, keys, o = {}) => mass(p, cx, cy, rx, ry, keys, { ...o, bias: (o.bias || 0) + TB });
+const C = (p, pts, r0, r1, keys, bias = 0) => curve(p, pts, r0, r1, keys, bias + TB);
+const LB = (p, x0, y0, x1, y1, r0, r1, keys, bias = 0) => limb(p, x0, y0, x1, y1, r0, r1, keys, bias + TB);
+
+/**
+ * A palette holding only house ramps: `set('keys', base)` registers one `ramp()` (5-7 steps,
+ * darkest first) against those keys, so no drake can invent its own shading law.
+ */
+/** Ramp options: keep a highlight IN the species colour (the default satShift greys the top step). */
+const HUE = { satShift: 0.03 }, BONE = { satShift: 0.015, hueShift: 0.035 };
+
+function drakePalette() {
+  const p = new Palette().set('#', INK).set('@', INK_LIT).set('F', '#fff4f0');
+  /** @param {string} keys @param {string} base @param {object} [o] */
+  p.band = (keys, base, o) => { const r = ramp(base, keys.length, o); [...keys].forEach((k, i) => p.set(k, r[i])); return p; };
+  return p;
+}
+
+/** Three toes and a dew-claw under a foot, pointing `dir` (+1 = toward the screen right). */
+function talons(p, x, y, dir, key) {
+  for (let i = 0; i < 3; i++) { setPx(p, x + dir * (i - 1) * 2, y, key); setPx(p, x + dir * (i - 1) * 2, y + 1, key); }
+  setPx(p, x - dir * 3, y, key);
+}
+
+/** A row of small even fangs along a jaw. */
+function fangs(p, x0, x1, y, key) { for (let x = x0; x <= x1; x += 2) setPx(p, x, y, key); }
+
+// ==========================================================================================
+//                                        WYVERN
+// ==========================================================================================
+// Read: a two-legged drake. It has no forelegs at all — the wings hang off the chest like arms,
+// elbows hooked ABOVE the shoulders, membrane falling to the hocks — and it balances that front end
+// on a tail as long as it is tall, finished with a flat barbed spade.
+const WY_SW = 60, WY_SH = 68;                     // the scratch the poses are written in
+const WY_DX = 5, WY_DY = 2, WY_W = WY_SW + 10, WY_H = WY_SH + 3;
+const WY_PIV = { x: 30 + WY_DX, y: 66 + WY_DY };
+const wyvDone = pad(WY_W, WY_H, WY_DX, WY_DY);
+const WY = drakePalette()
+  .band('123456', '#7a6d3e', HUE)   // dry olive-tan hide
+  .band('qrstu', '#93553a', HUE)    // rust wing membrane
+  .band('vwxyz', '#a09684', BONE)   // horn, beak plate, talon
+  .set('E', '#1d1526').set('Y', '#ffc45a');   // eye socket, the amber eye (emissive)
+const WY_HIDE = '123456', WY_MEM = 'qrstu', WY_HORN = 'vwxy';
+/** Sun-dried leather sits low on its ramp: this is the dusty drake, not a chalk one. */
+const WY_TB = -0.09;
+
+/** One wing, held as an ARM: `k` 0 = folded hook at the shoulder, 1 = full reach. */
+function wyvWing(p, cx, cy, k, dir, droop = 0) {
+  const fingers = [
+    { a: lerp(-1.86, -1.62, k), r: lerp(14, 27, k) },
+    { a: lerp(-1.18, -1.02, k) + droop, r: lerp(16, 29, k) },
+    { a: lerp(-0.42, -0.34, k) + droop, r: lerp(15, 24, k) },
+    { a: lerp(0.30, 0.24, k) + droop, r: lerp(12, 17, k) },
+    { a: lerp(0.92, 0.78, k) + droop, r: lerp(9, 12, k) },
+  ];
+  wingFan(p, cx, cy, fingers, dir, 'qrs' + 'w', { scallop: 2.6, tatter: 1 });
+  // the wrist claw at the crown of the hook — the wyvern's hand
+  const t = fingers[0];
+  const tx = Math.round(cx + Math.cos(t.a) * t.r * dir), ty = Math.round(cy + Math.sin(t.a) * t.r);
+  setPx(p, tx, ty, 'x'); setPx(p, tx, ty - 1, 'y'); setPx(p, tx + dir, ty - 1, 'w');
+}
+
+/** A bird-of-prey hind leg: heavy thigh, reversed hock, splayed talons on the floor. */
+function wyvLeg(p, hx, hy, dir, lift, bias) {
+  const foot = 64 - lift;
+  C(p, [[hx, hy], [hx + dir * 4, hy + 8], [hx + dir * 1.5, hy + 15], [hx + dir * 2.5, foot - 1]], 5.2, 2.4, WY_HIDE, bias - 0.12);
+  M(p, hx + dir * 2.5, foot - 1, 4.2, 2.0, WY_HIDE, { n: 2.6, bias: bias - 0.08 });
+  talons(p, hx + dir * 2.5, foot, dir, 'x');
+}
+
+/** The barbed spade at the end of the tail — the wyvern's other weapon. */
+function wyvBarb(p, x, y, ax, ay) {
+  const ux = x - ax, uy = y - ay, L = Math.hypot(ux, uy) || 1;
+  LB(p, x, y, x + ux / L * 4, y + uy / L * 4, 2.6, 0.6, WY_HORN, 0.02);
+  setPx(p, Math.round(x - uy / L * 3), Math.round(y + ux / L * 3), 'x');
+  setPx(p, Math.round(x + uy / L * 3), Math.round(y - ux / L * 3), 'w');
+}
+
+/** The narrow raptor skull: a beaked wedge under a pair of short swept horns, one hot eye. */
+function wyvHead(p, hx, hy, dir, both = false) {
+  M(p, hx, hy, 5.0, 4.2, WY_HIDE, { n: 2.3 });
+  LB(p, hx, hy + 1, hx + dir * 7, hy + 3, 3.6, 1.8, WY_HIDE, 0.02);       // the muzzle
+  LB(p, hx + dir * 2, hy + 4, hx + dir * 6, hy + 5, 2.2, 1.2, WY_HORN, -0.04); // the beak plate
+  C(p, [[hx - dir * 2, hy - 3], [hx - dir * 5, hy - 6], [hx - dir * 7, hy - 9]], 2.0, 0.5, WY_HORN, -0.16);
+  if (both) C(p, [[hx + dir * 2, hy - 3], [hx + dir * 5, hy - 6], [hx + dir * 7, hy - 9]], 2.0, 0.5, WY_HORN, -0.24);
+  fangs(p, Math.min(hx + dir * 2, hx + dir * 6), Math.max(hx + dir * 2, hx + dir * 6), hy + 6, 'y');
+  setPx(p, hx + dir * 2, hy - 1, 'E'); setPx(p, hx + dir * 2, hy, 'Y');
+}
+
+/**
+ * One wyvern frame.
+ * @param {'S'|'E'|'N'} f
+ * @param {{bob?:number, stride?:number, wing?:number, neck?:number, tail?:number, crouch?:number,
+ *   lunge?:number, droop?:number}} o
+ */
+function wyvFrame(f, o = {}) {
+  const p = makePix(WY_SW, WY_SH);
+  TB = WY_TB;
+  const b = o.bob || 0, s = o.stride || 0, c = o.crouch || 0, k = o.wing ?? 0.24;
+  const neck = o.neck || 0, lunge = o.lunge || 0, droop = o.droop || 0;
+  const sw = [0, -4, 4][(o.tail || 0) % 3];
+  const lLift = Math.max(0, s) * 3, rLift = Math.max(0, -s) * 3;
+
+  if (f === 'S') {
+    // the tail sweeps out behind and to the screen left, the spade lifted clear of the floor
+    C(p, [[31, 47 + b], [22, 57 + b + sw * 0.3], [10, 56 + b + sw * 0.7], [3, 45 + b + sw], [5, 34 + b + sw * 1.3]], 5.2, 1.2, WY_HIDE, -0.16);
+    wyvBarb(p, 5, 31 + b + sw, 4, 39 + b + sw);
+    wyvWing(p, 19, 34 + b, k, -1, droop);
+    wyvWing(p, 41, 34 + b, k, 1, droop);
+    wyvLeg(p, 24, 44 + b + c, -1, lLift, -0.02);
+    wyvLeg(p, 36, 44 + b + c, 1, rLift, -0.10);
+    // the barrel: deep chest over a keeled belly, no forelegs anywhere
+    M(p, 30, 40 + b, 11.4, 9.6, WY_HIDE, { n: 2.5 });
+    M(p, 30, 31 + b, 10.4, 7.8, WY_HIDE, { n: 2.4 });
+    M(p, 30, 37 + b, 5.6, 7.2, WY_MEM, { n: 2.3, bias: 0.10 });          // pale keel plates
+    for (let i = 0; i < 4; i++) for (let x = 26; x <= 34; x++) setPx(p, x, 32 + i * 3 + b, 's');
+    C(p, [[30, 28 + b], [30, 22 + b - neck], [30 + lunge, 18 + b - neck]], 5.6, 4.0, WY_HIDE);
+    crest(p, [[30, 27 + b], [30, 33 + b], [30, 40 + b]], 2, WY_HIDE, { tip: 'w' });
+    wyvHead(p, 30 + lunge, 14 + b - neck, 1, true);
+    // the second (far) eye, seen head-on
+    setPx(p, 27 + lunge, 13 + b - neck, 'E'); setPx(p, 27 + lunge, 14 + b - neck, 'Y');
+    return wyvDone(p);
+  }
+
+  if (f === 'E') {
+    wyvWing(p, 26, 33 + b, k * 0.85, -1, droop);                            // far wing, behind
+    C(p, [[22, 45 + b], [12, 51 + b + sw * 0.4], [4, 46 + b + sw]], 5.0, 1.2, WY_HIDE, -0.14);
+    wyvBarb(p, 3, 43 + b + sw, 8, 49 + b + sw);
+    wyvLeg(p, 25, 43 + b + c, -1, rLift, -0.18);
+    M(p, 30, 39 + b, 12.0, 9.2, WY_HIDE, { n: 2.5 });
+    M(p, 33, 32 + b, 9.6, 7.2, WY_HIDE, { n: 2.4 });
+    M(p, 34, 39 + b, 5.6, 6.0, WY_MEM, { n: 2.3, bias: 0.08 });
+    crest(p, [[24, 32 + b], [30, 30 + b], [36, 31 + b]], 2, WY_HIDE, { tip: 'w' });
+    C(p, [[36, 30 + b], [42, 25 + b - neck], [46 + lunge, 20 + b - neck]], 5.2, 3.8, WY_HIDE);
+    wyvHead(p, 48 + lunge, 17 + b - neck, 1);
+    wyvLeg(p, 33, 44 + b + c, 1, lLift, 0);
+    wyvWing(p, 31, 32 + b, k, 1, droop);                                    // near wing, over the body
+    return wyvDone(p);
+  }
+
+  // NORTH — walking away: the tail runs at the camera, the two wing hooks stand off the shoulders
+  C(p, [[30, 46 + b], [29 + sw * 0.4, 54 + b], [27 + sw, 61 + b]], 4.8, 1.4, WY_HIDE, 0.02);
+  wyvWing(p, 19, 34 + b, k, -1, droop);
+  wyvWing(p, 41, 34 + b, k, 1, droop);
+  wyvLeg(p, 24, 44 + b + c, -1, lLift, -0.08);
+  wyvLeg(p, 36, 44 + b + c, 1, rLift, -0.14);
+  M(p, 30, 39 + b, 11.6, 9.8, WY_HIDE, { n: 2.5, bias: -0.06 });
+  M(p, 30, 30 + b, 10.6, 7.6, WY_HIDE, { n: 2.4, bias: -0.03 });
+  crest(p, [[30, 24 + b], [30, 32 + b], [30, 42 + b]], 2, WY_HIDE, { tip: 'w' });
+  C(p, [[30, 27 + b], [30, 21 + b - neck], [30, 17 + b - neck]], 5.4, 4.2, WY_HIDE, -0.04);
+  M(p, 30, 14 + b - neck, 5.0, 4.2, WY_HIDE, { n: 2.3, bias: -0.04 });
+  C(p, [[27, 12 + b - neck], [22, 9 + b - neck], [18, 9 + b - neck]], 2.2, 0.6, WY_HORN, -0.02);
+  C(p, [[33, 12 + b - neck], [38, 9 + b - neck], [42, 9 + b - neck]], 2.2, 0.6, WY_HORN, -0.10);
+  return wyvDone(p);
+}
+
+function wyvAnims(f) {
+  const mk = (o) => wyvFrame(f, o);
+  const idle = {
+    frames: [mk({ wing: 0.22, tail: 0 }), mk({ wing: 0.30, bob: -1, neck: 1, tail: 1 }), mk({ wing: 0.34, bob: -1, neck: 1, tail: 2, droop: -0.05 }), mk({ wing: 0.26, tail: 1 })],
+    durations: [400, 320, 360, 320], loop: true,
+  };
+  // a two-legged strut: the wings beat a half-count to keep the front end up
+  const walk = {
+    frames: [mk({ stride: 1, wing: 0.28, tail: 1 }), mk({ stride: 0.4, wing: 0.5, bob: -1, crouch: 1, tail: 2 }), mk({ stride: -1, wing: 0.30, tail: 0 }), mk({ stride: -0.4, wing: 0.52, bob: -1, crouch: 1, tail: 1 })],
+    durations: [170, 150, 170, 150], loop: true,
+  };
+  // wings thrown wide, then the whole neck snaps forward into a bite
+  const attack = {
+    frames: [mk({ wing: 0.95, neck: 3, bob: -2, tail: 2 }), mk({ wing: 1, neck: 1, lunge: 2, tail: 1 }), mk({ wing: 0.55, neck: -3, lunge: 5, crouch: 1, tail: 0 }), mk({ wing: 0.42, neck: -1, crouch: 1, bob: 1 })],
+    durations: [180, 110, 130, 180], loop: false,
+  };
+  const recoil = mk({ wing: 0.18, neck: -2, crouch: 2, bob: 2, droop: 0.22, tail: 2 });
+  const hurt = { frames: [flash(recoil), recoil], durations: [80, 190], loop: false };
+  const d0 = mk({ wing: 0.8, neck: 2, bob: -1, tail: 2 });
+  const d1 = mk({ wing: 0.3, neck: -3, crouch: 3, bob: 2, droop: 0.4 });
+  const d2 = squashTo(tilt(mk({ wing: 0.16, neck: -4, crouch: 4, bob: 3, droop: 0.55 }), 0.3, 30 + WY_DX, 64 + WY_DY), 0.72, WY_H - 3);
+  const death = { frames: [d0, d1, d2, squashTo(d2, 0.6, WY_H - 3), squashTo(d2, 0.48, WY_H - 3)], durations: [150, 180, 210, 470, 900], loop: false };
+  return { idle, walk, attack, hurt, death };
+}
+
+/** Wyvern: a 70x71 cell around a 60x68 pose — two-legged, wings for arms, a barbed whip tail. */
+export function buildWyvern() {
+  return { anims: clips(wyvAnims), palette: WY, w: WY_W, h: WY_H, pivot: WY_PIV, emissive: 'Y', scale: 1 };
+}
+
+// ==========================================================================================
+//                                     SHADOW DRAGON
+// ==========================================================================================
+// Read: four legs planted under a span twice its own width, and a light that is INSIDE it. The
+// scale is a violet so dark it is nearly the floor; what separates it from the floor is the glow
+// leaking out of the throat, along the chest seams and down the veins of the membrane.
+const SD_SW = 76, SD_SH = 72;
+const SD_DX = 7, SD_DY = 5, SD_W = SD_SW + 14, SD_H = SD_SH + 8;
+const SD_PIV = { x: 38 + SD_DX, y: 70 + SD_DY };
+const sdDone = pad(SD_W, SD_H, SD_DX, SD_DY);
+const SD = drakePalette()
+  .band('123456', '#3a3157', HUE)   // violet-black scale
+  .band('qrstu', '#4e3568', HUE)    // plum membrane: thin enough that the light behind it comes through
+  .band('vwxyz', '#8f8a80', BONE)   // bone horn and claw
+  .set('G', '#7fd8ff').set('H', '#c9f0ff').set('I', '#4a86b8')  // the inner glow: core, flare, bleed
+  .set('E', '#1a1425');
+const SD_SCL = '123456', SD_MEM = 'qrstu', SD_HORN = 'vwxy';
+/** The darkest body in the game: it is read by the light LEAKING OUT of it, not falling on it. */
+const SD_TB = -0.26;
+
+/** A wing at spread `k`: the span is the read, so even furled it reaches past the shoulder. */
+function sdWing(p, cx, cy, k, dir, droop = 0) {
+  const fingers = [
+    { a: lerp(-1.42, -1.30, k), r: lerp(17, 33, k) },
+    { a: lerp(-0.82, -0.62, k) + droop, r: lerp(18, 35, k) },
+    { a: lerp(-0.22, -0.06, k) + droop, r: lerp(16, 30, k) },
+    { a: lerp(0.36, 0.42, k) + droop, r: lerp(13, 21, k) },
+    { a: lerp(0.92, 0.86, k) + droop, r: lerp(9, 13, k) },
+  ];
+  wingFan(p, cx, cy, fingers, dir, 'stu' + 'x', { scallop: 3.6 });
+  // the glow runs down the veins between the fingers, brightest at the root
+  for (let i = 1; i < fingers.length; i++) {
+    const a = (fingers[i - 1].a + fingers[i].a) / 2, r = (fingers[i - 1].r + fingers[i].r) / 2;
+    for (let t = 3; t < r * 0.7; t += 2) {
+      const x = Math.round(cx + Math.cos(a) * t * dir), y = Math.round(cy + Math.sin(a) * t);
+      if (getPx(p, x, y)) setPx(p, x, y, t < r * 0.34 ? 'G' : 'I');
+    }
+  }
+  const t0 = fingers[0];
+  const tx = Math.round(cx + Math.cos(t0.a) * t0.r * dir), ty = Math.round(cy + Math.sin(t0.a) * t0.r);
+  setPx(p, tx, ty, 'x'); setPx(p, tx, ty - 1, 'w');
+}
+
+/** The long skull: a narrow wedge with the lyre of horns and a throat full of cold fire. */
+function sdHead(p, hx, hy, dir, glow) {
+  M(p, hx, hy, 5.4, 4.2, SD_SCL, { n: 2.3 });
+  LB(p, hx, hy + 1, hx + dir * 8, hy + 3, 3.8, 2.0, SD_SCL, 0.02);
+  C(p, [[hx - dir * 3, hy - 3], [hx - dir * 7, hy - 8], [hx - dir * 10, hy - 13]], 2.4, 0.6, SD_HORN, -0.20);
+  C(p, [[hx - dir * 4, hy - 1], [hx - dir * 8, hy - 3], [hx - dir * 11, hy - 2]], 1.7, 0.5, SD_HORN, -0.28);
+  fangs(p, Math.min(hx + dir * 2, hx + dir * 7), Math.max(hx + dir * 2, hx + dir * 7), hy + 5, 'y');
+  setPx(p, hx + dir * 2, hy - 1, 'E'); setPx(p, hx + dir * 2, hy, 'G');
+  if (glow) for (let i = 0; i < 3; i++) setPx(p, hx + dir * (4 + i), hy + 4, i < 2 ? 'H' : 'G');
+}
+
+/**
+ * One shadow-dragon frame.
+ * @param {'S'|'E'|'N'} f
+ * @param {{bob?:number, wing?:number, stride?:number, neck?:number, lunge?:number, breath?:number,
+ *   droop?:number, crouch?:number, heat?:number}} o
+ */
+function sdFrame(f, o = {}) {
+  const p = makePix(SD_SW, SD_SH);
+  TB = SD_TB;
+  const b = o.bob || 0, k = o.wing ?? 0.66, s = o.stride || 0, c = o.crouch || 0;
+  const neck = o.neck || 0, lunge = o.lunge || 0, droop = o.droop || 0, heat = o.heat ?? 0.6;
+  const ground = 67;
+
+  /** The chest seams the inner light leaks through. */
+  const seams = (cx, cy, wide) => {
+    for (let i = 0; i < 4; i++) {
+      const y = cy + i * 3;
+      for (let x = cx - wide + (i & 1); x <= cx + wide - (i & 1); x += 2) {
+        if (!getPx(p, x, y)) continue;
+        setPx(p, x, y, heat > 0.7 && i < 2 ? 'H' : heat > 0.35 ? 'G' : 'I');
+      }
+    }
+  };
+
+  if (f === 'S') {
+    sdWing(p, 24, 30 + b, k, -1, droop);
+    sdWing(p, 52, 30 + b, k, 1, droop);
+    C(p, [[38, 52 + b], [26, 60 + b], [13, 62 + b], [5, 55 + b]], 5.4, 1.2, SD_SCL, -0.16);
+    // hind legs, then the body, then the two FORELEGS planted in front — the four-legged read
+    C(p, [[30, 46 + b + c], [25, 54 + b + c], [28 - Math.max(0, s) * 2, ground]], 6.2, 3.6, SD_SCL, -0.06);
+    C(p, [[46, 46 + b + c], [51, 54 + b + c], [48 + Math.max(0, -s) * 2, ground]], 6.2, 3.6, SD_SCL, -0.06);
+    for (const fx of [28 - Math.max(0, s) * 2, 48 + Math.max(0, -s) * 2]) {
+      M(p, fx, ground, 5.0, 2.0, SD_SCL, { n: 2.6, bias: -0.12 });
+      talons(p, fx, ground + 1, 1, 'w');
+    }
+    M(p, 38, 44 + b, 12.6, 9.6, SD_SCL, { n: 2.5 });
+    M(p, 38, 34 + b, 11.0, 8.4, SD_SCL, { n: 2.4 });
+    M(p, 38, 39 + b, 6.4, 7.4, SD_MEM, { n: 2.4, bias: 0.08 });
+    seams(38, 32 + b, 5);
+    C(p, [[38, 31 + b], [38, 24 + b - neck], [38 + lunge, 19 + b - neck]], 6.6, 4.6, SD_SCL);
+    sdHead(p, 38 + lunge, 15 + b - neck, 1, o.breath);
+    setPx(p, 35 + lunge, 14 + b - neck, 'E'); setPx(p, 35 + lunge, 15 + b - neck, 'G');
+    if (o.breath) for (let i = 0; i < o.breath; i++) { const r = 1 + i * 0.6; for (let j = -r; j <= r; j++) setPx(p, Math.round(38 + lunge + j), 21 + b - neck + i, Math.abs(j) < r * 0.5 ? 'H' : 'G'); }
+    C(p, [[28, 38 + b], [22, 46 + b], [26, 55 + b]], 3.8, 2.4, SD_SCL, -0.02);
+    C(p, [[48, 38 + b], [54, 46 + b], [50, 55 + b]], 3.8, 2.4, SD_SCL, -0.08);
+    for (const fx of [26, 50]) talons(p, fx, 57 + b, 1, 'w');
+    crest(p, [[38, 26 + b], [38, 34 + b], [38, 44 + b], [38, 52 + b]], 3, SD_SCL, { tip: 'y' });
+    return sdDone(p);
+  }
+
+  if (f === 'E') {
+    sdWing(p, 30, 30 + b, k * 0.9, -1, droop);
+    C(p, [[24, 48 + b], [11, 54 + b], [3, 46 + b]], 5.4, 1.2, SD_SCL, -0.14);
+    C(p, [[28, 44 + b + c], [22, 54 + b + c], [26 + Math.max(0, -s) * 3, ground]], 5.8, 3.4, SD_SCL, -0.18);
+    C(p, [[34, 40 + b], [28, 50 + b], [32 + Math.max(0, s) * 2, ground]], 3.8, 2.4, SD_SCL, -0.16);
+    M(p, 34, 42 + b, 12.8, 9.4, SD_SCL, { n: 2.5 });
+    M(p, 37, 34 + b, 10.4, 7.6, SD_SCL, { n: 2.4 });
+    M(p, 39, 42 + b, 6.4, 6.4, SD_MEM, { n: 2.4, bias: 0.07 });
+    seams(39, 34 + b, 4);
+    crest(p, [[24, 34 + b], [32, 31 + b], [40, 32 + b]], 3, SD_SCL, { tip: 'y' });
+    C(p, [[42, 32 + b], [49, 25 + b - neck], [55 + lunge, 20 + b - neck]], 6.2, 4.4, SD_SCL);
+    sdHead(p, 58 + lunge, 17 + b - neck, 1, o.breath);
+    if (o.breath) for (let i = 0; i < o.breath; i++) { const r = 1 + i * 0.6; for (let j = -r; j <= r; j++) setPx(p, 58 + lunge + 6 + i, Math.round(20 + b - neck + j), Math.abs(j) < r * 0.5 ? 'H' : 'G'); }
+    C(p, [[40, 46 + b + c], [35, 55 + b + c], [39 + Math.max(0, s) * 3, ground]], 6.0, 3.6, SD_SCL, -0.02);
+    C(p, [[44, 38 + b], [50, 48 + b], [46, 57 + b]], 3.6, 2.3, SD_SCL, 0.02);
+    for (const fx of [26 + Math.max(0, -s) * 3, 39 + Math.max(0, s) * 3]) { M(p, fx, ground, 5.0, 2.0, SD_SCL, { n: 2.6, bias: -0.12 }); talons(p, fx, ground + 1, 1, 'w'); }
+    talons(p, 46, 59 + b, 1, 'w'); talons(p, 32 + Math.max(0, s) * 2, ground + 1, 1, 'w');
+    sdWing(p, 36, 29 + b, k, 1, droop);
+    return sdDone(p);
+  }
+
+  // NORTH — the span from behind: two wings over a ridged spine, the tail running at the camera
+  sdWing(p, 24, 30 + b, k, -1, droop);
+  sdWing(p, 52, 30 + b, k, 1, droop);
+  C(p, [[38, 48 + b], [37, 56 + b], [35, 64 + b]], 5.2, 1.5, SD_SCL, 0.02);
+  C(p, [[30, 46 + b + c], [24, 54 + b + c], [27 - Math.max(0, s) * 2, ground]], 6.2, 3.6, SD_SCL, -0.12);
+  C(p, [[46, 46 + b + c], [52, 54 + b + c], [49 + Math.max(0, -s) * 2, ground]], 6.2, 3.6, SD_SCL, -0.12);
+  for (const fx of [27 - Math.max(0, s) * 2, 49 + Math.max(0, -s) * 2]) { M(p, fx, ground, 5.0, 2.0, SD_SCL, { n: 2.6, bias: -0.16 }); talons(p, fx, ground + 1, 1, 'w'); }
+  M(p, 38, 43 + b, 12.8, 10.0, SD_SCL, { n: 2.5, bias: -0.06 });
+  M(p, 38, 33 + b, 11.4, 8.4, SD_SCL, { n: 2.4, bias: -0.04 });
+  crest(p, [[38, 24 + b], [38, 34 + b], [38, 44 + b], [38, 54 + b]], 3.4, SD_SCL, { tip: 'y' });
+  for (let i = 0; i < 4; i++) setPx(p, 38, 30 + i * 4 + b, heat > 0.55 ? 'G' : 'I');
+  C(p, [[38, 30 + b], [38, 23 + b - neck], [38, 18 + b - neck]], 6.2, 4.6, SD_SCL, -0.04);
+  M(p, 38, 15 + b - neck, 5.6, 4.4, SD_SCL, { n: 2.2, bias: -0.04 });
+  C(p, [[34, 13 + b - neck], [30, 8 + b - neck], [27, 3 + b - neck]], 2.4, 0.6, SD_HORN, -0.20);
+  C(p, [[42, 13 + b - neck], [46, 8 + b - neck], [49, 3 + b - neck]], 2.4, 0.6, SD_HORN, -0.28);
+  return sdDone(p);
+}
+
+function sdAnims(f) {
+  const mk = (o) => sdFrame(f, o);
+  const idle = {
+    frames: [mk({ wing: 0.62, heat: 0.35 }), mk({ wing: 0.74, bob: -1, neck: 1, heat: 0.75 }), mk({ wing: 0.82, bob: -1, neck: 1, droop: -0.06, heat: 1 }), mk({ wing: 0.68, heat: 0.5 })],
+    durations: [430, 340, 380, 340], loop: true,
+  };
+  const walk = {
+    frames: [mk({ stride: 1, wing: 0.64, heat: 0.5 }), mk({ stride: 0.4, wing: 0.84, bob: -1, crouch: 1, heat: 0.7 }), mk({ stride: -1, wing: 0.66, heat: 0.5 }), mk({ stride: -0.4, wing: 0.86, bob: -1, crouch: 1, heat: 0.7 })],
+    durations: [195, 175, 195, 175], loop: true,
+  };
+  const attack = {
+    frames: [mk({ wing: 1, neck: 3, bob: -2, heat: 1 }), mk({ wing: 0.96, neck: 2, lunge: 2, breath: 3, heat: 1 }), mk({ wing: 0.54, neck: -2, lunge: 5, crouch: 1, breath: 8, heat: 1 }), mk({ wing: 0.64, neck: 0, crouch: 1, bob: 1, heat: 0.5 })],
+    durations: [190, 100, 140, 190], loop: false,
+  };
+  const recoil = mk({ wing: 0.42, neck: -2, crouch: 2, bob: 2, droop: 0.22, heat: 0.2 });
+  const hurt = { frames: [flash(recoil), recoil], durations: [80, 190], loop: false };
+  const d0 = mk({ wing: 0.9, neck: 2, bob: -1, heat: 0.9 });
+  const d1 = mk({ wing: 0.34, neck: -3, crouch: 3, bob: 2, droop: 0.36, heat: 0.4 });
+  const d2 = squashTo(tilt(mk({ wing: 0.2, neck: -4, crouch: 4, bob: 3, droop: 0.5, heat: 0.15 }), 0.32, 38 + SD_DX, 68 + SD_DY), 0.72, SD_H - 3);
+  const death = { frames: [d0, d1, d2, squashTo(d2, 0.6, SD_H - 3), squashTo(d2, 0.46, SD_H - 3)], durations: [150, 190, 220, 480, 950], loop: false };
+  return { idle, walk, attack, hurt, death };
+}
+
+/** Shadow dragon: a 90x80 cell around a 76x72 pose — four legs under a full span, lit from inside. */
+export function buildShadowDragon() {
+  return { anims: clips(sdAnims), palette: SD, w: SD_W, h: SD_H, pivot: SD_PIV, emissive: 'GH', scale: 1 };
+}
+
+// ==========================================================================================
+//                                       FYRE DRAKE
+// ==========================================================================================
+// Read: SQUAT. Its mass runs along the floor, not up: a slab of a body a hand off the ground on
+// four short thick legs, a head almost as wide as its shoulders, and no wings at all. Molten veins
+// split the hide down both flanks and the fire in them throws light UP onto the jaw, the dewlap and
+// the underside of the belly — the only creature in the game lit from below as well as above.
+const FD_SW = 76, FD_SH = 60;
+const FD_DX = 5, FD_DY = 2, FD_W = FD_SW + 10, FD_H = FD_SH + 5;
+const FD_PIV = { x: 38 + FD_DX, y: 58 + FD_DY };
+const fdDone = pad(FD_W, FD_H, FD_DX, FD_DY);
+const FD = drakePalette()
+  .band('123456', '#5e3128', HUE)   // charred red-brown hide
+  .band('qrstu', '#a8763f', HUE)    // hot ochre belly plate
+  .band('vwxyz', '#bdb298', BONE)   // tooth, claw, horn
+  .set('k', '#b8401a').set('l', '#ff8f30').set('m', '#ffe6a4')  // vein core / vein / white-hot
+  .set('E', '#1c1420');
+const FD_HIDE = '123456', FD_PLATE = 'qrstu';
+/** Charred hide: dark enough that the molten veins in it are the brightest thing on the creature. */
+const FD_TB = -0.13;
+
+/** A molten vein: a broken seam that brightens where the hide has split widest. */
+function veins(p, pts, heat) {
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
+    const n = Math.max(2, Math.round(Math.hypot(bx - ax, by - ay)));
+    for (let s = 0; s <= n; s++) {
+      const t = s / n, x = Math.round(lerp(ax, bx, t)), y = Math.round(lerp(ay, by, t));
+      if (!getPx(p, x, y)) continue;
+      const hot = (i + s) % 4 === 0 && heat > 0.5;
+      setPx(p, x, y, hot ? 'm' : (i + s) % 2 ? 'l' : 'k');
+      if (hot && getPx(p, x, y - 1)) setPx(p, x, y - 1, 'l');
+    }
+  }
+}
+
+/**
+ * The fire under it, painted as an interior under-light: one row in from the silhouette so the
+ * bottom rim stays dark and the KEY LIGHT still reads top-left (style.js KEY_LIGHT_MIN).
+ */
+function underLight(p, x0, x1, y, key) {
+  for (let x = x0; x <= x1; x++) {
+    if (!getPx(p, x, y) || !getPx(p, x, y + 1)) continue;
+    setPx(p, x, y, key);
+  }
+}
+
+/** A gout of fire from the jaws. */
+function gout(p, x, y, dx, dy, len) {
+  for (let i = 0; i < len; i++) {
+    const t = i / len, r = 1 + t * 3.4;
+    for (let j = -Math.round(r); j <= Math.round(r); j++) {
+      const px = Math.round(x + dx * i - dy * j), py = Math.round(y + dy * i + dx * j);
+      setPx(p, px, py, Math.abs(j) < r * 0.4 ? 'm' : Math.abs(j) < r * 0.75 ? 'l' : 'k');
+    }
+  }
+}
+
+/** A short, thick, sprawling leg: the knee sits level with the spine and the foot is planted wide. */
+function fdLeg(p, hx, hy, dir, spread, lift, bias) {
+  C(p, [[hx, hy], [hx + dir * spread, hy - 3], [hx + dir * (spread + 1), hy + 8 - lift]], 3.6, 2.6, FD_HIDE, bias);
+  M(p, hx + dir * (spread + 1), hy + 9 - lift, 4.0, 2.0, FD_HIDE, { n: 2.6, bias: bias - 0.06 });
+  talons(p, hx + dir * (spread + 1), hy + 10 - lift, dir, 'x');
+}
+
+/**
+ * One fyre-drake frame.
+ * @param {'S'|'E'|'N'} f
+ * @param {{bob?:number, gait?:number, tail?:number, heat?:number, rear?:number, breath?:number, crouch?:number}} o
+ */
+function fdFrame(f, o = {}) {
+  const p = makePix(FD_SW, FD_SH);
+  TB = FD_TB;
+  const b = (o.bob || 0) + (o.crouch || 0), g = o.gait || 0, heat = o.heat ?? 0.5;
+  const rear = o.rear || 0, sw = [0, -5, 5][(o.tail || 0) % 3];
+
+  if (f === 'E') {
+    // the tail: heavy at the root, a thick club of muscle rather than a whip
+    C(p, [[26, 36 + b], [16, 39 + b + sw * 0.3], [7, 36 + b + sw * 0.7], [2, 28 + b + sw]], 6.4, 1.4, FD_HIDE, -0.06);
+    fdLeg(p, 28, 40 + b, -1, 5, g * 2, -0.22);
+    fdLeg(p, 48, 40 + b, 1, 5, -g * 2, -0.22);
+    // the slab: wide, low, and deeper than it is tall
+    M(p, 38, 34 + b - rear, 18.5, 8.4, FD_HIDE, { n: 2.7 });
+    M(p, 38, 39 + b - rear * 0.4, 15.0, 4.0, FD_PLATE, { n: 2.8, bias: 0.04 });
+    for (let x = 25; x < 52; x += 3) setPx(p, x, 41 + b, 'r');
+    crest(p, [[22, 27 + b - rear * 0.3], [31, 25 + b - rear * 0.6], [42, 25 + b - rear], [52, 27 + b - rear]], 4, FD_HIDE, { tip: 'l' });
+    // neck: short and thick, the head carried barely above the shoulder
+    C(p, [[52, 33 + b - rear], [59, 31 + b - rear * 1.3]], 6.6, 5.6, FD_HIDE);
+    // the head: as wide as the shoulders, a slab of jaw under a heavy brow
+    M(p, 63, 30 + b - rear * 1.4, 8.6, 5.4, FD_HIDE, { n: 2.6 });
+    M(p, 65, 34 + b - rear * 1.4, 7.4, 2.6, FD_PLATE, { n: 2.8, bias: 0.02 });
+    fangs(p, 59, 71, 32 + b - rear * 1.4, 'y');
+    setPx(p, 63, 28 + b - rear * 1.4, 'E'); setPx(p, 64, 28 + b - rear * 1.4, 'l');
+    veins(p, [[24, 30 + b], [34, 28 + b], [45, 29 + b], [52, 31 + b]], heat);
+    veins(p, [[30, 36 + b], [40, 37 + b], [48, 36 + b]], heat * 0.8);
+    underLight(p, 24, 52, 41 + b, heat > 0.6 ? 'l' : 'k');
+    underLight(p, 58, 70, 35 + b - rear * 1.4, heat > 0.6 ? 'l' : 'k');
+    if (o.breath) gout(p, 72, 33 + b - rear * 1.4, 1, 0, o.breath);
+    return fdDone(p);
+  }
+
+  if (f === 'S') {
+    // head-on: the wide skull fills the front, the slab recedes behind it, the tail lashes out left
+    C(p, [[38, 28 + b], [28 + sw * 0.5, 23 + b], [17 + sw, 21 + b], [8 + sw * 1.4, 24 + b]], 5.4, 1.2, FD_HIDE, -0.16);
+    M(p, 38, 28 + b - rear, 17.0, 8.6, FD_HIDE, { n: 2.7, bias: -0.05 });
+    crest(p, [[28, 22 + b - rear], [34, 20 + b - rear], [43, 20 + b - rear], [49, 22 + b - rear]], 3, FD_HIDE, { tip: 'l' });
+    fdLeg(p, 26, 30 + b, -1, 8, g * 2, -0.14);
+    fdLeg(p, 50, 30 + b, 1, 8, -g * 2, -0.14);
+    fdLeg(p, 29, 38 + b, -1, 8, -g * 2, -0.02);
+    fdLeg(p, 47, 38 + b, 1, 8, g * 2, -0.02);
+    M(p, 38, 38 + b, 13.0, 6.0, FD_HIDE, { n: 2.6 });
+    // the head sits in FRONT of the body, filling the bottom of the frame
+    M(p, 38, 42 + b + rear, 12.0, 6.4, FD_HIDE, { n: 2.5 });
+    M(p, 38, 46 + b + rear, 9.6, 3.0, FD_PLATE, { n: 2.8, bias: 0.04 });
+    fangs(p, 30, 46, 45 + b + rear, 'y');
+    for (const ex of [33, 43]) { setPx(p, ex, 40 + b + rear, 'E'); setPx(p, ex, 41 + b + rear, 'l'); }
+    veins(p, [[27, 30 + b], [38, 26 + b], [49, 30 + b]], heat);
+    veins(p, [[31, 36 + b], [38, 34 + b], [45, 36 + b]], heat * 0.7);
+    underLight(p, 28, 48, 48 + b + rear, heat > 0.6 ? 'l' : 'k');
+    if (o.breath) gout(p, 38, 50 + b, 0, 1, o.breath);
+    return fdDone(p);
+  }
+
+  // NORTH — walking away: the crest runs up the spine to the back of a very wide skull
+  C(p, [[38, 34 + b], [37 + sw * 0.4, 42 + b], [35 + sw, 50 + b]], 5.6, 1.4, FD_HIDE, 0.02);
+  fdLeg(p, 26, 30 + b, -1, 8, g * 2, -0.18);
+  fdLeg(p, 50, 30 + b, 1, 8, -g * 2, -0.18);
+  fdLeg(p, 29, 38 + b, -1, 8, -g * 2, -0.06);
+  fdLeg(p, 47, 38 + b, 1, 8, g * 2, -0.06);
+  M(p, 38, 33 + b, 17.4, 9.4, FD_HIDE, { n: 2.7, bias: -0.07 });
+  M(p, 38, 24 + b, 11.6, 5.0, FD_HIDE, { n: 2.5, bias: -0.03 });
+  M(p, 38, 20 + b, 9.0, 4.2, FD_HIDE, { n: 2.4, bias: -0.02 });
+  setPx(p, 32, 19 + b, '@'); setPx(p, 44, 19 + b, '#');
+  crest(p, [[38, 22 + b], [38, 30 + b], [38, 38 + b]], 3.4, FD_HIDE, { tip: 'l' });
+  veins(p, [[28, 30 + b], [32, 38 + b]], heat);
+  veins(p, [[48, 30 + b], [44, 38 + b]], heat);
+  return fdDone(p);
+}
+
+function fdAnims(f) {
+  const mk = (o) => fdFrame(f, o);
+  const idle = {
+    frames: [mk({ heat: 0.3, tail: 0 }), mk({ bob: -1, heat: 0.75, tail: 1 }), mk({ heat: 1, tail: 2 }), mk({ bob: -1, heat: 0.5, tail: 1 })],
+    durations: [330, 270, 310, 280], loop: true,
+  };
+  // a heavy sprawling waddle: the whole slab rocks, it never leaves the floor
+  const walk = {
+    frames: [mk({ gait: 1, tail: 1, heat: 0.6 }), mk({ gait: 0.3, bob: -1, tail: 2, heat: 0.45 }), mk({ gait: -1, tail: 1, heat: 0.7 }), mk({ gait: -0.3, bob: -1, tail: 0, heat: 0.5 })],
+    durations: [130, 130, 130, 130], loop: true,
+  };
+  const attack = {
+    frames: [mk({ rear: 3, tail: 2, heat: 1, bob: -1 }), mk({ rear: 2, tail: 2, heat: 1, breath: 4 }), mk({ rear: 0, tail: 0, heat: 1, breath: 10 }), mk({ rear: 0, tail: 1, heat: 0.6 })],
+    durations: [170, 90, 140, 180], loop: false,
+  };
+  const recoil = mk({ bob: 2, tail: 2, heat: 0.15 });
+  const hurt = { frames: [flash(recoil), recoil], durations: [70, 180], loop: false };
+  const d0 = mk({ bob: 1, tail: 2, heat: 0.9 });
+  const d1 = mk({ bob: 3, tail: 1, heat: 0.45 });
+  const d2 = squashTo(mk({ bob: 4, tail: 0, heat: 0.15 }), 0.7, FD_H - 3);
+  const death = { frames: [d0, d1, d2, squashTo(d2, 0.62, FD_H - 3), squashTo(d2, 0.5, FD_H - 3)], durations: [130, 160, 200, 480, 860], loop: false };
+  return { idle, walk, attack, hurt, death };
+}
+
+/** Fyre drake: an 86x65 cell around a 76x60 pose — a squat slab with molten veins, lit from under. */
+export function buildFyreDrake() {
+  return { anims: clips(fdAnims), palette: FD, w: FD_W, h: FD_H, pivot: FD_PIV, emissive: 'lm', scale: 1 };
+}
+
+// ==========================================================================================
+//                                    DIMENSION SPIDER
+// ==========================================================================================
+// Read: EIGHT legs, and only half of it is here. Each leg is three tapering segments — femur out
+// and UP so the knees stand above the body, tibia down and out, a one-pixel foot on the floor —
+// which is what a spider's legs actually do and what the old six untapered sticks never did. A
+// violet echo of the whole animal stands a pixel out of register behind it, and a cold shimmer
+// crawls the carapace: it is not walking across the room, it is arriving in it.
+const DS_SW = 52, DS_SH = 46;
+const DS_DX = 4, DS_DY = 2, DS_W = DS_SW + 8, DS_H = DS_SH + 5;
+const DS_PIV = { x: 26 + DS_DX, y: 44 + DS_DY };
+const dsDone = pad(DS_W, DS_H, DS_DX, DS_DY);
+const DS = drakePalette()
+  .band('123456', '#3c4a68', HUE)   // cold slate carapace: violet-navy in shadow, teal in the light
+  .band('qrstu', '#5d5078', HUE)    // violet underside and joints
+  .set('v', '#5b4a80')              // the echo: the half of it that is elsewhere
+  .set('x', '#a8ecff').set('y', '#e8f8ff')                      // shimmer, glint (emissive)
+  .set('E', '#1b1526').set('Y', '#c8f0ff');                     // eye socket, eye (emissive)
+const DS_SHELL = '123456', DS_JOINT = 'qrstu';
+/** Cold chitin: the shell sits below its own highlights so the shimmer and the eyes stay the bright notes. */
+const DS_TB = -0.13;
+
+/**
+ * One jointed leg: femur up-and-out to a knee ABOVE the body, tibia down-and-out, tarsus to the
+ * floor. The radius tapers 3.0 -> 0.6 along the whole run, so it reads as a leg and not a stick.
+ * @param {Pix} p @param {number} bx @param {number} by body attachment
+ * @param {number} dir +1 = to the screen right
+ * @param {{reach:number, knee:number, foot:number, lift?:number, bias?:number}} o
+ */
+function spiderLeg(p, bx, by, dir, o) {
+  const kx = bx + dir * o.reach * 0.44, ky = by - o.knee;
+  const ax = bx + dir * o.reach * 0.88, ay = by + o.reach * 0.16;
+  const fx = bx + dir * o.reach, fy = o.foot - (o.lift || 0);
+  const bias = o.bias || 0;
+  C(p, [[bx, by], [kx, ky]], 3.0, 2.1, DS_SHELL, bias);
+  C(p, [[kx, ky], [ax, ay]], 2.1, 1.3, DS_SHELL, bias - 0.04);
+  C(p, [[ax, ay], [fx, fy]], 1.3, 0.6, DS_SHELL, bias - 0.08);
+  setPx(p, Math.round(kx), Math.round(ky) - 1, 't');     // a pale knee-joint plate catches the key light
+  setPx(p, Math.round(fx), Math.round(fy) + 1, '#');
+}
+
+/** The violet echo: the same silhouette, one pixel out of register, painted only where nothing else is. */
+function echo(p, dx, dy) {
+  const src = { w: p.w, h: p.h, d: new Uint16Array(p.d) };
+  const V = 'v'.charCodeAt(0);
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+    if (!src.d[y * src.w + x]) continue;
+    const tx = x + dx, ty = y + dy;
+    if (tx < 0 || ty < 0 || tx >= p.w || ty >= p.h) continue;
+    if (p.d[ty * p.w + tx]) continue;
+    p.d[ty * p.w + tx] = V;
+  }
+  return p;
+}
+
+/** Four sparks of shimmer that crawl the carapace on a fixed four-beat (no RNG anywhere in art). */
+const DS_SHIMMER = [[-4, -3], [3, -4], [5, 1], [-5, 2], [0, -5], [-2, 3], [4, -1], [2, 4]];
+function shimmer(p, cx, cy, phase) {
+  for (let i = 0; i < 4; i++) {
+    const [dx, dy] = DS_SHIMMER[(phase * 2 + i) % DS_SHIMMER.length];
+    const x = Math.round(cx + dx), y = Math.round(cy + dy);
+    if (!getPx(p, x, y)) continue;
+    setPx(p, x, y, i & 1 ? 'x' : 'y');
+  }
+}
+
+/**
+ * One dimension-spider frame.
+ * @param {'S'|'E'|'N'} f
+ * @param {{bob?:number, gait?:number, phase?:number, rear?:number, blink?:number, drop?:number}} o
+ */
+function dsFrame(f, o = {}) {
+  const p = makePix(DS_SW, DS_SH);
+  TB = DS_TB;
+  const b = (o.bob || 0) + (o.drop || 0), g = o.gait || 0, rear = o.rear || 0;
+  const floor = 42;
+  const cx = 26, cy = 28 + b - rear;
+
+  // the eight legs: alternating pairs lift on the walk beat, and each pair reaches further back
+  const REACH = [[11, 13, -1.6], [16, 16, -0.4], [18, 15, 0.9], [14, 11, 2.2]];
+  for (let i = 0; i < 4; i++) {
+    const [reach, knee, back] = REACH[i];
+    const lift = (i % 2 === 0 ? Math.max(0, g) : Math.max(0, -g)) * 3;
+    if (f === 'N') {
+      spiderLeg(p, cx - 4, cy + back * 0.6, -1, { reach, knee: knee - 1, foot: floor - i, lift, bias: -0.12 });
+      spiderLeg(p, cx + 4, cy + back * 0.6, 1, { reach, knee: knee - 1, foot: floor - i, lift: (i % 2 ? Math.max(0, g) : Math.max(0, -g)) * 3, bias: -0.18 });
+    } else if (f === 'E') {
+      // side on: the far four sit a tone back and a row higher
+      spiderLeg(p, cx - 6 + i * 4, cy - 1, i < 2 ? -1 : 1, { reach: reach - 2, knee: knee - 2, foot: floor - 2, lift, bias: -0.22 });
+    } else {
+      spiderLeg(p, cx - 5, cy + back, -1, { reach, knee, foot: floor - i, lift, bias: -0.04 });
+      spiderLeg(p, cx + 5, cy + back, 1, { reach, knee, foot: floor - i, lift: (i % 2 ? Math.max(0, g) : Math.max(0, -g)) * 3, bias: -0.10 });
+    }
+  }
+  if (f === 'E') {
+    for (let i = 0; i < 4; i++) {
+      const [reach, knee] = REACH[i];
+      const lift = (i % 2 ? Math.max(0, g) : Math.max(0, -g)) * 3;
+      spiderLeg(p, cx - 6 + i * 4, cy + 2, i < 2 ? -1 : 1, { reach, knee, foot: floor, lift, bias: 0 });
+    }
+    // abdomen behind, cephalothorax in front, the head end carried low
+    M(p, cx - 10, cy, 9.0, 7.0, DS_SHELL, { n: 2.4 });
+    LB(p, cx - 3, cy + 1, cx + 1, cy + 2, 2.2, 2.4, DS_JOINT, -0.22);     // the pedicel
+    M(p, cx + 6, cy + 2, 6.4, 5.0, DS_SHELL, { n: 2.3, bias: 0.05 });
+    M(p, cx + 4, cy + 4, 4.4, 2.6, DS_JOINT, { n: 2.6, bias: 0.04 });
+    for (const [ex, ey] of [[cx + 8, cy], [cx + 10, cy + 1]]) { setPx(p, ex, ey, 'E'); setPx(p, ex + 1, ey, 'Y'); }
+    LB(p, cx + 10, cy + 4, cx + 13, cy + 6, 1.6, 0.8, DS_JOINT, 0.02);    // a chelicera
+  } else if (f === 'N') {
+    M(p, cx, cy + 6, 9.4, 7.4, DS_SHELL, { n: 2.4, bias: -0.06 });        // the abdomen, seen from behind
+    LB(p, cx, cy, cx, cy + 3, 2.0, 2.6, DS_JOINT, -0.24);                 // the pedicel
+    M(p, cx, cy - 5, 6.6, 4.4, DS_SHELL, { n: 2.3, bias: -0.02 });
+    for (let i = 0; i < 3; i++) { setPx(p, cx - 3 + i * 3, cy + 4, 'q'); setPx(p, cx - 3 + i * 3, cy + 8, 'q'); }
+    LB(p, cx - 2, cy + 12, cx - 3, cy + 15, 1.6, 0.8, DS_JOINT, -0.1);     // spinnerets
+    LB(p, cx + 2, cy + 12, cx + 3, cy + 15, 1.6, 0.8, DS_JOINT, -0.14);
+  } else {
+    M(p, cx, cy + 7, 9.4, 6.8, DS_SHELL, { n: 2.4 });                     // abdomen, well behind
+    LB(p, cx, cy + 1, cx, cy + 4, 2.0, 2.6, DS_JOINT, -0.22);             // the pedicel: the pinch
+    M(p, cx, cy - 3, 7.4, 5.2, DS_SHELL, { n: 2.3, bias: 0.05 });         // cephalothorax
+    M(p, cx, cy + 8, 4.6, 3.2, DS_JOINT, { n: 2.4, bias: 0.04 });         // pale underside
+    // eight eyes: a big forward pair over a row of six small ones
+    setPx(p, cx - 3, cy - 4, 'E'); setPx(p, cx - 2, cy - 4, 'Y');
+    setPx(p, cx + 2, cy - 4, 'E'); setPx(p, cx + 3, cy - 4, 'Y');
+    for (let i = 0; i < 3; i++) { setPx(p, cx - 4 + i * 2, cy - 1, 'Y'); setPx(p, cx + 1 + i * 2, cy - 1, 'E'); }
+    LB(p, cx - 3, cy + 1, cx - 4, cy + 4, 1.8, 0.9, DS_JOINT, 0.04);       // chelicerae
+    LB(p, cx + 3, cy + 1, cx + 4, cy + 4, 1.8, 0.9, DS_JOINT, -0.04);
+  }
+  shimmer(p, cx, cy, o.phase || 0);
+  echo(p, o.blink ? 3 : 1, o.blink ? -2 : -1);
+  return dsDone(p);
+}
+
+function dsAnims(f) {
+  const mk = (o) => dsFrame(f, o);
+  const idle = {
+    frames: [mk({ phase: 0 }), mk({ bob: -1, phase: 1 }), mk({ phase: 2 }), mk({ bob: -1, phase: 3 })],
+    durations: [300, 260, 300, 260], loop: true,
+  };
+  // a scuttle: alternate sets of four, the body barely moving between beats
+  const walk = {
+    frames: [mk({ gait: 1, phase: 0 }), mk({ gait: 0.3, bob: -1, phase: 1 }), mk({ gait: -1, phase: 2 }), mk({ gait: -0.3, bob: -1, phase: 3 })],
+    durations: [95, 95, 95, 95], loop: true,
+  };
+  // it rears, half-vanishes, and lands on top of you
+  const attack = {
+    frames: [mk({ rear: 4, phase: 1 }), mk({ rear: 6, blink: 1, phase: 2 }), mk({ rear: -1, drop: 1, phase: 3 }), mk({ rear: 1, phase: 0 })],
+    durations: [160, 90, 120, 170], loop: false,
+  };
+  const recoil = mk({ drop: 2, phase: 2 });
+  const hurt = { frames: [flash(recoil), recoil], durations: [70, 170], loop: false };
+  const d0 = mk({ drop: 1, phase: 1 });
+  const d1 = mk({ drop: 3, phase: 3, blink: 1 });
+  const d2 = squashTo(mk({ drop: 4, phase: 2 }), 0.62, DS_H - 3);
+  const death = { frames: [d0, d1, d2, squashTo(d2, 0.5, DS_H - 3), squashTo(d2, 0.4, DS_H - 3)], durations: [110, 150, 190, 440, 800], loop: false };
+  return { idle, walk, attack, hurt, death };
+}
+
+/** Dimension spider: a 60x51 cell around a 52x46 pose — eight jointed legs and an echo out of register. */
+export function buildDimensionSpider() {
+  return { anims: clips(dsAnims), palette: DS, w: DS_W, h: DS_H, pivot: DS_PIV, emissive: 'xyY', scale: 1 };
+}
+
+// ---------------------------------------------------------------------------------- registry
+const cache = new Map();
+const build = (key, make) => () => {
+  let b = cache.get(key);
+  if (!b) { b = make(); cache.set(key, b); }
+  return b;
+};
+
+/**
+ * The four MONSTER_TABLE types that used to share two drawings. Every key here is a real type the
+ * generator rolls (game/monsters.js) — no fictional creatures.
+ * @type {Object<string, () => {anims:object, palette:import('../pixelPainter.js').Palette, w:number, h:number, pivot:{x:number,y:number}, emissive:string, scale:number}>}
+ */
+export const DRAKE_SPRITES = {
+  'wyvern': build('wyvern', buildWyvern),
+  'shadow-dragon': build('shadow-dragon', buildShadowDragon),
+  'fyre-drake': build('fyre-drake', buildFyreDrake),
+  'dimension-spider': build('dimension-spider', buildDimensionSpider),
+};

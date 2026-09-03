@@ -4,7 +4,8 @@ import { TILE } from '../core/constants.js';
 import { Level } from '../world/level.js';
 import { MONSTER_TYPES } from '../game/monsters.js';
 import { addHallOfFameEntry, getHallOfFame } from '../core/save.js';
-import { drawSheet } from '../render/sprites/spriteSheet.js';
+import { drawSheet, packSheet } from '../render/sprites/spriteSheet.js';
+import { MONSTER_SPRITES } from '../render/sprites/monsters/index.js';
 
 /** Walkable tiles adjacent to (x,y) (8-way), nearest-first order as given by DIRS8. */
 function neighbours(level, x, y, { empty = true } = {}) {
@@ -120,6 +121,31 @@ function bestiaryHall(g, W, H, depth) {
   lv.revealAll();
   g.levels.set(depth, lv);
   return lv;
+}
+
+/**
+ * One WIDELY SPACED rank in front of the hero at the ordinary gameplay camera. `lineup()` packs its
+ * two ranks at 1.5 tiles, which is right for a row of people and hopeless for the drakes: a shadow
+ * dragon is 2.2x the hero and a fyre drake is nearly three tiles wide, so at 1.5 they simply eat
+ * each other and nothing can be judged. Nothing here touches the camera — that is the point.
+ * @param {object} ctx @param {string[]} types @param {number} [gap] tiles between neighbours
+ */
+function drakeRank(ctx, types, gap = 3) {
+  const g = ctx.reset();
+  const W = 22, H = 14, depth = 5;
+  bestiaryHall(g, W, H, depth);
+  const px = W >> 1, py = H - 4;
+  g.enterLevel(depth, 'teleport', { arrival: { x: px, y: py } });
+  const p = g.player; p.facing = { dx: 0, dy: -1 };
+  g.give('light', 1); g.castSpell('light');
+  types.forEach((t, i) => {
+    const x = px + Math.round((i - (types.length - 1) / 2) * gap), y = py - 3;
+    const m = g.spawnMonster(t, x, y, { depth, state: 'idle' });
+    if (m) { freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false; }
+  });
+  ctx.renderer.fog.override = 'all';
+  ctx.renderer.rebuildLevel();
+  ctx.step(600);
 }
 
 /** Monsters in two ranks in front of the hero, seen from the ordinary gameplay camera. */
@@ -876,6 +902,84 @@ export const scenarios = {
     lineup(ctx, ['dire-wolf', 'gargoyle', 'werebear', 'troll', 'dire-wolf', 'gargoyle']);
   },
 
+  /**
+   * THE DEDUPE ROW (sprites/monsters/drakes.js). Wyvern, shadow dragon and fyre drake used to be
+   * served by TWO builders between the three of them — `buildDragon` twice and one salamander — and
+   * `dimension-spider` was the generic six-legged spider. All four are MONSTER_TABLE types, so a
+   * player met the same picture at depth 8 and depth 20. Here they stand in one lit hall, in one
+   * light, with the hero at the head of the rank: two legs / four legs + span / squat and molten /
+   * eight jointed legs, and four palettes that share nothing.
+   */
+  async 'bestiary-drakes'(ctx) {
+    const g = ctx.reset();
+    const W = 20, H = 12, depth = 6;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 2, y: 6 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');     // one lit rank, no fog gradient across the row
+    const types = [['wyvern', 'Wyvern'], ['shadow-dragon', 'Shadow Dragon'], ['fyre-drake', 'Fyre Drake'], ['dimension-spider', 'Dimension Spider']];
+    const placed = [{ label: 'Hero', x: 2, y: 6 }];
+    types.forEach(([t, label], i) => {
+      const x = 5 + i * 4, y = 6;
+      const m = g.spawnMonster(t, x, y, { depth, state: 'idle' });
+      if (!m) return;
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(10.0, 6.2, 19.0, 10.0, { elevation: 30 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
+  },
+
+  /**
+   * The same four drakes at the ORDINARY GAMEPLAY CAMERA on a lit floor — the only test that
+   * counts. `lineup()` packs a rank at 1.5 tiles, which is right for people and useless for a
+   * shadow dragon, so these stand three tiles apart and the camera is left where the game puts it.
+   */
+  async 'drakes-in-play'(ctx) {
+    drakeRank(ctx, ['wyvern', 'shadow-dragon', 'fyre-drake', 'dimension-spider']);
+  },
+
+  /**
+   * THE RE-KEYED FIVE. Every one of these read as a hole or a pillow at gameplay distance: the ogre
+   * pillow-shaded round his own navel and swinging an unpainted bone-cream capsule brighter than his
+   * face; the hobgoblin lit from his own centre of mass; the rogue and the assassin collapsed into
+   * the bottom of their ramps and keyed from the WRONG SIDE (rim delta 0.03 and 0.05 against a house
+   * minimum of 0.02 and a cast average near 0.15); the mage dark and with his hat cut flat by the
+   * edge of his own atlas cell. One lit hall, hero at the head of the rank, nothing hidden.
+   */
+  async 'bestiary-rekeyed'(ctx) {
+    const g = ctx.reset();
+    const W = 20, H = 12, depth = 4;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 2, y: 6 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');
+    const types = [['ogre', 'Ogre'], ['hobgoblin', 'Hobgoblin'], ['rogue', 'Rogue'], ['assassin', 'Assassin'], ['mage', 'Mage']];
+    const placed = [{ label: 'Hero', x: 2, y: 6 }];
+    types.forEach(([t, label], i) => {
+      const x = 5 + i * 3, y = 6;
+      const m = g.spawnMonster(t, x, y, { depth, state: 'idle' });
+      if (!m) return;
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(9.6, 6.2, 18.0, 9.6, { elevation: 30 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
+  },
+
+  /** The re-keyed five at the ordinary gameplay camera, on the floor they have to read against. */
+  async 'rekeyed-in-play'(ctx) {
+    drakeRank(ctx, ['ogre', 'hobgoblin', 'rogue', 'assassin', 'mage'], 2.5);
+  },
+
   // ---------------------------------------------------------------- HD-2D hero sprite
   /** Every hero animation sheet (all facings, west mirrored from east) at 4x on a neutral grey overlay. */
   async 'hero-sheet'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 0); },
@@ -933,6 +1037,48 @@ export const scenarios = {
   async 'hero-in-game'(ctx) {
     ctx.reset();
     ctx.step(400);
+  },
+
+  /**
+   * THE CONTACT-ROW PROOF. Every frame of the idle clip of the six types whose idles are hand-built
+   * (five humanoids + the mage), drawn at 4x with the pivot row ruled straight across all of them.
+   * An idle may move anything it likes above the belt; the one thing it may never do is move the
+   * row the creature stands on. Any frame whose lowest opaque pixel leaves the rule is printed in
+   * red — that is a sprite that hops, or floats, four times a second.
+   */
+  async 'idle-grounding'(ctx) {
+    ctx.reset();
+    ctx.step(50);
+    idleOverlay(ctx, ['hobgoblin', 'rogue', 'barbarian', 'elvin-ranger', 'assassin', 'mage']);
+  },
+
+  /**
+   * The same six standing in a lit hall at the gameplay camera, breathing: one ink, one key light
+   * and one seven-step house ramp across the whole rank, and the Barbarian with two arms, no
+   * pure-white grin and skin that is no longer the hottest thing on screen.
+   */
+  async 'bestiary-idle'(ctx) {
+    const g = ctx.reset();
+    const W = 20, H = 12, depth = 5;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 5 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    const types = [['hobgoblin', 'Hobgoblin'], ['rogue', 'Rogue'], ['barbarian', 'Barbarian'],
+      ['elvin-ranger', 'Elvin Ranger'], ['assassin', 'Assassin'], ['mage', 'Mage']];
+    const placed = [{ label: 'Hero', x: 3, y: 5 }];
+    types.forEach(([t, label], i) => {
+      const x = 6 + i * 2, y = 5;
+      const m = g.spawnMonster(t, x, y, { depth: 12, state: 'idle' });
+      if (!m) return;
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(9.0, 5.3, 16.0, 8.8, { elevation: 32 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
   },
 };
 
@@ -1359,6 +1505,68 @@ export const uiScenarios = {
     ctx.step(900);
   },
 };
+
+let idleOverlayEl = null;
+/**
+ * Full-screen 2D canvas over the 3D view: every frame of one idle clip per type at 4x nearest
+ * neighbour, all of them ruled with the pivot row they must stand on. Under each frame is the row
+ * its lowest opaque pixel actually landed on — green when it matches the first frame (the sprite
+ * is planted), red when it does not (the sprite lifts or sinks as it breathes). Removed when the
+ * next game starts, like the other overlays here.
+ * @param {object} ctx scenario context
+ * @param {string[]} types monster types to inspect (each must have a sprite builder)
+ */
+function idleOverlay(ctx, types) {
+  if (!idleOverlayEl) {
+    idleOverlayEl = document.createElement('canvas');
+    idleOverlayEl.id = 'idle-grounding-overlay';
+    Object.assign(idleOverlayEl.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh', zIndex: '9999', pointerEvents: 'none' });
+    document.body.appendChild(idleOverlayEl);
+    ctx.bus.on('game:start', () => { if (idleOverlayEl) { idleOverlayEl.remove(); idleOverlayEl = null; } });
+  }
+  const W = window.innerWidth, H = window.innerHeight;
+  idleOverlayEl.width = W; idleOverlayEl.height = H;
+  const c = idleOverlayEl.getContext('2d');
+  c.fillStyle = '#2b2731'; c.fillRect(0, 0, W, H);
+  c.imageSmoothingEnabled = false;
+  const zoom = 4, margin = 14, labelH = 16, gap = 8, cols = 2;
+  const boxW = Math.floor((W - margin * 2) / cols);
+  let rowH = 0;
+  types.forEach((type, i) => {
+    const build = MONSTER_SPRITES[type];
+    if (!build) return;
+    const built = build();
+    const sheet = packSheet(built, { order: ['idle'], facings: ['S'] });
+    const frames = sheet.frames.filter((f) => f.name === 'idle' && f.facing === 'S');
+    if (!frames.length) return;
+    const off = document.createElement('canvas');
+    off.width = sheet.width; off.height = sheet.height;
+    off.getContext('2d').putImageData(new ImageData(sheet.data, sheet.width, sheet.height), 0, 0);
+    rowH = labelH + built.h * zoom + 22;
+    const bx = margin + (i % cols) * boxW, by = margin + Math.floor(i / cols) * rowH;
+    c.fillStyle = '#e7dfc8'; c.font = 'bold 13px ui-monospace, Menlo, Consolas, monospace';
+    c.textBaseline = 'top'; c.textAlign = 'left';
+    c.fillText(`${type}  ·  idle S  ·  pivot row ${built.pivot.y}`, bx, by);
+    const top = by + labelH;
+    let base = null;
+    frames.forEach((f, j) => {
+      const fx = bx + j * (built.w * zoom + gap);
+      c.fillStyle = '#37333d'; c.fillRect(fx, top, built.w * zoom, built.h * zoom);
+      c.drawImage(off, f.x, f.y, f.w, f.h, fx, top, f.w * zoom, f.h * zoom);
+      const b = frameBounds(sheet, f), foot = b.y + b.h - 1;
+      if (base === null) base = foot;
+      c.fillStyle = foot === base ? '#8fd18a' : '#ff6a5a';
+      c.font = '11px ui-monospace, Menlo, Consolas, monospace';
+      c.fillText(`${j}: floor row ${foot}`, fx + 2, top + built.h * zoom + 3);
+    });
+    // the rule the feet must not leave, across every frame of this type
+    const ruleY = top + (base === null ? built.pivot.y : base + 1) * zoom;
+    c.fillStyle = 'rgba(255,138,60,0.85)';
+    c.fillRect(bx, ruleY, frames.length * (built.w * zoom + gap) - gap, 1);
+  });
+  c.fillStyle = '#a49eb0'; c.font = '11px ui-monospace, Menlo, Consolas, monospace';
+  c.fillText('idle grounding · 4x nearest · the rule is the contact row of frame 0: every frame must reach it and none may pass it', margin, H - 16);
+}
 
 /**
  * Register every scenario on the debug object.

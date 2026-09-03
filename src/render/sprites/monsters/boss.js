@@ -31,40 +31,64 @@
 //              back into two hanging blades, cloven hooves, char cracks over an ember heart, and
 //              the signature — the ring of stolen soul-light hanging above its open palm.
 import { Palette, paint, outline, makePix, setPx, getPx, shift, smearArc, mirrorLit, blit } from '../pixelPainter.js';
+import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
 // ---------------------------------------------------------------------------------- palette
 // Keys are unique per creature so a mis-keyed pixel is obvious in the sheet.
-export const BOSS_PALETTE = new Palette()
-  .set('#', '#17111f')                                        // outline: near-black violet
-  .set('@', '#514659')                                        // lit edge / inner line
+// EVERY ramp below is a slice of ONE seven-step house curve (`ramp()` in style.js): the same ink,
+// the same hue drift and the same value spread as every other group, so the ogre and the swordsman
+// he is about to eat are lit by one law. `pick` chooses which steps of that curve a material takes
+// — bone and keratin reach the top because they are polished, hide sits in the middle, the
+// shadow dragon's scale starts at the bottom because it is a hole in the light.
+const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
+/** Default steps of the seven-step curve for a 2-, 3- or 4-key ramp. */
+const SPREAD = { 2: [2, 5], 3: [1, 3, 5], 4: [0, 2, 3, 5] };
+
+/** A Palette whose `ramp()` IS the house ramp: one curve, one hue drift, one value spread. */
+class HousePalette extends Palette {
+  /**
+   * @param {string} keys darkest first
+   * @param {string} base the material's mid tone
+   * @param {{pick?:number[]}} [o] which steps of the seven-step house curve the keys land on
+   */
+  ramp(keys, base, o = {}) {
+    const cols = ramp(base, 7, RAMP_OPTS);
+    const pick = o.pick || SPREAD[keys.length] || [...keys].map((_, i) => Math.round((i * 6) / (keys.length - 1)));
+    for (let i = 0; i < keys.length; i++) this.set(keys[i], cols[pick[i]]);
+    return this;
+  }
+}
+
+export const BOSS_PALETTE = new HousePalette()
+  .set('#', INK)                                              // outline: the one house ink
+  .set('@', INK_LIT)                                          // lit edge / inner line
   // ogre — sour olive hide over a pale gut, bone club, cured leather
-  .ramp('1234', '#7c8752', { step: 0.086, hueShift: 0.03, satShift: 0.06 })
-  .ramp('567', '#b3b184', { step: 0.075, hueShift: 0.025, satShift: 0.05 })
-  .ramp('89', '#e2d6b2', { step: 0.105 })
-  .ramp('ab', '#6d4a2e', { step: 0.115, satShift: 0.08 })
+  .ramp('1234', '#7c8752')
+  .ramp('567', '#b3b184', { pick: [1, 3, 5] })
+  .ramp('89z', '#a08e69', { pick: [1, 3, 5] })   // old greased bone: never brighter than his own face
+  .ramp('ab', '#6d4a2e', { pick: [1, 4] })
   .set('c', '#8d94a2')                                        // iron band on the club
   // salamander — charred scale, hot ochre belly plates, molten cracks
-  .ramp('defg', '#5e3330', { step: 0.088, hueShift: 0.03, satShift: 0.07 })
-  .ramp('hij', '#c08540', { step: 0.09, hueShift: 0.02, satShift: 0.05 })
+  .ramp('defg', '#5e3330')
+  .ramp('hij', '#c08540')
   .set('k', '#a83318').set('l', '#ff8a2b').set('m', '#ffe9a8')  // crack core / crack / white-hot
   .set('n', '#f2e6c8')                                        // teeth and claws
   // shadow dragon — cold violet scale, plum membrane, bone horn, blue fire
-  .ramp('opqr', '#40355e', { step: 0.082, hueShift: 0.028, satShift: 0.07 })
-  .ramp('stu', '#5a3550', { step: 0.095, hueShift: 0.02, satShift: 0.06 })
-  .ramp('vw', '#a99f8a', { step: 0.115 })
+  .ramp('opqr', '#40355e')
+  .ramp('stu', '#5a3550')
+  .ramp('vw', '#a99f8a', { pick: [3, 6] })
   .set('x', '#8fe6ff').set('y', '#2a2140')                    // cold fire / spine ridge
   // demon — deep crimson hide, ash keratin, black-plum wing, ember
-  .ramp('ABCD', '#7c2434', { step: 0.086, hueShift: 0.025, satShift: 0.07 })
-  .ramp('GHI', '#a99a86', { step: 0.105, hueShift: 0.02 })
-  .ramp('JKL', '#452b4d', { step: 0.09, satShift: 0.05 })
+  .ramp('ABCD', '#7c2434')
+  .ramp('GHI', '#a99a86', { pick: [2, 4, 6] })
+  .ramp('JKL', '#452b4d')
   .set('M', '#ffbf4d').set('N', '#2a0f18')                    // ember light / char crack
   // shared
   .set('E', '#1b1424').set('W', '#fff7ea').set('R', '#ff6a4a')  // eye, catch-light, red iris
   .set('F', '#fff4f0');                                        // hurt flash
 
-const LIT = { x: -1, y: -1 };
 /** Compose is not used here: every creature draws straight into one Pix, then takes the outline. */
 const ink = (p) => outline(p, '#', { lit: LIT, litKey: '@' });
 
@@ -256,7 +280,7 @@ const lerp = (a, b, t) => a + (b - a) * t;
 // shoulder line, the gut overhangs the kilt, and the bone club is as long as he is tall.
 // drawn in a 48-wide frame and shifted right by OG_PAD, so the club never clips the canvas edge
 const OG_W = 56, OG_H = 56, OG_PAD = 4, OG_PIV = { x: 28, y: 54 };
-const HIDE = '1234', BELLY = '567', BONE = '89', LEATHER = 'ab';
+const HIDE = '1234', BELLY = '567', BONE = '89z', LEATHER = 'ab';
 
 // a lit brow ridge, two small deep-set eyes under it, and the under-bite: tusks past the upper lip
 const OG_FACE_S = paint(`
@@ -276,15 +300,48 @@ const OG_FACE_E = paint(`
 /** The club: a knotted bone shaft with an iron band and a heavy knobbed head. */
 function ogreClub(p, hx, hy, tx, ty, { far = false } = {}) {
   const b = far ? -0.14 : 0;
-  limb(p, hx, hy, lerp(hx, tx, 0.55), lerp(hy, ty, 0.55), 2.4, 3.1, BONE, b);
-  limb(p, lerp(hx, tx, 0.55), lerp(hy, ty, 0.55), tx, ty, 3.1, 3.4, BONE, b);
-  mass(p, tx, ty, 5.4, 5.0, BONE, { n: 2.4, bias: b });
-  // knuckles on the head and the iron band at the grip
   const ux = (tx - hx), uy = (ty - hy), L = Math.hypot(ux, uy) || 1;
-  setPx(p, Math.round(tx - uy / L * 3.4), Math.round(ty + ux / L * 3.4), '9');
-  setPx(p, Math.round(tx + uy / L * 3.6), Math.round(ty - ux / L * 3.6), '8');
-  setPx(p, Math.round(tx + ux / L * 2.2), Math.round(ty + uy / L * 2.2), '8');
-  for (let k = -2; k <= 2; k++) setPx(p, Math.round(hx + ux / L * 4 - uy / L * k * 0.9), Math.round(hy + uy / L * 4 + ux / L * k * 0.9), 'c');
+  const ax = ux / L, ay = uy / L;                       // along the shaft
+  const nx = -ay, ny = ax;                              // across it
+  const at = (t, k = 0) => [hx + ax * L * t + nx * k, hy + ay * L * t + ny * k];
+  // the shaft TAPERS: a hand-thick grip swelling into the head, not one fat capsule
+  limb(p, hx, hy, ...at(0.55), 1.9, 3.0, BONE, b - 0.04);
+  limb(p, ...at(0.55), tx, ty, 3.0, 3.6, BONE, b - 0.02);
+  mass(p, tx, ty, 5.4, 5.0, BONE, { n: 2.4, bias: b });
+  // GRAIN: split lines running the length of old bone, on the shadow side only so they read as
+  // texture and never as a highlight (they used to be nothing at all — a bare cream capsule)
+  for (let i = 0; i < 3; i++) {
+    const off = [1.4, 2.2, -1.7][i], t0 = [0.26, 0.30, 0.24][i], t1 = [0.66, 0.70, 0.60][i];
+    for (let t = t0; t <= t1; t += 0.04) {
+      const [gx, gy] = at(t, off);
+      if (getPx(p, Math.round(gx), Math.round(gy))) setPx(p, Math.round(gx), Math.round(gy), off > 0 ? '8' : '9');
+    }
+  }
+  // KNUCKLES on the head: three lumps, lit up-left, shadowed down-right
+  setPx(p, Math.round(tx - nx * 3.4), Math.round(ty - ny * 3.4), 'z');
+  setPx(p, Math.round(tx - nx * 3.4 - ax * 2), Math.round(ty - ny * 3.4 - ay * 2), '9');
+  setPx(p, Math.round(tx + nx * 3.6), Math.round(ty + ny * 3.6), '8');
+  setPx(p, Math.round(tx + ax * 2.2), Math.round(ty + ay * 2.2), '8');
+  // BINDING: cured hide lashed round the grip, and a second turn where the shaft meets the head
+  for (const [t, half] of [[0.08, 2.2], [0.17, 2.5], [0.74, 3.2]]) {
+    for (let k = -half; k <= half; k += 0.5) {
+      const [bxp, byp] = at(t, k);
+      if (getPx(p, Math.round(bxp), Math.round(byp))) setPx(p, Math.round(bxp), Math.round(byp), k < -half * 0.25 ? 'b' : 'a');
+    }
+  }
+  // the iron ferrule at the very butt of the grip
+  for (let k = -2; k <= 2; k++) { const [cxp, cyp] = at(0.36, k * 0.9); setPx(p, Math.round(cxp), Math.round(cyp), 'c'); }
+}
+
+/**
+ * The crease where the gut folds over: one dark arc along the lower-right of the belly mass, so the
+ * pale skin ends on a terminator instead of fading concentrically into its own outline.
+ */
+function ogreFold(p, cx, cy, rx, ry) {
+  for (let a = -0.45; a < 1.9; a += 0.06) {
+    const x = Math.round(cx + Math.cos(a) * rx * 0.99), y = Math.round(cy + Math.sin(a) * ry * 0.99);
+    if (getPx(p, x, y)) setPx(p, x, y, '5');
+  }
 }
 
 /**
@@ -308,9 +365,11 @@ function ogreFrame(f, o = {}) {
     // hide kilt over the hips
     mass(p, 24, 40 + b + c, 13.5, 6.4, LEATHER, { n: 2.8 });
     for (let i = 0; i < 5; i++) setPx(p, 13 + i * 6, 45 + b + c, 'a');
-    // gut and the pale belly turning under it
+    // gut, and the pale belly turning under it: the belly sits UP-LEFT of the gut's centre so the
+    // hide rolls under it into shadow on the lower right — a concentric belly is a pillow, not a form
     mass(p, 24 + lean, 32 + b, 13.8, 10.6, HIDE, { n: 2.4 });
-    mass(p, 24 + lean, 34 + b, 8.4, 6.6, BELLY, { n: 2.2, bias: 0.02 });
+    mass(p, 22 + lean, 32 + b, 11.6, 8.8, BELLY, { n: 2.5, bias: -0.06 });
+    ogreFold(p, 22 + lean, 32 + b, 11.6, 8.8);
     // chest slab with a shoulder hump at each end; the skull drops into the notch between them
     mass(p, 24 + lean, 22 + b, 15.2, 7.6, HIDE, { n: 2.8 });
     mass(p, 10 + lean, 20 + b, 6.8, 5.8, HIDE, { n: 2.2, bias: 0.03 });
@@ -966,14 +1025,15 @@ const build = (key, make) => () => {
  */
 export const BOSS_SPRITES = {
   'ogre': build('ogre', buildOgre),
-  'fyre-drake': build('salamander', buildSalamander),
-  'salamander': build('salamander', buildSalamander),
-  'fire-lizard': build('salamander', buildSalamander),
-  'shadow-dragon': build('dragon', buildDragon),
-  'dragon': build('dragon', buildDragon),
-  'wyvern': build('dragon', buildDragon),
   'demon': build('demon', buildDemon),
   'demon-guardian': build('demon', buildDemon),
+  // `wyvern`, `shadow-dragon` and `fyre-drake` USED to live here, and between the three of them they
+  // had two drawings: buildDragon twice and one salamander. They are now three separate creatures in
+  // monsters/drakes.js. buildSalamander and buildDragon stay as the aliases below — nothing the
+  // generator rolls reaches them, so no MONSTER_TABLE type shares a silhouette with another.
+  'salamander': build('salamander', buildSalamander),
+  'fire-lizard': build('salamander', buildSalamander),
+  'dragon': build('dragon', buildDragon),
 };
 
 export { mass, limb, curve, crest, wingFan, tone, clips, flash, squashTo, tilt };

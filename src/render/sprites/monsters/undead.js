@@ -29,31 +29,56 @@
 //
 // CLIPS idle(4) walk(6) attack(4) hurt(2) death(5) on every facing.
 import { Palette, paint, compose, mirrorLit, outline, recolor, makePix, setPx } from '../pixelPainter.js';
+import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
 // ---------------------------------------------------------------------------------- palette
 // Keys are unique per creature so a mis-keyed pixel shows up as magenta in the sheet.
-export const UNDEAD_PALETTE = new Palette()
-  .set('#', '#150f1e')                                                        // outline: near-black violet
-  .set('@', '#4d4359')                                                        // lit edge / inner line
+// EVERY ramp below is a slice of ONE seven-step house curve (`ramp()` in style.js): the same ink,
+// the same hue drift and the same value spread as every other group. `pick` chooses which steps of
+// that curve a material occupies — bone and gold reach the top, grave rags and cloak sit low, and
+// the vampire's pallid skin takes a deliberately TIGHT slice high up the curve, because a face with
+// a full seven-step range on it stops being pallid and starts being carved.
+const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
+/** Default steps of the seven-step curve for a 2-, 3- or 4-key ramp. */
+const SPREAD = { 2: [2, 5], 3: [1, 3, 5], 4: [0, 2, 3, 5] };
+
+/** A Palette whose `ramp()` IS the house ramp: one curve, one hue drift, one value spread. */
+class HousePalette extends Palette {
+  /**
+   * @param {string} keys darkest first
+   * @param {string} base the material's mid tone
+   * @param {{pick?:number[]}} [o] which steps of the seven-step house curve the keys land on
+   */
+  ramp(keys, base, o = {}) {
+    const cols = ramp(base, 7, RAMP_OPTS);
+    const pick = o.pick || SPREAD[keys.length] || [...keys].map((_, i) => Math.round((i * 6) / (keys.length - 1)));
+    for (let i = 0; i < keys.length; i++) this.set(keys[i], cols[pick[i]]);
+    return this;
+  }
+}
+
+export const UNDEAD_PALETTE = new HousePalette()
+  .set('#', INK)                                                              // outline: the one house ink
+  .set('@', INK_LIT)                                                          // lit edge / inner line
   .set('V', '#0b0812')                                                        // void: inside a hood, an open maw
   // ghoul
-  .ramp('1234', '#7d9159', { step: 0.09, hueShift: 0.03, satShift: 0.1 })     // corpse flesh (grave green)
-  .ramp('567', '#ded2b0', { step: 0.09 })                                     // bone: jaw, teeth, claws, feet
-  .ramp('890', '#5d4a37', { step: 0.09 })                                     // grave rags
+  .ramp('1234', '#7d9159')                                                    // corpse flesh (grave green)
+  .ramp('567', '#ded2b0', { pick: [2, 4, 6] })                                // bone: jaw, teeth, claws, feet
+  .ramp('890', '#5d4a37')                                                     // grave rags
   // wraith
-  .ramp('abcd', '#3c3757', { step: 0.1, satShift: 0.08 })                     // shroud (cold indigo)
+  .ramp('abcd', '#3c3757')                                                    // shroud (cold indigo)
   .set('e', '#6f6796').set('f', '#aba4d8')                                    // hem wisps: dim / bright
   // vampire
-  .ramp('ghij', '#2c2438', { step: 0.085 })                                   // cloak & tailcoat
+  .ramp('ghij', '#2c2438')                                                    // cloak & tailcoat
   .set('k', '#7d1b2b').set('l', '#b8303f')                                    // crimson lining
-  .ramp('mno', '#c9c1d4', { step: 0.05, satShift: 0.03, hueShift: 0.015 })    // pallid skin
+  .ramp('mno', '#c9c1d4', { pick: [3, 5, 6] })                                // pallid skin (a tight, high slice)
   .set('p', '#ece6ee').set('q', '#b0a6bb')                                    // linen shirt / cravat
   .set('r', '#221a2c').set('s', '#3f3253')                                    // slicked hair
-  .ramp('tuv', '#d0a03c', { step: 0.1, hueShift: 0.012, satShift: 0.04 })     // gold medallion
+  .ramp('tuv', '#d0a03c', { pick: [2, 4, 6] })                                // gold medallion
   // werewolf
-  .ramp('wxyz', '#6b5443', { step: 0.09, hueShift: 0.025, satShift: 0.08 })   // fur
+  .ramp('wxyz', '#6b5443')                                                    // fur
   .set('A', '#d2bd9b').set('B', '#93816a')                                    // pale ruff / belly
   .set('C', '#241a20')                                                        // nose leather, paw pads
   // shared
@@ -66,7 +91,6 @@ export const UNDEAD_PALETTE = new Palette()
 /** Keys flagged emissive in the atlas alpha: they keep their glow under fog and torchlight. */
 const EMISSIVE = 'YRf';
 
-const LIT = { x: -1, y: -1 };
 const L = (p, x, y, m) => (p ? { p, x, y, mirror: !!m } : null);
 /** Compose layers and lay the single selective outline on last (the house treatment). */
 const ink = (w, h, layers) => outline(compose(w, h, layers.filter(Boolean)), '#', { lit: LIT, litKey: '@' });

@@ -24,37 +24,61 @@
 //  kobold      small hunched dog-snouted humanoid, two backswept horns, a ragged hide kilt and a
 //              crude bone-tipped spear held across the body.
 import { Palette, paint, compose, mirrorLit, outline, makePix, setPx, line } from '../pixelPainter.js';
+import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
 // ---------------------------------------------------------------------------------- palette
 // Keys are unique per creature so a mis-keyed pixel is obvious in the sheet.
-export const VERMIN_PALETTE = new Palette()
-  .set('#', '#17111f')                                     // outline: near-black violet
-  .set('@', '#4e4459')                                     // lit edge / inner line
+// EVERY ramp below is a slice of ONE seven-step house curve (`ramp()` in style.js): the same ink,
+// the same hue drift and the same value spread as the humanoids, the fighters and the beasts, so
+// nothing in this file can quietly invent its own contrast. `pick` chooses which steps of that one
+// curve a material occupies — bone and steel reach the top because they are polished, fur and hide
+// sit in the middle, the ink-dark chitin starts at the bottom.
+const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
+/** Default steps of the seven-step curve for a 2-, 3- or 4-key ramp. */
+const SPREAD = { 2: [2, 5], 3: [1, 3, 5], 4: [0, 2, 3, 5] };
+
+/** A Palette whose `ramp()` IS the house ramp: one curve, one hue drift, one value spread. */
+class HousePalette extends Palette {
+  /**
+   * @param {string} keys darkest first
+   * @param {string} base the material's mid tone
+   * @param {{pick?:number[]}} [o] which steps of the seven-step house curve the keys land on
+   */
+  ramp(keys, base, o = {}) {
+    const cols = ramp(base, 7, RAMP_OPTS);
+    const pick = o.pick || SPREAD[keys.length] || [...keys].map((_, i) => Math.round((i * 6) / (keys.length - 1)));
+    for (let i = 0; i < keys.length; i++) this.set(keys[i], cols[pick[i]]);
+    return this;
+  }
+}
+
+export const VERMIN_PALETTE = new HousePalette()
+  .set('#', INK)                                            // outline: the one house ink
+  .set('@', INK_LIT)                                        // lit edge / inner line
   // giant rat
-  .ramp('1234', '#8a7a68', { step: 0.095, satShift: 0.05, hueShift: 0.03 })  // dusty brown fur
-  .ramp('567', '#c98d86', { step: 0.075, satShift: 0.04 })  // naked flesh: ears, tail, paws
-  .ramp('89', '#d8ccae', { step: 0.1 })                     // bone: teeth, claws, spear tip
+  .ramp('1234', '#8a7a68')                                  // dusty brown fur
+  .ramp('567', '#c98d86', { pick: [2, 4, 6] })              // naked flesh: ears, tail, paws
+  .ramp('89', '#d8ccae', { pick: [4, 6] })                  // bone: teeth, claws, spear tip
   // vampire bat
-  .ramp('abc', '#8f4159', { step: 0.1, satShift: 0.06 })    // wing membrane (warm wine)
-  .ramp('def', '#4b3550', { step: 0.1 })                    // bat fur / finger bones
+  .ramp('abc', '#8f4159')                                   // wing membrane (warm wine)
+  .ramp('def', '#4b3550', { pick: [2, 4, 6] })              // bat fur / finger bones
   // spider
-  .ramp('ghij', '#3f3c55', { step: 0.1 })                   // chitin (cold blue-black)
+  .ramp('ghij', '#3f3c55', { pick: [1, 3, 5, 6] })          // chitin (cold blue-black)
   .set('Y', '#ffbe5c').set('y', '#8f5a1c')                  // amber eyes / joint marks
   // green slime
-  .ramp('mnop', '#4fa83c', { step: 0.12, satShift: 0.1 })   // gel body
+  .ramp('mnop', '#4fa83c')                                  // gel body
   .set('q', '#bdf07e')                                      // translucent skirt (light through it)
   .set('r', '#1d4a1b').set('s', '#dcffab')                  // nucleus core / nucleus glow
   // kobold
-  .ramp('tuvw', '#a86a34', { step: 0.1, hueShift: 0.02, satShift: 0.05 })  // rusty hide
-  .ramp('xyz', '#5b4130', { step: 0.095 })                  // leather straps and kilt
-  .ramp('ST', '#98a0ae', { step: 0.13 })                    // lashings / steel
+  .ramp('tuvw', '#a86a34')                                  // rusty hide
+  .ramp('xyz', '#5b4130', { pick: [1, 3, 5] })              // leather straps and kilt
+  .ramp('ST', '#98a0ae', { pick: [3, 6] })                  // lashings / steel
   // shared
   .set('E', '#1c1424').set('W', '#fff7ea').set('R', '#ff6a4a')  // eye, catch-light, red iris
   .set('F', '#fff4f0');                                     // hurt flash
 
-const LIT = { x: -1, y: -1 };
 const L = (p, x, y) => (p ? { p, x, y } : null);
 /** Compose layers and lay the single selective outline on last (the house treatment). */
 const ink = (w, h, layers) => outline(compose(w, h, layers.filter(Boolean)), '#', { lit: LIT, litKey: '@' });
@@ -1048,7 +1072,9 @@ export const VERMIN_SPRITES = {
   'giant-rat': buildGiantRat,
   'vampire-bat': buildVampireBat,
   'spider': buildSpider,
-  'dimension-spider': buildSpider,
+  // 'dimension-spider' is NOT this spider: it is a real MONSTER_TABLE type with eight jointed
+  // legs and an out-of-register echo, drawn in monsters/drakes.js. `spider` below stays as the
+  // generic six-legger for anything that asks for one by name.
   'green-slime': buildGreenSlime,
   'slime': buildGreenSlime,
   'kobold': buildKobold,

@@ -38,32 +38,95 @@
 import {
   Palette, paint, compose, mirrorLit, outline, line, setPx, solid, makePix, smearArc,
 } from '../pixelPainter.js';
+import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 export const MON_W = 40, MON_H = 40, PIVOT_X = 20, PIVOT_Y = 37;
+
+// ------------------------------------------------------------------------------- the key light
+/**
+ * RE-LIGHT a hand-drawn part to the canonical TOP-LEFT key (style.js `LIT`).
+ *
+ * Three of this group's species were hand-shaded with the light in two different places at once:
+ * the shared legs are lit from the LEFT (`#655#..#554#`) while every head and torso block was
+ * keyed light-on-the-RIGHT and, worse, BRIGHTEST DOWN THE MIDDLE (`#44455566555444#`) — a textbook
+ * pillow. Measured by `style.js` that left the rogue at a rim delta of 0.03 and the assassin at
+ * 0.05, against 0.15-0.20 for the rest of the cast: the figures read as flat stickers.
+ *
+ * Rather than re-typing every block by hand, this re-keys the pixels that already hold one of
+ * `keys` (darkest first) from a real directional terminator: `nx` runs across THAT ROW's own span
+ * of the region, so a tapering form still turns across its own width, and `ny` runs down the
+ * region's bounding box. Anything not in `keys` — eyes, teeth, belts, weapons, hair — is untouched.
+ *
+ * @param {Pix} p @param {string} keys the material's ramp keys, DARKEST FIRST
+ * @param {{gain?:number, mid?:number, up?:number, bias?:number}} [o]
+ *   gain = terminator contrast · mid = where the unlit-normal sits on the ramp · up = how much of
+ *   the light's vertical component the form takes (a column takes less than a sphere)
+ * @returns {Pix} a new Pix
+ */
+function relight(p, keys, o = {}) {
+  const ks = [...keys], set = new Set(ks.map((c) => c.charCodeAt(0)));
+  const gain = o.gain ?? 0.62, mid = o.mid ?? 0.50, up = o.up ?? 0.62, bias = o.bias ?? 0;
+  let y0 = p.h, y1 = -1;
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) if (set.has(p.d[y * p.w + x])) { if (y < y0) y0 = y; if (y > y1) y1 = y; break; }
+  if (y1 < 0) return p;
+  const out = { w: p.w, h: p.h, d: new Uint16Array(p.d) };
+  const cy = (y0 + y1 + 1) / 2, ry = Math.max(1, (y1 - y0 + 1) / 2);
+  for (let y = y0; y <= y1; y++) {
+    let rx0 = p.w, rx1 = -1;
+    for (let x = 0; x < p.w; x++) if (set.has(p.d[y * p.w + x])) { if (x < rx0) rx0 = x; if (x > rx1) rx1 = x; }
+    if (rx1 < 0) continue;
+    const cx = (rx0 + rx1 + 1) / 2, rx = Math.max(1, (rx1 - rx0 + 1) / 2);
+    for (let x = rx0; x <= rx1; x++) {
+      if (!set.has(p.d[y * p.w + x])) continue;
+      const nx = (x + 0.5 - cx) / rx, ny = ((y + 0.5 - cy) / ry) * up;
+      const r2 = Math.min(1, nx * nx + ny * ny);
+      const lam = nx * LIT.x * 0.62 + ny * LIT.y * 0.52 + Math.sqrt(1 - r2) * 0.585;
+      let t = lam * gain + mid + bias;
+      t = t < 0 ? 0 : t > 0.999 ? 0.999 : t;
+      out.d[y * p.w + x] = ks[(t * ks.length) | 0].charCodeAt(0);
+    }
+  }
+  return out;
+}
+
 /** Where the shared parts are stamped on the canvas. */
 const LEG_X = 12, LEG_Y = 25, TORSO_Y = 10, HEAD_Y = 0;
 
 // ------------------------------------------------------------------------------------ palettes
+// Every ramp in this file is a slice of ONE seven-step house curve (`ramp()` in style.js): same ink,
+// same hue drift, same value spread as the fighters in humans.js and the beasts in beasts.js, so a
+// hobgoblin and a swordsman standing in the same torchlight are lit by the same law. `RAMP_PICK`
+// says which steps of that curve each material occupies — cloth and skin sit in the middle (dyed
+// and pigmented, not polished), metal reaches the top because a specular highlight is the whole
+// point of steel, leather sits between them. The old per-species `skinStep`/`accentStep` knobs are
+// gone: five species each inventing their own contrast is exactly what made the cast look sampled
+// from five different games.
+const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
+const RAMP_PICK = { skin: [1, 3, 5], cloth: [0, 2, 3, 4], leather: [1, 3, 4], metal: [1, 3, 5, 6], accent: [1, 3, 5] };
+
 /**
  * One species palette over the shared key vocabulary.
  * @param {{skin:string, cloth:string, leather:string, metal:string, accent:string, eye:string,
- *   tooth?:string, outline?:string, litEdge?:string, skinStep?:number, clothStep?:number,
- *   accentStep?:number}} o
+ *   tooth?:string, picks?:Object<string, number[]>}} o
  */
 function humanoidPalette(o) {
-  return new Palette()
-    .set('#', o.outline || '#181121')
-    .set('@', o.litEdge || '#4b4257')
-    .ramp('123', o.skin, { step: o.skinStep ?? 0.068, hueShift: 0.02, satShift: 0.05 })
-    .ramp('7456', o.cloth, { step: o.clothStep ?? 0.082, mid: 2, hueShift: 0.02, satShift: 0.05 })
-    .ramp('890', o.leather, { step: 0.086, hueShift: 0.03, satShift: 0.07 })
-    .ramp('abcd', o.metal, { step: 0.125, satShift: 0.13 })
-    .ramp('efg', o.accent, { step: o.accentStep ?? 0.095, hueShift: 0.02, satShift: 0.06 })
-    .set('T', o.tooth || '#e8dcc4')
+  const p = new Palette().set('#', INK).set('@', INK_LIT);
+  const put = (keys, base, which) => {
+    const r = ramp(base, 7, RAMP_OPTS);
+    const pick = (o.picks && o.picks[which]) || RAMP_PICK[which];
+    [...keys].forEach((k, i) => p.set(k, r[pick[i]]));
+  };
+  put('123', o.skin, 'skin');
+  put('7456', o.cloth, 'cloth');   // 7 is the darkest crease, then 4 5 6 up to the lit fold
+  put('890', o.leather, 'leather');
+  put('abcd', o.metal, 'metal');   // d is a 1-px specular only
+  put('efg', o.accent, 'accent');
+  return p
+    .set('T', o.tooth || '#ded2b8')
     .set('E', '#191322')
-    .set('W', '#fff6e8')
+    .set('W', '#e6dcc8')
     .set('Y', o.eye)
-    .set('G', '#ffffff')
+    .set('G', '#efe9dd')
     .set('F', '#fff4f0');
 }
 
@@ -244,7 +307,6 @@ const LEGS_E = {
 LEGS_E.squat = LEGS_S.squat; LEGS_E.kneel = LEGS_S.kneel; LEGS_E.down = LEGS_S.down;
 
 // ------------------------------------------------------------------------------------ rig helpers
-const LIT = { x: -1, y: -1 };
 const LIGHT_KEYS = new Set(['3', '6', '0', 'c', 'd', 'g', 'T', 'W'].map((c) => c.charCodeAt(0)));
 
 /** Soften the hand-drawn outline to '@' where a light tone meets empty space on the top-left edge. */
@@ -471,7 +533,7 @@ const SMEAR = {
 function restWeapon(S, f, o = {}) {
   const r = S.rest[f];
   return S.weapon(f, {
-    gx: r.gx + (o.dx || 0), gy: r.gy + (o.dy || 0), angle: r.a, len: r.len, glint: o.glint || 0,
+    gx: r.gx + (o.dx || 0), gy: r.gy + (o.dy || 0), angle: r.a + (o.tilt || 0), len: r.len, glint: o.glint || 0,
   });
 }
 function restArm(S, f, dx = 0, dy = 0) {
@@ -480,22 +542,40 @@ function restArm(S, f, dx = 0, dy = 0) {
 }
 
 // ------------------------------------------------------------------------------------ animations
+/**
+ * Breathing on the spot. THE RULE: an idle never moves the contact row. The boots, the shins and the
+ * hips are the same pixels in all four frames — every bit of the motion lives above the belt, where
+ * a lungful of air actually goes. On the exhale the head settles a pixel into the shoulders (the
+ * neck compresses; the mane, cowl and ear-blades come with it), the hands sink and drift in toward
+ * the body, the weapon tips a couple of degrees, and the cloth extras run their own four-phase
+ * cycle. The old idle translated the whole figure — head, torso, arms and weapon together — down a
+ * pixel and back four times a second, which reads as a man hopping, not breathing.
+ */
+const BREATH = [
+  { head: 0, hand: 0, drift: 0, tilt: 0, glint: 0 },   // rest, lungs full
+  { head: 1, hand: 1, drift: 0, tilt: -2, glint: 0 },  // exhale: the head settles, the arms sink
+  { head: 1, hand: 1, drift: 1, tilt: -3, glint: 1 },  // the bottom of the breath, hands drawn in
+  { head: 0, hand: 0, drift: 1, tilt: -1, glint: 0 },  // inhale: chest lifts, the weapon swings back
+];
+
 function idleClip(S, f) {
-  const mk = (dy, glint, extraPhase) => {
+  const inward = f === 'N' ? 1 : -1;                   // "toward the body" flips with the facing
+  const mk = (i) => {
+    const b = BREATH[i], dx = inward * b.drift;
     const o = {
-      dy, legs: 'stand',
-      arm: restArm(S, f, 0, dy),
-      weapon: restWeapon(S, f, { dy, glint }),
+      hdy: b.head, legs: 'stand',
+      arm: restArm(S, f, dx, b.hand),
+      weapon: restWeapon(S, f, { dx, dy: b.hand, tilt: b.tilt, glint: b.glint }),
     };
     if (S.offRest && S.offRest[f]) {
       const r = S.offRest[f];
-      o.offArm = offArmTo(f, r.gx, r.gy + dy);
-      if (S.offWeapon) o.offWeapon = S.offWeapon(f, { gx: r.gx, gy: r.gy + dy, angle: r.a, len: r.len });
+      o.offArm = offArmTo(f, r.gx - dx, r.gy + b.hand);
+      if (S.offWeapon) o.offWeapon = S.offWeapon(f, { gx: r.gx - dx, gy: r.gy + b.hand, angle: r.a - b.tilt, len: r.len });
     }
-    if (S.idleExtra) o.extra = S.idleExtra(f, extraPhase, dy);
+    if (S.idleExtra) o.extra = S.idleExtra(f, i, b.head);
     return frame(S, f, o);
   };
-  return { frames: [mk(0, 0, 0), mk(1, 0, 1), mk(1, 1, 2), mk(0, 0, 3)], durations: [340, 260, 220, 300], loop: true };
+  return { frames: [mk(0), mk(1), mk(2), mk(3)], durations: [340, 260, 220, 300], loop: true };
 }
 
 function walkClip(S, f) {
@@ -635,7 +715,7 @@ function buildSpecies(S) {
 // The goblinoid grunt. Ear-blades wider than the skull, a jutting underbite with two tusks, a
 // hunched barrel chest over bandy legs, and a notched iron cleaver held low. Nothing else in the
 // dungeon is this wide at the head and this narrow at the hip.
-const HOB_HEAD_S = paint(`
+const HOB_HEAD_S = relight(paint(`
 ......................
 ...#....######....#...
 ..#3#..#333333#..#2#..
@@ -647,8 +727,8 @@ const HOB_HEAD_S = paint(`
 ......#22111122#......
 ......#21TTTT12#......
 ......#T111111T#......
-.......#111112#.......`);
-const HOB_HEAD_E = paint(`
+.......#111112#.......`), '123', { bias: 0.10 });
+const HOB_HEAD_E = relight(paint(`
 ......................
 ...#....######........
 ..#3#..#3333332#......
@@ -660,8 +740,8 @@ const HOB_HEAD_E = paint(`
 ......#32211TT1112#...
 ......#3221111112#....
 ........#32211112#....
-........##########....`);
-const HOB_HEAD_N = paint(`
+........##########....`), '123', { bias: 0.10 });
+const HOB_HEAD_N = relight(paint(`
 ......................
 ...#....######....#...
 ..#3#..#333333#..#2#..
@@ -673,8 +753,8 @@ const HOB_HEAD_N = paint(`
 ......#32222211#......
 ......#22222211#......
 ......#22222211#......
-.......#222211#.......`);
-const HOB_TORSO_S = paint(`
+.......#222211#.......`), '123', { bias: 0.10 });
+const HOB_TORSO_S = relight(paint(`
 .....######.....
 ..############..
 .#333222222333#.
@@ -690,8 +770,8 @@ const HOB_TORSO_S = paint(`
 ..#5566665544#..
 ...#55665544#...
 ....########....
-................`);
-const HOB_TORSO_E = paint(`
+................`), '123', { bias: -0.07 });
+const HOB_TORSO_E = relight(paint(`
 ......####......
 ....########....
 ...#33322222#...
@@ -707,8 +787,8 @@ const HOB_TORSO_E = paint(`
 ..#5566665544#..
 ...#55665544#...
 ....########....
-................`);
-const HOB_TORSO_N = paint(`
+................`), '123', { bias: -0.07 });
+const HOB_TORSO_N = relight(paint(`
 .....######.....
 ..############..
 .#333222222333#.
@@ -724,7 +804,7 @@ const HOB_TORSO_N = paint(`
 ..#5566665544#..
 ...#55665544#...
 ....########....
-................`);
+................`), '123', { bias: -0.07 });
 
 const HOBGOBLIN = {
   scale: 1.08,
@@ -746,7 +826,7 @@ const HOBGOBLIN = {
 // Small and coiled. The hood is a hard triangular peak with the face lost in shadow behind two cold
 // eye-glints; a fat coin pouch swings at the belt (its gold is the one warm note) and the dagger is
 // held REVERSED, blade back along the forearm — the thief's grip.
-const ROG_HEAD_S = paint(`
+const ROG_HEAD_S = relight(paint(`
 .......##.......
 ......#46#......
 .....#4456#.....
@@ -758,8 +838,8 @@ const ROG_HEAD_S = paint(`
 ..#455#11#556#..
 ...#4455556#....
 ....######......
-................`);
-const ROG_HEAD_E = paint(`
+................`), '7456', { bias: 0.10 });
+const ROG_HEAD_E = relight(paint(`
 ....##..........
 ...#46#.........
 ..#4456#........
@@ -771,8 +851,8 @@ const ROG_HEAD_E = paint(`
 .#455#11111#....
 ..#4455566#.....
 ...#######......
-................`);
-const ROG_HEAD_N = paint(`
+................`), '7456', { bias: 0.10 });
+const ROG_HEAD_N = relight(paint(`
 .......##.......
 ......#46#......
 .....#4456#.....
@@ -784,8 +864,8 @@ const ROG_HEAD_N = paint(`
 ..#4455556666#..
 ...#44555566#...
 ....########....
-................`);
-const ROG_TORSO_S = paint(`
+................`), '7456', { bias: 0.10 });
+const ROG_TORSO_S = relight(paint(`
 .....######.....
 ..###444444###..
 .#444555555444#.
@@ -801,8 +881,8 @@ const ROG_TORSO_S = paint(`
 ...#44555444#...
 ...#44555444#...
 ....########....
-................`);
-const ROG_TORSO_E = paint(`
+................`), '7456', { bias: -0.07 });
+const ROG_TORSO_E = relight(paint(`
 ......####......
 ....########....
 ...#44455555#...
@@ -818,8 +898,8 @@ const ROG_TORSO_E = paint(`
 ..#4455554444#..
 ...#44555444#...
 ....########....
-................`);
-const ROG_TORSO_N = paint(`
+................`), '7456', { bias: -0.07 });
+const ROG_TORSO_N = relight(paint(`
 .....######.....
 ..###444444###..
 .#444555555444#.
@@ -835,7 +915,7 @@ const ROG_TORSO_N = paint(`
 ...#44555444#...
 ...#44555444#...
 ....########....
-................`);
+................`), '7456', { bias: -0.07 });
 
 // The stolen purse: fat, gold-stuffed and swinging half a beat behind the hips. The thief's tell.
 const PURSE = paint(`
@@ -849,8 +929,11 @@ const PURSE = paint(`
 const ROGUE = {
   scale: 1.02,
   palette: humanoidPalette({
-    skin: '#d8a982', cloth: '#5b4c36', leather: '#7c5731', metal: '#9aa2ae',
-    accent: '#d8a42e', eye: '#bff2ff', accentStep: 0.12,
+    skin: '#d8a982', cloth: '#4e4032', leather: '#8f5f2e', metal: '#9aa2ae',
+    accent: '#d8a42e', eye: '#bff2ff',
+    // his cloak IS his silhouette, so it takes the top of the curve as well as the bottom: on the
+    // group default ([0,2,3,4]) the lit fold never got past mid grey and he read as one flat shape
+    picks: { cloth: [0, 2, 3, 6] },
   }),
   head: { S: ROG_HEAD_S, E: ROG_HEAD_E, N: ROG_HEAD_N },
   headX: { S: 12, E: 12, N: 12 },
@@ -878,7 +961,7 @@ const BAR_HEAD_S = paint(`
 ..#ef#311113#e#.
 ..#ef#1EE2EE1#e#
 ..#ef#3322233#e#
-..#ef#32TTT23#e#
+..#ef#3211123#e#
 ..#efe#31113#ee#
 ..#eeffe111effe#
 ...#eeeffeffee#.
@@ -891,7 +974,7 @@ const BAR_HEAD_E = paint(`
 .#ef#3111113#...
 .#ef#31EE223#...
 .#ef#3332223#...
-.#ef#33TT123#...
+.#ef#3311123#...
 .#efe#311123#...
 .#eeffe1111#....
 ..#eeffeffe#....
@@ -964,8 +1047,13 @@ const BAR_TORSO_N = paint(`
 const BARBARIAN = {
   scale: 1.2,
   palette: humanoidPalette({
-    skin: '#d09a6a', cloth: '#7d5a34', leather: '#5f4126', metal: '#9ba3b0',
-    accent: '#a8541f', eye: '#ffe9c0', accentStep: 0.15,
+    skin: '#c2926f', cloth: '#7a5c3c', leather: '#5f4126', metal: '#9ba3b0',
+    accent: '#96562f', eye: '#ffe9c0',
+    // Bare skin is nearly his whole body, so it takes a NARROWER slice of the house curve than a
+    // clothed fighter's face does: a shadow two steps up from the bottom, not one. The mane takes
+    // the BOTTOM of its curve for the opposite reason — at the middle it landed on the same value
+    // as the lit chest and the two merged into one beige mass that read as a hooded tunic.
+    picks: { skin: [2, 3, 5], accent: [0, 1, 3] },
   }),
   head: { S: BAR_HEAD_S, E: BAR_HEAD_E, N: BAR_HEAD_N },
   headX: { S: 12, E: 12, N: 12 },
@@ -974,6 +1062,10 @@ const BARBARIAN = {
   limb: { lit: '3', dark: '2', fist: '2', fistLit: '3' },
   style: 'swing',
   rest: { S: { gx: 15, gy: 24, a: -24, len: 11 }, E: { gx: 25, gy: 23, a: 30, len: 11 }, N: { gx: 25, gy: 24, a: 22, len: 11 } },
+  // The off hand: bare, hanging outside the hip clear of the mane. Without it the axe shoulder was
+  // the only arm he had and the other one ended in a stump under the hair.
+  // (no E entry: from the side the far arm is behind the body, and drawing it would stripe the chest)
+  offRest: { S: { gx: 27, gy: 23, a: 0, len: 0 }, N: { gx: 13, gy: 23, a: 0, len: 0 } },
   weapon: (f, o) => axePix(o.gx, o.gy, o.angle, { len: o.len, head: 4.2, glint: o.glint || 0 }),
 };
 
@@ -1097,6 +1189,10 @@ const RANGER = {
   palette: humanoidPalette({
     skin: '#e0bb92', cloth: '#3f6b4a', leather: '#9c7442', metal: '#a8b0bc',
     accent: '#c8b46a', eye: '#dff5ff',
+    // A figure dressed head to foot in forest green has almost nothing to be light or dark WITH:
+    // his fletchings take the top of the curve and his belt and boots the very bottom, which is
+    // what stops the whole silhouette flattening into the wall behind him.
+    picks: { accent: [2, 4, 6], leather: [0, 3, 5] },
   }),
   head: { S: RAN_HEAD_S, E: RAN_HEAD_E, N: RAN_HEAD_N },
   headX: { S: 12, E: 12, N: 12 },
@@ -1117,7 +1213,7 @@ const RANGER = {
 // ============================================================================ ASSASSIN
 // Narrow, low and wrapped head to foot in indigo; the only face is a mask slit with a red ember
 // behind it. Twin daggers held reversed, and a long scarf that keeps moving after he stops.
-const ASS_HEAD_S = paint(`
+const ASS_HEAD_S = relight(paint(`
 ......####......
 .....#4556#.....
 ....#445566#....
@@ -1129,8 +1225,8 @@ const ASS_HEAD_S = paint(`
 ....#445556#....
 ....#445566#....
 .....######.....
-................`);
-const ASS_HEAD_E = paint(`
+................`), '7456', { bias: 0.10 });
+const ASS_HEAD_E = relight(paint(`
 .....####.......
 ....#45566#.....
 ...#4455666#....
@@ -1142,8 +1238,8 @@ const ASS_HEAD_E = paint(`
 ...#445566666#..
 ...#44556666#...
 ....########....
-................`);
-const ASS_HEAD_N = paint(`
+................`), '7456', { bias: 0.10 });
+const ASS_HEAD_N = relight(paint(`
 ......####......
 .....#4556#.....
 ....#445566#....
@@ -1155,8 +1251,8 @@ const ASS_HEAD_N = paint(`
 ....#455566#....
 ....#445566#....
 .....######.....
-................`);
-const ASS_TORSO_S = paint(`
+................`), '7456', { bias: 0.10 });
+const ASS_TORSO_S = relight(paint(`
 .....######.....
 ..###444455###..
 .#444555555666#.
@@ -1172,8 +1268,8 @@ const ASS_TORSO_S = paint(`
 ...#44555444#...
 ...#44555444#...
 ....########....
-................`);
-const ASS_TORSO_E = paint(`
+................`), '7456', { bias: -0.07 });
+const ASS_TORSO_E = relight(paint(`
 ......####......
 ....########....
 ...#44455555#...
@@ -1189,8 +1285,8 @@ const ASS_TORSO_E = paint(`
 ..#4455554444#..
 ...#44555444#...
 ....########....
-................`);
-const ASS_TORSO_N = paint(`
+................`), '7456', { bias: -0.07 });
+const ASS_TORSO_N = relight(paint(`
 .....######.....
 ..###444455###..
 .#444555555666#.
@@ -1206,7 +1302,7 @@ const ASS_TORSO_N = paint(`
 ...#44555444#...
 ...#44555444#...
 ....########....
-................`);
+................`), '7456', { bias: -0.07 });
 // The scarf: four drift poses, sheared further with each idle beat.
 const SCARF = [
   paint(`
@@ -1246,8 +1342,8 @@ const SCARF = [
 const ASSASSIN = {
   scale: 1.12,
   palette: humanoidPalette({
-    skin: '#8f7c9a', cloth: '#474473', leather: '#39355a', metal: '#aab2c2',
-    accent: '#a8283c', eye: '#ff5a4a', accentStep: 0.12,
+    skin: '#8f7c9a', cloth: '#4e4b80', leather: '#332f52', metal: '#aab2c2',
+    accent: '#a8283c', eye: '#ff5a4a',
   }),
   head: { S: ASS_HEAD_S, E: ASS_HEAD_E, N: ASS_HEAD_N },
   headX: { S: 12, E: 12, N: 12 },
