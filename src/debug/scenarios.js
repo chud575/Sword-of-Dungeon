@@ -661,6 +661,62 @@ export const scenarios = {
     lineup(ctx, ['rogue', 'barbarian', 'elvin-ranger', 'dwarven-guard', 'mercenary', 'swordsman', 'monk', 'dark-warrior', 'assassin', 'war-lord', 'mage']);
   },
 
+  /**
+   * The upper-dungeon vermin as HD-2D pixel sprites: a labelled row in a lit hall, facing the
+   * camera, with the hero beside them for scale. The types are placed by overriding the entity type
+   * of ordinary spawns, so the row works whatever the bestiary currently rolls.
+   */
+  async 'bestiary-vermin'(ctx) {
+    const g = ctx.reset();
+    const W = 16, H = 11, depth = 2;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 2, y: 6 } });
+    const p = g.player; p.facing = { dx: 1, dy: 0 };
+    const types = [['giant-rat', 'Giant Rat'], ['vampire-bat', 'Vampire Bat'], ['spider', 'Spider'], ['green-slime', 'Green Slime'], ['kobold', 'Kobold']];
+    const placed = [];
+    types.forEach(([t, label], i) => {
+      const x = 4 + i * 2, y = 5;
+      const m = g.spawnMonster('hobgoblin', x, y, { depth, state: 'idle' });
+      if (!m) return;
+      m.type = t; m.name = label;             // the sprite registry keys off entity.type
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ m, label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(7.4, 5.6, 11.5, 6.6, { elevation: 30 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed.map((q) => ({ label: q.label, x: q.x, y: q.y })));
+  },
+
+  /**
+   * The humanoid warriors as HD-2D pixel sprites: a labelled row in a lit hall facing the camera,
+   * with the hero at the end of the rank for scale (sprites/monsters/humanoid.js).
+   */
+  async 'bestiary-humanoid'(ctx) {
+    const g = ctx.reset();
+    const W = 19, H = 12, depth = 3;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 5 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    const types = [['hobgoblin', 'Hobgoblin'], ['rogue', 'Rogue'], ['barbarian', 'Barbarian'], ['elvin-ranger', 'Elvin Ranger'], ['assassin', 'Assassin']];
+    const placed = [{ label: 'Hero', x: 3, y: 5 }];
+    types.forEach(([t, label], i) => {
+      const x = 6 + i * 2, y = 5;
+      const m = g.spawnMonster(t, x, y, { depth: 10, state: 'idle' });
+      if (!m) return;
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(8.6, 5.5, 13.5, 7.6, { elevation: 32 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
+  },
+
   // ---------------------------------------------------------------- HD-2D hero sprite
   /** Every hero animation sheet (all facings, west mirrored from east) at 4x on a neutral grey overlay. */
   async 'hero-sheet'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 0); },
@@ -750,6 +806,41 @@ function longestRun(g) {
     if (n > best.n) best = { dx, dy, n };
   }
   return best;
+}
+
+let nameplateEl = null;
+/**
+ * Caption tiles in the 3D view: projects each {label,x,y} tile through the live camera and writes
+ * the name under it on a transparent overlay (removed when the next game starts).
+ */
+function nameplates(ctx, items) {
+  if (!nameplateEl) {
+    nameplateEl = document.createElement('canvas');
+    nameplateEl.id = 'nameplate-overlay';
+    Object.assign(nameplateEl.style, { position: 'fixed', left: '0', top: '0', width: '100vw', height: '100vh', zIndex: '9998', pointerEvents: 'none' });
+    document.body.appendChild(nameplateEl);
+    ctx.bus.on('game:start', () => { if (nameplateEl) { nameplateEl.remove(); nameplateEl = null; } });
+  }
+  const W = window.innerWidth, H = window.innerHeight;
+  nameplateEl.width = W; nameplateEl.height = H;
+  const c = nameplateEl.getContext('2d');
+  c.clearRect(0, 0, W, H);
+  c.font = '600 15px ui-monospace, Menlo, Consolas, monospace';
+  c.textAlign = 'center'; c.textBaseline = 'top';
+  const cam = ctx.renderer.camera;
+  cam.updateMatrixWorld(true);
+  // project by hand (column-major mat4 * vec4) so this file needs no THREE import
+  const mul = (e, v) => [0, 1, 2, 3].map((r) => e[r] * v[0] + e[4 + r] * v[1] + e[8 + r] * v[2] + e[12 + r] * v[3]);
+  for (const it of items) {
+    const clip = mul(cam.projectionMatrix.elements, mul(cam.matrixWorldInverse.elements, [it.x, 0.02, it.y, 1]));
+    const w = clip[3] || 1;
+    const sx = (clip[0] / w * 0.5 + 0.5) * W, sy = (-clip[1] / w * 0.5 + 0.5) * H + 10;
+    const tw = c.measureText(it.label).width + 14;
+    c.fillStyle = 'rgba(12,9,18,0.72)';
+    c.fillRect(sx - tw / 2, sy - 3, tw, 21);
+    c.fillStyle = '#e7dfc8';
+    c.fillText(it.label, sx, sy);
+  }
 }
 
 let heroOverlayEl = null;

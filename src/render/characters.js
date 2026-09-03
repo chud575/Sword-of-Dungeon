@@ -12,6 +12,7 @@ import { bus } from '../core/events.js';
 import { buildHero } from './sprites/heroSprite.js';
 import { packSheet, createSheetTexture } from './sprites/spriteSheet.js';
 import { SpriteBillboard } from './sprites/spriteBillboard.js';
+import { MONSTER_SPRITES } from './sprites/monsters/index.js';
 
 const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const smooth = (x) => { x = clamp01(x); return x * x * (3 - 2 * x); };
@@ -28,8 +29,10 @@ export class CharacterFactory {
   constructor(fog) {
     this.fog = fog;
     this.geoCache = new Map();
+    /** built sheet + atlas per monster type that has a pixel sprite */
+    this.monsterSheets = new Map();
     this.sizeMul = 1.2;
-    /** The hero is an HD-2D pixel sprite (sprites/heroSprite.js); monsters keep their low-poly rigs. */
+    /** The hero is an HD-2D pixel sprite (sprites/heroSprite.js). */
     this.hero = null;
     this.playerView = null;
     this.unsub = [
@@ -46,6 +49,43 @@ export class CharacterFactory {
       this.hero = { built, sheet, texture: createSheetTexture(sheet) };
     }
     return this.hero;
+  }
+
+  /** Build (once) the sheet + texture for a monster type drawn as a pixel sprite. */
+  monsterAssets(type) {
+    let a = this.monsterSheets.get(type);
+    if (!a) {
+      const built = MONSTER_SPRITES[type]();
+      const sheet = packSheet(built, { order: ['idle', 'walk', 'attack', 'hurt', 'death'] });
+      a = { built, sheet, texture: createSheetTexture(sheet) };
+      this.monsterSheets.set(type, a);
+    }
+    return a;
+  }
+
+  /**
+   * A monster drawn as an HD-2D pixel sprite (sprites/monsters/) instead of its low-poly rig.
+   * Same view shape as the hero's, so move/attack/hurt/die/update need no special cases: its
+   * bulk is baked into the canvas size, so entity.size only nudges the scale.
+   */
+  createMonsterSprite(entity, type) {
+    const { built, sheet, texture } = this.monsterAssets(type);
+    const sprite = new SpriteBillboard({ sheet, texture, fog: this.fog });
+    const root = sprite.root;
+    root.name = `char:${entity.id}`;
+    const armR = new THREE.Object3D(); armR.position.set(0, 0.5, 0); root.add(armR);
+    const view = {
+      root, nodes: { root, armR }, material: sprite.material, sprite, mesh: sprite.mesh, kind: 'sprite', entity, type,
+      size: (1 + ((entity.size || 1) - 1) * 0.5) * (built.scale || 1), style: 'swing',
+      // ground-locked stride: a rat's scurry cycles far faster than the hero's march
+      stride: 0.45 + (built.h / 48) * 0.9,
+      anim: { t: entity.id ? hash(entity.id) * 10 : 0, walk: 0, alert: 0, attack: 0, attackDir: 0, hurt: 0, dead: 0, spawn: 0, flash: 0, moving: false, dying: false, done: false, angle: 0, opacity: 1, facing: 'S', dist: 0, action: null, actionT: 0, actionRestart: false, restart: false },
+      pos: new THREE.Vector3(entity.x, 0, entity.y), from: null, to: null, moveT: 1, moveDur: 0.2, _prev: new THREE.Vector3(entity.x, 0, entity.y),
+    };
+    view.anim.angle = Math.atan2(entity.facing?.dx || 0, entity.facing?.dy || 1);
+    view.anim.facing = facingOf(entity.facing?.dx || 0, entity.facing?.dy || 1);
+    root.position.copy(view.pos);
+    return view;
   }
 
   /** One-shot hero action (cast / pickup) for `dur` seconds. */
@@ -92,6 +132,8 @@ export class CharacterFactory {
   create(entity) {
     if (entity.kind === 'player') return this.createSprite(entity);
     const type = entity.kind === 'player' ? 'player' : entity.type;
+    // monsters with hand-pixelled sprites are billboards; everything else keeps its rig
+    if (MONSTER_SPRITES[type]) return this.createMonsterSprite(entity, type);
     const spec = this.rigGeometry(type);
     const material = createCharacterMaterial(this.fog);
     const outline = createOutlineMaterial();
@@ -488,7 +530,7 @@ export class CharacterFactory {
     const restart = a.restart || (a.action && a.actionRestart);
     a.restart = false; a.actionRestart = false;
     sp.animator.play(clip, a.facing, { restart });
-    if (clip === 'walk') { a.dist += view.pos.distanceTo(view._prev); sp.animator.setPhase(a.dist / 1.35); sp.animator.time -= dt * 1000; } // ground-locked: update() re-adds dt
+    if (clip === 'walk') { a.dist += view.pos.distanceTo(view._prev); sp.animator.setPhase(a.dist / (view.stride || 1.35)); sp.animator.time -= dt * 1000; } // ground-locked: update() re-adds dt
     // squash & stretch, lunge and knock-back
     root.position.copy(view.pos);
     let sx = 1, sy = 1;
@@ -514,9 +556,8 @@ export class CharacterFactory {
     if (ctx.invisible) op = Math.min(op, 0.3 + 0.08 * Math.sin(a.t * 9));
     sp.opacity = op;
     sp.update(dt);
-    // the sword-aura node follows the hand of the current facing
-    const n = view.nodes.armR;
-    n.position.set(a.facing === 'E' ? 0.18 : a.facing === 'W' ? -0.18 : a.facing === 'N' ? 0.22 : -0.22, 0.86, 0.06);
+    // the sword-aura node follows the hand of the current facing (hero only; monsters carry none)
+    if (view.type === 'player') view.nodes.armR.position.set(a.facing === 'E' ? 0.18 : a.facing === 'W' ? -0.18 : a.facing === 'N' ? 0.22 : -0.22, 0.86, 0.06);
   }
 
   dispose(view) {
