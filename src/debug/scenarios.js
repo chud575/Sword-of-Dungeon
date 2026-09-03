@@ -777,6 +777,35 @@ export const scenarios = {
     nameplates(ctx, placed);
   },
 
+  /**
+   * The heavies of the deep as HD-2D pixel sprites: a labelled row in a lit hall facing the camera,
+   * with the hero at the head of the rank for scale (sprites/monsters/boss.js). They are spaced two
+   * extra tiles apart because their canvases are half again as wide as anything else's.
+   */
+  async 'bestiary-boss'(ctx) {
+    const g = ctx.reset();
+    const W = 19, H = 12, depth = 3;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 2, y: 5 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');    // depth 14 is the darkest band; light the whole rank
+    const types = [['ogre', 'Ogre'], ['fyre-drake', 'Salamander'], ['shadow-dragon', 'Shadow Dragon'], ['demon', 'Demon']];
+    const placed = [{ label: 'Hero', x: 2, y: 5 }];
+    types.forEach(([t, label], i) => {
+      const x = 5 + i * 3, y = 5;
+      const m = g.spawnMonster(t, x, y, { depth, state: 'idle' });
+      if (!m) return;
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(8.4, 5.4, 14.5, 8.2, { elevation: 32 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
+  },
+
   // ---------------------------------------------------------------- HD-2D hero sprite
   /** Every hero animation sheet (all facings, west mirrored from east) at 4x on a neutral grey overlay. */
   async 'hero-sheet'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 0); },
