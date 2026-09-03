@@ -717,6 +717,66 @@ export const scenarios = {
     nameplates(ctx, placed);
   },
 
+  /**
+   * The spellcasters and tricksters as HD-2D pixel sprites: a labelled row in a lit hall facing
+   * the camera, with the hero at the end of the rank for scale (sprites/monsters/caster.js).
+   * `sprite` and `wizard` are not rolled by the generator, so they are placed by overriding the
+   * entity type of an ordinary spawn — the sprite registry keys off entity.type.
+   */
+  async 'bestiary-caster'(ctx) {
+    const g = ctx.reset();
+    const W = 18, H = 12, depth = 14;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 5 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    const types = [['mage', 'Mage'], ['warlock', 'Warlock'], ['sprite', 'Sprite'], ['wizard', 'Illusionist']];
+    const placed = [{ label: 'Hero', x: 3, y: 5 }];
+    types.forEach(([t, label], i) => {
+      const x = 6 + i * 2, y = 5;
+      const m = g.spawnMonster('mage', x, y, { depth, state: 'idle' });
+      if (!m) return;
+      m.type = t; m.name = label;
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(7.9, 5.4, 11.0, 6.2, { elevation: 30 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
+  },
+
+  /**
+   * The undead and horrors as HD-2D pixel sprites: a labelled row in a lit hall facing the camera,
+   * with the hero at the head of the rank for scale (sprites/monsters/undead.js). These are
+   * extended-bestiary types, so the row is placed by overriding the entity type of ordinary spawns
+   * — the sprite registry keys off `entity.type` and nothing else.
+   */
+  async 'bestiary-undead'(ctx) {
+    const g = ctx.reset();
+    const W = 18, H = 12, depth = 6;
+    bestiaryHall(g, W, H, depth);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 5 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    const types = [['ghoul', 'Ghoul'], ['wraith', 'Wraith'], ['vampire', 'Vampire'], ['werewolf', 'Werewolf']];
+    const placed = [{ label: 'Hero', x: 3, y: 5 }];
+    types.forEach(([t, label], i) => {
+      const x = 7 + i * 2, y = 5;
+      const m = g.spawnMonster('hobgoblin', x, y, { depth: 12, state: 'idle' });
+      if (!m) return;
+      m.type = t; m.name = label;             // the sprite registry keys off entity.type
+      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+      placed.push({ label, x, y });
+    });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.renderer.cameraRig.setOverview(8.4, 5.5, 13.5, 7.6, { elevation: 32 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed);
+  },
+
   // ---------------------------------------------------------------- HD-2D hero sprite
   /** Every hero animation sheet (all facings, west mirrored from east) at 4x on a neutral grey overlay. */
   async 'hero-sheet'(ctx) { ctx.reset(); ctx.step(50); heroOverlay(ctx, 0); },
