@@ -109,6 +109,34 @@ function clearStart(game) {
   return s;
 }
 
+/** Nearest empty floor tile (at least `minDist` from the player) whose 8 neighbours are all plain floor. */
+function interiorSpot(game, minDist = 2) {
+  const p = game.player, lv = game.level;
+  let best = null, bestD = Infinity;
+  for (let y = 1; y < lv.height - 1; y++) for (let x = 1; x < lv.width - 1; x++) {
+    if (lv.get(x, y) !== TILE.FLOOR || !lv.isEmptyFloor(x, y)) continue;
+    let ok = true;
+    for (let dy = -1; dy <= 1 && ok; dy++) for (let dx = -1; dx <= 1; dx++) if (lv.get(x + dx, y + dy) !== TILE.FLOOR) { ok = false; break; }
+    if (!ok) continue;
+    const d = Math.abs(x - p.x) + Math.abs(y - p.y);
+    if (d >= minDist && d < bestD) { best = { x, y }; bestD = d; }
+  }
+  return best;
+}
+
+/** Stage a pickup: player north of an interior tile, item on it, then step south onto it. */
+function stageStepOnto(ctx, item) {
+  const g = ctx.game, lv = g.level;
+  const s = interiorSpot(g, 2);
+  if (!s) return null;
+  g.teleportTo(s.x, s.y - 1); g.updateFov();
+  if (item) lv.addItem({ qty: 1, x: s.x, y: s.y, ...item });
+  ctx.step(200);
+  g.move(0, 1);
+  ctx.step(g.balance.playerStepTime * 1000 + 40);
+  return s;
+}
+
 /** Empty floor tiles around the player ordered south row, sides, north row, then the second ring. */
 function ringSpots(game, max = 12) {
   const p = game.player, lv = game.level;
@@ -241,40 +269,25 @@ export const scenarios = {
   /** Gold pickup: the player steps onto a fat gold sack — coin fountain, flash and the +gold number. */
   async 'gold-pickup'(ctx) {
     const g = ctx.reset();
-    clearStart(g);
-    const lv = g.level, p = g.player;
-    const s = ringSpots(g, 3)[0];
-    if (s) {
-      lv.addItem({ qty: 1, x: s.x, y: s.y, type: 'gold', gold: 95 });
-      ctx.step(200);
-      g.move(s.x - p.x, s.y - p.y);
-      ctx.step(g.balance.playerStepTime * 1000 + 60);
-    }
+    stageStepOnto(ctx, { type: 'gold', gold: 95 });
   },
 
   /** Opening a chest: lid springs back, gold light spills out, coins fountain. */
   async 'chest-open'(ctx) {
     const g = ctx.reset();
-    clearStart(g);
-    const lv = g.level, p = g.player;
-    const s = ringSpots(g, 3)[0];
-    if (s) {
-      lv.addItem({ qty: 1, x: s.x, y: s.y, type: 'chest', hidden: false, trap: null, content: { item: 'potion' } });
-      ctx.step(200);
-      g.move(s.x - p.x, s.y - p.y);
-      ctx.step(g.balance.playerStepTime * 1000 + 40);
-    }
+    stageStepOnto(ctx, { type: 'chest', hidden: false, trap: null, content: { item: 'potion' } });
+    void g;
   },
 
   /** A monster slain beside the player: ichor burst, soul motes, floor splat. */
   async 'monster-slain'(ctx) {
     const g = ctx.reset();
-    clearStart(g);
     const p = g.player;
     p.maxHp = 200; p.hp = 200; p.skill = 60;
-    const s = ringSpots(g, 3)[0];
+    const s = interiorSpot(g, 2);
+    if (s) { g.teleportTo(s.x, s.y - 1); g.updateFov(); }
     const m = s ? g.spawnMonster('hobgoblin', s.x, s.y, { depth: 1, state: 'hunt' }) : null;
-    if (m) { m.hp = 1; m.facing = { dx: Math.sign(p.x - s.x), dy: Math.sign(p.y - s.y) }; g.move(s.x - p.x, s.y - p.y); }
+    if (m) { m.hp = 1; m.facing = { dx: 0, dy: -1 }; g.move(0, 1); }
     ctx.step(260);
   },
 
@@ -521,6 +534,25 @@ export const uiScenarios = {
     ctx.step(700);
     ctx.ui.hud.showBanner('An exper dark warrior comes into view', 'Paused — any key to continue', 'danger', 0);
     ctx.step(400);
+  },
+
+  /** HUD showcase: a healthy mid-run with a full hotbar, statuses, a fat purse and a lively mixed log. */
+  async 'hud-showcase'(ctx) {
+    const g = midRun(ctx, { depth: 7 });
+    const p = g.player;
+    p.maxHp = 58; p.hp = 41; p.kills = 12;
+    g.give('gold', 267); g.give('teleport', 1); g.give('potion', 1);
+    g.log('You descend the stairs. Cold air rises from below.', 'info');
+    g.log('A kobold strikes from the shadows! HITS: 44', 'combat');
+    g.log('HITS: 41 SLASH', 'combat');
+    g.log('The kobold is slain. +38 exp', 'combat');
+    g.log('GOLD! 120 pieces', 'loot');
+    g.log('TELEPORT SPELL!!', 'magic');
+    g.log('The air hums here. Something of great power lies on this level.', 'quest');
+    const spots = neighbours(g.level, p.x, p.y);
+    const s = spots[spots.length - 1];
+    if (s) { const m = g.spawnMonster('mercenary', s.x, s.y, { depth: 7, state: 'hunt' }); if (m) { freeze(m); m.facing = { dx: Math.sign(p.x - s.x), dy: Math.sign(p.y - s.y) }; } }
+    ctx.step(900);
   },
 };
 

@@ -202,7 +202,7 @@ export function flameMaterial() {
           float core = (1.0 - smoothstep(0.0, 0.5, d)) * (1.0 - smoothstep(0.05, 0.62, p.y + n2 * 0.05));
           vec3 col = mix(vec3(1.0, 0.22, 0.02), vec3(1.0, 0.58, 0.1), body);
           col = mix(col, vec3(1.0, 0.95, 0.72), core);
-          col *= 1.7 + core * 1.2;
+          col *= 1.35 + core * 0.9;
           vec3 c = applyFog(col, vFogXZ);
           gl_FragColor = vec4(c, a);
         }`,
@@ -247,11 +247,13 @@ export function groundGlow(color, radius, { opacity = 0.55, y = 0.015, tex = glo
   return m;
 }
 
-/** Flame billboard mesh (userData.flame so DungeonView flickers its scale). */
+/**
+ * Flame billboard mesh (userData.flame so DungeonView flickers its scale). The size is baked into
+ * the geometry because DungeonView drives `scale` with a unit flicker factor each frame.
+ */
 export function flame(size = 0.3, aspect = 1.6) {
-  const m = new THREE.Mesh(planeGeometry(), flameMaterial());
-  m.geometry = memo('geo:flamePlane', () => new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0));
-  m.scale.set(size, size * aspect, 1);
+  const key = `geo:flame:${size}:${aspect}`;
+  const m = new THREE.Mesh(memo(key, () => new THREE.PlaneGeometry(size, size * aspect).translate(0, size * aspect * 0.5, 0)), flameMaterial());
   m.userData.flame = true; m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false; m.renderOrder = 7;
   return m;
 }

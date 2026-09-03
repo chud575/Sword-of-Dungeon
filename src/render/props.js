@@ -400,8 +400,8 @@ export class PropFactory {
     for (const x of [-0.27, 0.27]) {
       g.add(mesh(geo('candleHolder', () => new THREE.CylinderGeometry(0.045, 0.06, 0.03, 8)), M.brass, x, 0.55, 0.13));
       g.add(mesh(geo('candle', () => new THREE.CylinderGeometry(0.03, 0.035, 0.15, 8)), M.candle, x, 0.64, 0.13));
-      const fl = flame(0.12, 1.8); fl.position.set(x, 0.7, 0.13); g.add(fl);
-      const gl = billboard(glowTexture(), 0xffb060, 0.36, { intensity: 0.6 }); gl.position.set(x, 0.78, 0.13); g.add(gl);
+      const fl = flame(0.085, 2.0); fl.position.set(x, 0.71, 0.13); g.add(fl);
+      const gl = billboard(glowTexture(), 0xffb060, 0.2, { intensity: 0.45 }); gl.position.set(x, 0.76, 0.13); g.add(gl);
     }
     const glow = mesh(geo('altarGlow', () => new THREE.CylinderGeometry(0.5, 0.7, 1.4, 16, 1, true)), M.holyGlow, 0, 0.8, 0, { shadow: false });
     glow.userData.glow = true;
@@ -420,8 +420,8 @@ export class PropFactory {
     g.add(mesh(geo('torchArm', () => new THREE.CylinderGeometry(0.012, 0.012, 0.14, 6)), M.iron, 0, 0.04, 0.06, { rx: 1.1 }));
     g.add(mesh(geo('torchHandle', () => new THREE.CylinderGeometry(0.024, 0.02, 0.34, 7)), M.wood, 0, 0.1, 0.13, { rx: 0.5 }));
     g.add(mesh(geo('torchHead', () => new THREE.CylinderGeometry(0.04, 0.032, 0.1, 8)), M.dark, 0, 0.25, 0.21, { rx: 0.5 }));
-    const f1 = flame(0.3, 1.7); f1.position.set(0, 0.27, 0.22); g.add(f1);
-    const f2 = flame(0.18, 1.5); f2.position.set(0, 0.29, 0.225); g.add(f2);
+    const f1 = flame(0.4, 1.8); f1.position.set(0, 0.27, 0.22); g.add(f1);
+    const f2 = flame(0.24, 1.5); f2.position.set(0, 0.29, 0.225); g.add(f2);
     const ember = billboard(glowTexture(), 0xff7a2a, 0.55, { intensity: 0.9 }); ember.position.set(0, 0.33, 0.22); g.add(ember);
     animate(g, (dt, time, ctx, d) => {
       const s = 0.55 * (0.85 + 0.15 * Math.sin(time * 9.1 + g.position.x) * Math.sin(time * 5.7 + g.position.z));

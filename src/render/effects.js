@@ -260,7 +260,7 @@ export class Effects {
         this.matter.emit({ x: d.x, y: 0.5, z: d.z, count: crit ? 30 : 14, color: [0x8a1c1c, 0x5a0e0e, 0xb02020], speed: 2.2, up: 1.2, life: 1.4, size: 0.07, gravity: -9, drag: 1, radius: 0.08, dir: { x: dir.x * 0.7, y: 0.6, z: dir.z * 0.7 }, stick: true }, this.rng);
         this.matter.emit({ x: d.x, y: 0.5, z: d.z, count: 6, color: [0x5a0e0e, 0x3a0808], speed: 0.8, up: 0.6, life: 0.7, size: 0.16, gravity: -0.5, drag: 2, radius: 0.1, kind: 3 }, this.rng);
         const rot = this.rng.float(0, 6.28), size = (crit ? 0.6 : 0.4) * this.rng.float(0.8, 1.2);
-        this.decals.play({ x: d.x + dir.x * 0.25 + this.rng.float(-0.15, 0.15), z: d.z + dir.z * 0.25 + this.rng.float(-0.15, 0.15), color: 0x4a0c0c, intensity: 1, dur: 7, fn: (m, k) => { m.rotation.set(-Math.PI / 2, 0, rot); m.scale.setScalar(size * (0.6 + 0.4 * easeOut(Math.min(1, k * 20)))); m.material.opacity = 0.75 * (1 - k * k); } });
+        this.decals.play({ x: d.x + dir.x * 0.25 + this.rng.float(-0.15, 0.15), z: d.z + dir.z * 0.25 + this.rng.float(-0.15, 0.15), color: 0x2a0606, intensity: 1, dur: 8, fn: (m, k) => { m.rotation.set(-Math.PI / 2, 0, rot); m.scale.setScalar(size * 1.2 * (0.6 + 0.4 * easeOut(Math.min(1, k * 20)))); m.material.opacity = 0.85 * (1 - k * k); } });
       } else this.burst(d.x, d.z, { color: [0x9a9088, 0xd0c8c0], count: 8, speed: 1.4, up: 1.2, life: 0.5, size: 0.06, y: 0.5, gravity: -5 });
       this.lights.pulse({ x: d.x, z: d.z, color: steel ? 0xffd090 : 0xff6040, intensity: crit ? 14 : 6, dur: crit ? 0.3 : 0.14, distance: 4 });
       this.numbers.spawn(d.x, d.z, crit ? `${damage}!` : `${damage}`, { style: isPlayer ? 'player' : crit ? 'crit' : 'normal', size: crit ? 1.35 : isPlayer ? 1.05 : 0.92 });
@@ -292,7 +292,7 @@ export class Effects {
     this.flashes.play({ x, y: 0.3, z, color: creature ? 0x7a4cdf : 0xff8060, size0: 1.2, size1: 0.6, dur: 2.6, intensity: 0.5, opacity: 0.6 });
     this.rings.play({ x, z, color: creature ? 0x8a5cff : 0xff8060, dur: 0.5, intensity: 1, fn: (m, k) => { m.scale.setScalar(0.3 + easeOut(k) * 1.2); m.material.opacity = 0.6 * (1 - k); } });
     const rot = this.rng.float(0, 6.28);
-    this.decals.play({ x, z, color: creature ? 0x2a1030 : 0x4a0c0c, intensity: 1, dur: 9, fn: (m, k) => { m.rotation.set(-Math.PI / 2, 0, rot); m.scale.setScalar(0.9 * (0.5 + 0.5 * easeOut(Math.min(1, k * 15)))); m.material.opacity = 0.8 * (1 - k * k); } });
+    this.decals.play({ x, z, color: creature ? 0x140820 : 0x2a0606, intensity: 1, dur: 10, fn: (m, k) => { m.rotation.set(-Math.PI / 2, 0, rot); m.scale.setScalar(1.15 * (0.5 + 0.5 * easeOut(Math.min(1, k * 15)))); m.material.opacity = 0.92 * (1 - k * k); } });
     this.lights.pulse({ x, z, color: creature ? 0x8a5cff : 0xff8060, intensity: 9, dur: 0.4 });
   }
 
@@ -396,8 +396,6 @@ export class Effects {
   }
 
   levelUp(x, z) {
-    if (this.time - (this.lastLevelUp || -9) < 0.5) return; // one burst per level-up moment
-    this.lastLevelUp = this.time;
     this.castCore(x, z, 0xffd866, 1.4);
     this.rings.play({ x, z, color: 0xffffff, dur: 0.8, fn: (m, k) => { m.scale.setScalar(0.3 + easeOut(k) * 3.2); m.material.opacity = 0.9 * (1 - k); } });
     this.helix(x, z, [0xffd866, 0xfff3bf, 0xffffff], { turns: 3, height: 2.2, n: 120, life: 2 });
@@ -478,16 +476,17 @@ export class Effects {
     const pf = getPropFactory();
     if (pf) {
       const g = pf.chestOpen();
-      g.position.set(x, 0, z);
+      // the player stands on the chest tile: show the opened chest at their feet on the camera side
+      // (+z), lid thrown back away from the viewer so the gold inside is on display
+      g.position.set(x, 0, z + 0.45);
       const lid = g.userData.lid, inner = g.userData.inner;
-      const p = this.playerPos;
-      g.rotation.y = Math.atan2(p.x - x, p.z - z);
+      g.rotation.y = 0;
       this.scene.add(g);
-      this.transients.push({ obj: g, t: 0, dur: 1.8, fn: (o, k, t) => {
+      this.transients.push({ obj: g, t: 0, dur: 3.4, fn: (o, k, t) => {
         const open = easeOutBack(Math.min(1, t / 0.32));
         lid.rotation.x = -1.9 * open; lid.position.z = -0.18 * open;
         const s = 0.9 * (0.6 + 0.4 * Math.sin(t * 5)) * (1 - k * k); inner.scale.set(s, s, 1);
-        if (k > 0.7) { const f = (k - 0.7) / 0.3; o.position.y = -f * 0.5; o.scale.setScalar(1 - f * 0.9); }
+        if (k > 0.78) { const f = (k - 0.78) / 0.22; o.position.y = -f * 0.5; o.scale.setScalar(1 - f * 0.9); }
       } });
     }
     this.coinFountain(x, z, 60);
