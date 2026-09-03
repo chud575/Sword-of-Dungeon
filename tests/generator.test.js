@@ -82,3 +82,112 @@ test('corridors are twisty single-tile passages with dead ends', () => {
   assert.ok(corridors > 60, `corridor tiles ${corridors}`);
   assert.ok(deadEnds >= 1, 'has dead ends');
 });
+
+// ---------------------------------------------------------------- generator polish (round 1)
+import { levelStats } from '../tools/mapdump.mjs';
+
+const POLISH_SEEDS = [42, 7, 1234, 99, 2024, 31337];
+
+test('room variety: irregular shapes, wide halls with pillars, caves deeper down', () => {
+  const shapesSeen = new Set();
+  let hallsWithPillars = 0, cavesShallow = 0, cavesDeep = 0;
+  for (const seed of POLISH_SEEDS) {
+    for (const depth of [2, 5, 10, 16, 22]) {
+      const lv = generateLevel(seed, depth, { monsters: false });
+      for (const r of lv.rooms) {
+        shapesSeen.add(r.shape);
+        assert.ok(lv.isWalkable(r.cx, r.cy), `room centre walkable seed=${seed} depth=${depth} ${r.type}`);
+        assert.ok(r.x >= 1 && r.y >= 1 && r.x + r.w <= lv.width - 1 && r.y + r.h <= lv.height - 1, 'room inside the map');
+        if (r.shape === 'cave') { if (depth <= 5) cavesShallow++; else cavesDeep++; }
+      }
+      const st = levelStats(lv);
+      if (lv.rooms.some((r) => r.shape === 'hall') && st.pillars >= 2) hallsWithPillars++;
+    }
+  }
+  for (const s of ['rect', 'bitten', 'cross', 'round', 'cave', 'hall', 'chamber', 'alcove']) assert.ok(shapesSeen.has(s), `shape ${s} appears`);
+  assert.ok(hallsWithPillars >= POLISH_SEEDS.length * 3, `pillared halls ${hallsWithPillars}`);
+  assert.ok(cavesDeep > cavesShallow, `caves scale with depth (${cavesShallow} shallow vs ${cavesDeep} deep)`);
+});
+
+test('corridors: single-tile, twisting, with dead ends and loops, no 2x2 corridor blocks', () => {
+  let totalDead = 0, totalLoops = 0;
+  for (const seed of POLISH_SEEDS) for (const depth of [1, 4, 9, 17]) {
+    const lv = generateLevel(seed, depth, { monsters: false });
+    const st = levelStats(lv);
+    assert.equal(st.wide2x2, 0, `no double-wide corridors seed=${seed} depth=${depth}`);
+    assert.ok(st.corridor >= 60, `corridor tiles ${st.corridor} seed=${seed} depth=${depth}`);
+    // twistiness: at least a third of corridor tiles are bends or junctions
+    let bends = 0, straight = 0;
+    for (let y = 1; y < lv.height - 1; y++) for (let x = 1; x < lv.width - 1; x++) {
+      if (lv.get(x, y) !== TILE.CORRIDOR) continue;
+      const ew = lv.isWalkable(x - 1, y) && lv.isWalkable(x + 1, y), ns = lv.isWalkable(x, y - 1) && lv.isWalkable(x, y + 1);
+      const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => lv.isWalkable(x + dx, y + dy)).length;
+      if (open === 2 && (ew || ns)) straight++; else bends++;
+    }
+    assert.ok(bends / (bends + straight) >= 0.12, `twisty corridors seed=${seed} depth=${depth} (${bends}/${bends + straight})`);
+    totalDead += st.deadEnds; totalLoops += st.loops;
+  }
+  assert.ok(totalDead >= POLISH_SEEDS.length * 4 * 2, `dead ends ${totalDead}`);
+  assert.ok(totalLoops >= POLISH_SEEDS.length * 4, `loops ${totalLoops}`);
+});
+
+test('temples sit in small side chambers behind a single doorway; alcoves hide gold', () => {
+  for (const seed of POLISH_SEEDS) for (const depth of [1, 3, 7, 12, 21]) {
+    const lv = generateLevel(seed, depth, { monsters: false });
+    const chambers = lv.rooms.filter((r) => r.type === 'temple');
+    if (depth === swordDepthForSeed(seed)) continue;
+    assert.ok(chambers.length >= 1, `temple chamber seed=${seed} depth=${depth}`);
+    for (const r of chambers) {
+      assert.ok(r.w <= 4 && r.h <= 4, 'temple chamber is small');
+      assert.equal(lv.get(r.cx, r.cy), TILE.TEMPLE);
+      assert.equal(lv.get(r.door.x, r.door.y), TILE.DOOR, 'chamber has a doorway');
+      // the doorway is the only way in: every walkable tile bordering the chamber box is the door
+      let openings = 0;
+      for (let y = r.y - 1; y <= r.y + r.h; y++) for (let x = r.x - 1; x <= r.x + r.w; x++) {
+        const inside = x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h;
+        if (!inside && lv.isWalkable(x, y)) openings++;
+      }
+      assert.equal(openings, 1, `single doorway seed=${seed} depth=${depth}`);
+    }
+    for (const a of lv.rooms.filter((r) => r.type === 'alcove')) {
+      assert.equal(lv.get(a.door.x, a.door.y), TILE.DOOR);
+      const cache = lv.items.find((it) => it.type === 'gold' && it.hidden && it.x === a.cx && it.y === a.cy);
+      assert.ok(cache && cache.gold >= 30 * depth, 'alcove holds a hidden cache worth at least 3x a sack');
+    }
+  }
+});
+
+test('water pools are organic blobs, rubble and treasure scale with depth, stairs are far apart', () => {
+  let rubbleShallow = 0, rubbleDeep = 0, hiddenShallow = 0, hiddenDeep = 0;
+  for (const seed of POLISH_SEEDS) for (const depth of [1, 2, 4, 12, 18, 24]) {
+    const lv = generateLevel(seed, depth, { monsters: false });
+    const st = levelStats(lv);
+    // every water tile touches at least one other water tile (no lone puddles), pools stay inside rooms
+    for (let y = 1; y < lv.height - 1; y++) for (let x = 1; x < lv.width - 1; x++) {
+      if (lv.get(x, y) !== TILE.WATER) continue;
+      const wet = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => lv.get(x + dx, y + dy) === TILE.WATER).length;
+      assert.ok(wet >= 1, `lone water tile at ${x},${y} seed=${seed} depth=${depth}`);
+      assert.ok(lv.rooms.some((r) => x > r.x && y > r.y && x < r.x + r.w - 1 && y < r.y + r.h - 1), 'water inside a room');
+    }
+    for (let i = 0; i < lv.tiles.length; i++) if (lv.tiles[i] === TILE.RUBBLE) assert.ok(lv.isWalkable(i % lv.width, (i / lv.width) | 0));
+    if (depth <= 2) { rubbleShallow += st.rubble; hiddenShallow += st.hiddenGold; } else if (depth >= 12) { rubbleDeep += st.rubble; hiddenDeep += st.hiddenGold; }
+    assert.ok(st.stairsDist >= 30, `stairs far apart (${st.stairsDist}) seed=${seed} depth=${depth}`);
+    for (const s of lv.stairsDownAll) assert.equal(lv.get(s.x, s.y), TILE.STAIRS_DOWN);
+    assert.equal(lv.componentCount(), 1);
+    assert.ok(lv.countWalkable() >= 380 && lv.countWalkable() <= 760, `walkable area ${lv.countWalkable()} seed=${seed} depth=${depth}`);
+  }
+  assert.ok(rubbleDeep > rubbleShallow, `rubble scales (${rubbleShallow} vs ${rubbleDeep})`);
+  assert.ok(hiddenDeep > hiddenShallow, `hidden gold scales (${hiddenShallow} vs ${hiddenDeep})`);
+});
+
+test('sword level: obsidian style, sword in a shrine chamber, no temple', () => {
+  for (const seed of POLISH_SEEDS) {
+    const d = swordDepthForSeed(seed);
+    const lv = generateLevel(seed, d, { monsters: false });
+    assert.equal(lv.debug.style, 'obsidian');
+    const shrine = lv.rooms.find((r) => r.type === 'shrine');
+    const sword = lv.items.find((it) => it.type === 'sword');
+    assert.ok(shrine && sword && sword.x === shrine.cx && sword.y === shrine.cy, 'sword in the shrine');
+    assert.equal(lv.temples.length, 0);
+  }
+});

@@ -59,6 +59,32 @@ function findDepthWith(game, tile, from = 1, to = 12) {
 
 function freeze(m) { m.speed = 0; m.moveTimer = 0; }
 
+/** Depth in [from,to] whose level shows off the generator best (shape variety, water, pillars, temple chambers). */
+function pickShowcaseDepth(game, from, to) {
+  let best = from, bestScore = -Infinity;
+  for (let d = from; d <= to; d++) {
+    const lv = game.getLevel(d);
+    const shapes = new Set(lv.rooms.map((r) => r.shape || r.type)).size;
+    let pillars = 0;
+    for (let y = 1; y < lv.height - 1; y++) for (let x = 1; x < lv.width - 1; x++) {
+      if (lv.get(x, y) === TILE.WALL && lv.isWalkable(x - 1, y) && lv.isWalkable(x + 1, y) && lv.isWalkable(x, y - 1) && lv.isWalkable(x, y + 1)) pillars++;
+    }
+    const s = shapes * 2 + Math.min(20, findTiles(lv, TILE.WATER).length) * 0.4 + Math.min(12, pillars) * 0.5 + lv.temples.length * 2 + findTiles(lv, TILE.RUBBLE).length * 0.3;
+    if (s > bestScore) { bestScore = s; best = d; }
+  }
+  return best;
+}
+
+/** Frame the whole level from above, padded so the 45-degree view keeps every corner on screen. */
+function fitOverview(ctx, elevation = 62) {
+  const lv = ctx.game.level;
+  let minX = lv.width, minY = lv.height, maxX = 0, maxY = 0;
+  for (let y = 0; y < lv.height; y++) for (let x = 0; x < lv.width; x++) if (lv.get(x, y) !== TILE.WALL) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+  const w = maxX - minX + 3, h = maxY - minY + 3;
+  ctx.renderer.cameraRig.setOverview((minX + maxX) / 2, (minY + maxY) / 2 + 1, w * 1.12, h * 1.22, { elevation });
+  ctx.renderer.cameraRig.snap();
+}
+
 /** A lit rectangular hall registered at `depth` (used by the bestiary scenarios). */
 function bestiaryHall(g, W, H, depth) {
   const lv = new Level({ depth, width: W, height: H, seed: 7 });
@@ -165,12 +191,20 @@ export const scenarios = {
   /** Whole level revealed and lit from a high camera. */
   async 'dungeon-overview'(ctx) {
     const g = ctx.reset();
-    let best = 6, bestScore = -1;
-    for (let d = 2; d <= 5; d++) { const lv = g.getLevel(d); const s = lv.rooms.length + findTiles(lv, TILE.WATER).length * 0.5 + lv.temples.length * 3; if (s > bestScore) { bestScore = s; best = d; } }
-    g.goToDepth(best);
+    g.goToDepth(pickShowcaseDepth(g, 2, 5));
     g.revealAll();
     ctx.renderer.fog.override = 'all';
-    ctx.renderer.overview(60);
+    fitOverview(ctx, 62);
+    ctx.step(600);
+  },
+
+  /** A deep cavern level (crumbling caves, rubble, pools, pillared halls) revealed from above. */
+  async 'cavern-overview'(ctx) {
+    const g = ctx.reset();
+    g.goToDepth(pickShowcaseDepth(g, 13, 16));
+    g.revealAll();
+    ctx.renderer.fog.override = 'all';
+    fitOverview(ctx, 62);
     ctx.step(600);
   },
 
@@ -206,13 +240,69 @@ export const scenarios = {
     ctx.step(500);
   },
 
-  /** Down staircase next to the player. */
+  /** Down staircase: the player steps onto it and the camera dives (parked mid-flight for the still). */
   async 'stairs'(ctx) {
     const g = ctx.reset();
     const sd = g.level.stairsDown;
     teleportBeside(g, sd.x, sd.y);
     castWith(ctx, 'light');
-    ctx.step(400);
+    ctx.step(300);
+    g.move(sd.x - g.player.x, sd.y - g.player.y);
+    ctx.step(g.balance.playerStepTime * 1000 + 120);
+    ctx.renderer.transition('descend', () => g.descend());
+    ctx.step(200);
+    ctx.renderer.cameraRig.freezeTransition(0.22);
+    ctx.step(100);
+  },
+
+  /** Camera: zoomed all the way in — low, dramatic diorama angle with the FOV tightened. */
+  async 'camera-zoom-in'(ctx) {
+    const g = ctx.reset();
+    castWith(ctx, 'light');
+    ctx.renderer.cameraRig.setZoomExact(1.4);
+    ctx.step(1200);
+  },
+
+  /** Camera: zoomed all the way out — high tactical view over a revealed level. */
+  async 'camera-zoom-out'(ctx) {
+    const g = ctx.reset();
+    g.goToDepth(3); g.revealAll(); ctx.renderer.fog.override = 'all';
+    ctx.renderer.cameraRig.setZoomExact(0.72);
+    ctx.step(1200);
+  },
+
+  /** Camera: pit free-fall caught at the landing thud (trauma shake + bounce). */
+  async 'camera-pit-drop'(ctx) {
+    const g = ctx.reset();
+    ctx.step(200);
+    g.enterLevel(g.depth + 1, 'pit', { levels: 1 });
+    castWith(ctx, 'light');
+    ctx.step(60);
+    const rig = ctx.renderer.cameraRig;
+    rig.freezeTransition(0.52); rig.shaker.hold = true; rig.shaker.trauma = 0.7;
+    ctx.step(120);
+  },
+
+  /** Camera: standing at the altar — the rig drops into its reverent low tilt and dollies in. */
+  async 'camera-sanctum'(ctx) {
+    const g = ctx.reset();
+    const found = findDepthWith(g, TILE.TEMPLE, 1, 6);
+    if (found) { if (found.depth !== g.depth) g.goToDepth(found.depth); g.teleportTo(found.tiles[0].x, found.tiles[0].y); g.updateFov(); }
+    g.give('gold', 120);
+    ctx.renderer.cameraRig.snap();
+    ctx.step(1500);
+  },
+
+  /** Camera: a heavy hit — trauma shake with roll and recoil, held for the still. */
+  async 'camera-shake'(ctx) {
+    await scenarios.combat(ctx);
+    const g = ctx.game;
+    g.setHeld(null);
+    for (const e of g.level.entities) if (e.kind === 'monster') freeze(e);
+    const rig = ctx.renderer.cameraRig;
+    rig.shaker.hold = true; rig.shaker.trauma = 0.75;
+    rig.punchFov(3);
+    ctx.step(90);
   },
 
   /** An open pit beside the player. */
@@ -371,6 +461,9 @@ export const scenarios = {
     g.goToDepth(18);
     const p = g.player;
     p.maxHp = 999; p.hp = 999; p.skill = 400;
+    // stand in the biggest cavern or hall so the light spell shows the deep level's bones
+    const big = g.level.rooms.filter((r) => ['cave', 'grotto', 'hall'].includes(r.type) && (r.area || r.w * r.h) >= 24).sort((a, b) => (b.area || 0) - (a.area || 0))[0];
+    if (big) { const s = neighbours(g.level, big.cx, big.cy).concat([{ x: big.cx, y: big.cy }]).find((n) => g.level.isEmptyFloor(n.x, n.y)); if (s) { g.teleportTo(s.x, s.y); g.updateFov(); } }
     castWith(ctx, 'light');
     for (const m of g.level.monsters) freeze(m);
     const types = ['fyre-drake', 'shadow-dragon', 'war-lord', 'dark-warrior', 'dimension-spider', 'troll', 'wyvern', 'demon'];
