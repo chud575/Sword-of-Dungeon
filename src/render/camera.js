@@ -14,8 +14,12 @@ import { TraumaShaker } from './cameraShake.js';
 const DEG = Math.PI / 180;
 const BASE_FOV = 38;
 const BASE_DIST = 12.5;
-const BASE_ELEV = 55 * DEG;
-const BASE_YAW = 14 * DEG;
+// Fargoal's view is top-down with only a slight tilt, square to the dungeon grid — not an
+// isometric/angled diorama. High elevation + zero yaw keeps corridors reading as clean rows and
+// columns the way the 1983 original did, while the few degrees off vertical keep wall faces and
+// character sprites visible.
+const BASE_ELEV = 72 * DEG;
+const BASE_YAW = 0;
 /** Zoom stops: each wheel notch moves to the neighbouring stop. */
 export const ZOOM_STOPS = [0.72, 0.85, 1, 1.18, 1.4];
 const DEAD_ZONE = { x: 0.42, z: 0.32 }; // half extents, tiles
@@ -30,7 +34,7 @@ const easeInQuad = (t) => t * t;
 /** Frame-rate independent exponential approach. */
 const damp = (cur, dst, rate, dt) => lerp(cur, dst, 1 - Math.exp(-rate * dt));
 /** Per-depth yaw: a few degrees of variation so every level sits a little differently. */
-const depthYaw = (depth) => Math.sin((depth || 0) * 2.399) * 3 * DEG;
+const depthYaw = () => 0; // squared to the grid: no per-level yaw drift (see BASE_YAW)
 
 export class CameraRig {
   /**
@@ -131,7 +135,7 @@ export class CameraRig {
   }
 
   /** Frame an entire level (or a rectangle) from above. */
-  setOverview(cx, cz, w, h, { elevation = 62 } = {}) {
+  setOverview(cx, cz, w, h, { elevation = 76 } = {}) {
     const fov = BASE_FOV * DEG;
     const aspect = this.camera.aspect;
     const el = elevation * DEG;
@@ -227,7 +231,7 @@ export class CameraRig {
     }
     const z = this.currentZoom;
     const s = this.sanctum;
-    const elev = clamp(this.elevation - (z - 1) * 12 * DEG, 46 * DEG, 63 * DEG) - s * 9 * DEG;
+    const elev = clamp(this.elevation - (z - 1) * 8 * DEG, 64 * DEG, 80 * DEG) - s * 5 * DEG;
     const dist = (this.distance / z) * (1 - s * 0.14);
     const yaw = this._yaw + this.depthYaw + s * Math.sin(this.time * 0.35) * 3.5 * DEG;
     return { distance: dist, elevation: elev, yaw, lookHeight: 0.3 + s * 0.35 };

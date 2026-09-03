@@ -21,12 +21,31 @@ vec2 fogMask(vec2 xz) {
     + texture2D(fogTex, fuv + vec2(0.0, px.y)).rg + texture2D(fogTex, fuv - vec2(0.0, px.y)).rg;
   return f * (1.0 / 6.0);
 }
+// Cheap value noise so unexplored rock has grain instead of being a flat fill.
+float bhash(vec2 p) { return fract(sin(dot(floor(p), vec2(127.1, 311.7))) * 43758.5453); }
+float bnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(bhash(i), bhash(i + vec2(1.0, 0.0)), f.x),
+             mix(bhash(i + vec2(0.0, 1.0)), bhash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+/** Dim, faintly mottled stone: dark enough to keep the dungeon's secrets, lit enough to read as mass. */
+vec3 bedrock(vec2 xz) {
+  float n = bnoise(xz * 1.7) * 0.6 + bnoise(xz * 5.3) * 0.4;
+  // Faintly warm-neutral: the post grade splits shadows toward blue, so a neutral base here
+  // would come out navy. Nudging red up keeps it reading as stone rather than night sky.
+  vec3 base = vec3(0.0168, 0.0142, 0.0146);
+  return base * (0.58 + 1.05 * n);
+}
 vec3 applyFog(vec3 c, vec2 xz) {
   vec2 f = fogMask(xz);
   float explored = smoothstep(0.0, 1.0, f.r), vis = smoothstep(0.0, 1.0, f.g);
   float lum = dot(c, vec3(0.299, 0.587, 0.114));
   vec3 memory = mix(vec3(lum), c, 0.3) * fogTint;
-  return mix(vec3(0.0), mix(memory, c, vis), explored);
+  // Unexplored space is not a void: it reads as the unlit bedrock the dungeon is cut from, so the
+  // screen shows solid rock rather than black nothing. It stays dark enough to hide layout — the
+  // fog of war still conceals rooms and corridors, which is the point of exploring.
+  return mix(bedrock(xz), mix(memory, c, vis), explored);
 }`;
 
 export class FogOfWar {

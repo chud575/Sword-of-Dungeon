@@ -10,6 +10,7 @@ import { AudioEngine } from './core/audio.js';
 import { saveGame, loadSave, deleteSave, loadSettings } from './core/save.js';
 import { Hud } from './ui/hud.js';
 import { PanelCollapse } from './ui/collapse.js';
+import { Surround } from './render/surround.js';
 import { MessageLog } from './ui/log.js';
 import { InventoryPanel } from './ui/inventory.js';
 import { Minimap } from './ui/minimap.js';
@@ -24,6 +25,7 @@ const difficultyParam = params.get('difficulty') || 'standard';
 
 const canvas = document.getElementById('game-canvas');
 const renderer = new Renderer({ canvas, bus, quality: params.get('quality') || 'high' }); // ?quality=low: cheaper fill for bots / weak GPUs
+const surround = new Surround({ scene: renderer.scene, bus });
 const input = new Input({ canvas, bus, pickTile: (x, y) => renderer.pickTile(x, y) });
 const DEFAULT_YAW = renderer.cameraRig.yaw;
 
