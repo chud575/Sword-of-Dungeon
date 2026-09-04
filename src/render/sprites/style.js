@@ -29,7 +29,9 @@
 // from hue-shifted ramps (shadows drift cooler / toward violet and gain saturation, highlights drift
 // warmer / toward amber and lose a little) — never a flat darken/lighten. One dark, non-black ink
 // outline of exactly one pixel, softened on the edges that face the light. The key light is TOP-LEFT
-// on every facing, every frame, every creature. Clean silhouettes; no pillow shading; no banding; no
+// on every facing, every frame, every creature — and "no pillow shading" in that sentence is now a
+// RULE and not a wish: `form-pillow` (see "the form check") fails a sheet whose forms are lit down
+// their own middle. Clean silhouettes; no pillow shading; no banding; no
 // dithering except where a form is deliberately dissolving. Nothing is painted at a fluorescent
 // chroma, nothing outshines the torches, and nothing collapses into the bottom of its own ramp.
 import { toRgb, rgbToHsl, hslToRgb } from './pixelPainter.js';
