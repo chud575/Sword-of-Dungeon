@@ -372,14 +372,129 @@ export function measureFigure(sheet, { anim = 'idle', facing = 'S' } = {}) {
 
 // ------------------------------------------------------------------------------------ the depth tint
 /**
- * How much of the renderer's per-depth colour grade a character sprite is allowed to take. The
+ * How much of the renderer's per-depth colour grade a character sprite is allowed to CANCEL. The
  * dungeon's depth bands push the whole frame green at depth 18 and violet at depth 19+, which is
- * exactly right for stone and air and exactly wrong for a creature: species identity must not change
- * with the floor you meet it on. 1.0 would cancel the depth grade on characters entirely and float
- * them off the background; 0 is the old bug. 0.78 keeps a Shadow Dragon violet everywhere while the
- * room around it still turns.
+ * exactly right for stone and air and — at full strength — wrong for a creature: species identity
+ * must not change with the floor you meet it on. 1.0 would cancel the depth grade on characters
+ * entirely and float them off the background; 0 lets the band repaint the species.
+ *
+ * IT WAS 0.78, AND THAT WAS AN OVER-CORRECTION. At 0.78 the cast kept its own colour world: an
+ * olive wyvern and a red-and-white hero stood in a saturated cyan room and read as stickers on a
+ * photograph, because nearly all of the light the ROOM was graded by was being divided back out of
+ * them. A figure belongs to a room only if the room's light lands on it. 0.42 leaves the Shadow
+ * Dragon recognisably violet on every floor while letting a good half of each band's cast reach
+ * the cast — enough that hero, monster and flagstone are lit by the same lamp.
  */
-export const DEPTH_TINT_CLAMP = 0.78;
+export const DEPTH_TINT_CLAMP = 0.42;
+
+// ---------------------------------------------------------------------------- the scene tone pass
+/**
+ * THE SHEET IS NOT WHAT THE PLAYER SEES.
+ *
+ * `lint()` used to judge a packed atlas and stop there, and two audits in a row proved that is not
+ * the same question as "does this creature read on screen". The renderer multiplies a sprite's
+ * albedo by the room's light (measured live at the playing camera: about `SCENE_GAIN` of it in a
+ * lit hall), the grading pass then lifts, split-tones and pushes CONTRAST ABOUT MID GREY — which
+ * crushes everything below ~0.013 linear to nothing — and the output pass finally runs ACES and
+ * encodes to sRGB. The crush is brutal in the darks: a sheet whose median sits at 0.22 (legal by
+ * `VALUE_FLOOR`) lands at 0.01 on screen, i.e. a hole in the floor, while the hero's 0.44 lands at
+ * 0.23. Seven sheets shipped that way — demon, fyre drake, gargoyle, dark warrior, war lord,
+ * werebear and assassin — every one of them "passing" lint.
+ *
+ * These constants are the pass, measured from the live uniforms (spriteBillboard's `uAmbientGain`
+ * /`uDirectGain`/`uFloor` against the scene's lights at the 'bestiary', 'bestiary-idle' and
+ * 'deep-level' cameras) and from renderer.js's GradingShader + OutputPass. They are deliberately
+ * a REPRESENTATIVE middle of the game, not any one frame: near a torch a sprite reads brighter,
+ * in a far corner darker.
+ */
+export const SCENE_GAIN = 0.32;
+/** The grading pass's black lift, contrast and pivot (renderer.js GradingShader). */
+export const SCENE_LIFT = 0.003, SCENE_CONTRAST = 1.08, SCENE_PIVOT = 0.18;
+/** `renderer.gl.toneMappingExposure` ahead of the ACES output pass. */
+export const SCENE_EXPOSURE = 1.1;
+
+const srgbToLinear = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+const linearToSrgb = (v) => (v <= 0.0031308 ? v * 12.92 : 1.055 * v ** (1 / 2.4) - 0.055);
+/** The ACES filmic curve three.js applies in the output pass (Narkowicz's fit — three's own). */
+const acesCurve = (x) => clamp01((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));
+
+/**
+ * What a sheet tone of luminance `v` (0-1, as the art file paints it) actually reads as on screen,
+ * after the room's light, the depth grade and the tone map. Monotone, pure, and the number `lint()`
+ * judges — see `SCENE_GAIN` for where the constants come from.
+ * @param {number} v
+ * @returns {number} screen luminance, 0-1
+ */
+export function sceneValue(v) {
+  let c = srgbToLinear(clamp01(v)) * SCENE_GAIN + SCENE_LIFT;
+  c = (c - SCENE_PIVOT) * SCENE_CONTRAST + SCENE_PIVOT;
+  if (c < 0) c = 0;
+  return linearToSrgb(acesCurve(c * SCENE_EXPOSURE));
+}
+
+// ------------------------------------------------------------------------------ the read-lift
+/**
+ * THE RENDERER'S RESCUE, AND ITS LIMIT.
+ *
+ * A sheet that lands under `READ_LIFT_TARGET` is pulled up to it by a per-sheet GAMMA applied to
+ * the albedo in `spriteBillboard`'s fragment shader (`uReadLift`). Gamma, not a brightness add:
+ * `x^g` fixes both ends, so the one-pixel INK outline (luminance 0.08) stays under the grading
+ * pass's contrast crush and keeps reading as pure black, while the body — the part that was
+ * disappearing — comes up. An additive lift greys the ink out and eats the silhouette.
+ *
+ * The rescue is CAPPED at `READ_LIFT_MIN_GAMMA`. Uncapped it would flatten a genuinely dark
+ * creature into a grey one and, worse, would make `lint()`'s post-lighting rule unfailable: with
+ * infinite rescue no sheet is ever too dark. Capped, a sheet drawn darker than about median 0.20
+ * cannot be saved by the renderer and fails CI, which is exactly the class of bug this pass exists
+ * to stop shipping.
+ */
+export const READ_LIFT_TARGET = 0.36;
+/** The strongest rescue: `x^0.68` takes a median of 0.224 (the Demon) to 0.36 and no further. */
+export const READ_LIFT_MIN_GAMMA = 0.68;
+
+/**
+ * The albedo gamma the renderer applies to a sheet whose body median is `median`. 1 = untouched.
+ * @param {number} median a sheet's median body luminance (see `analyseSheet`)
+ * @returns {number} gamma in [READ_LIFT_MIN_GAMMA, 1]
+ */
+export function readLift(median) {
+  const m = clamp(median, 1e-3, 0.999);
+  if (m >= READ_LIFT_TARGET) return 1;
+  return clamp(Math.log(READ_LIFT_TARGET) / Math.log(m), READ_LIFT_MIN_GAMMA, 1);
+}
+
+/**
+ * The gamma for a packed sheet, measured once and memoised on the sheet object (the character
+ * factory caches one sheet per type, but builds a billboard per entity).
+ * @param {import('./spriteSheet.js').Sheet} sheet
+ * @returns {number}
+ */
+export function readLiftFor(sheet) {
+  if (typeof sheet.readLift === 'number') return sheet.readLift;
+  const a = analyseSheet(sheet);
+  const g = a ? readLift(a.median) : 1;
+  Object.defineProperty(sheet, 'readLift', { value: g, enumerable: false, writable: true });
+  return g;
+}
+
+/**
+ * Minimum median value a creature may read at on screen after the scene pass (`sceneValue`), with
+ * the renderer's capped read-lift applied. Below this the figure is a hole in the floor at the
+ * playing camera however legal its atlas looks. The lifted cast lands at 0.143; the hero, who needs
+ * no lift at all, at 0.232.
+ */
+export const LIT_VALUE_FLOOR = 0.12;
+
+/**
+ * Minimum SCREEN value range a creature's ramp must still hold after the scene pass — the rule the
+ * atlas cannot express. `VALUE_RANGE_MIN` measures the ramp as painted, and a ramp painted low can
+ * be a legal 0.30 wide in the file and land almost flat on screen, because the grading pass's
+ * contrast crush eats the bottom of it and ACES compresses the top: 0.10-0.40 in the file (median
+ * 0.25 — legal by every sheet rule there is) comes out as 0.00-0.32, a third of the separation the
+ * shipping cast holds. That is a creature with no form on it, which is a different failure from a
+ * creature that is too dark, and this is the rule that catches it. The cast runs 0.52-0.64.
+ */
+export const LIT_RANGE_MIN = 0.40;
 
 // ------------------------------------------------------------------------------------ the lint
 /**
@@ -435,9 +550,16 @@ export function analyseSheet(sheet, { skipAnims = LINT_SKIP_ANIMS } = {}) {
   const minLum = tones[0].lum;
   const cut = minLum + (maxLum - minLum) * 0.5;
   const readThrough = tones.reduce((s, t) => s + (t.lum >= cut ? t.n : 0), 0) / total;
+  // ---- what the PLAYER sees: the same tones after the room's light, the grade and the tone map
+  // (see `sceneValue`), both as painted and with the renderer's capped read-lift (see `readLift`).
+  const gamma = readLift(median);
+  const litMedian = sceneValue(median ** gamma);
+  const unaidedMedian = sceneValue(median);
+  const litRange = (area.length ? Math.max(...area.map((t) => sceneValue(t.lum ** gamma))) : sceneValue(maxLum ** gamma))
+    - sceneValue(minLum ** gamma);
   return {
     ink, inkHex: hex(ink), tones, area, steps: tones.length, median, minLum, maxLum,
-    range: maxLum - minLum, readThrough,
+    range: maxLum - minLum, readThrough, readLift: gamma, litMedian, unaidedMedian, litRange,
     peakChroma: area.length ? Math.max(...area.map((t) => t.chroma)) : 0,
     meanChroma: tones.reduce((s, t) => s + t.chroma * t.coverage, 0),
     keyLight: (litN ? litSum / litN : 0) - (awayN ? awaySum / awayN : 0),
@@ -498,6 +620,21 @@ export function lint(sheet, meta = {}) {
   if (a.keyLight < KEY_LIGHT_MIN) {
     v.push({ rule: 'key-light', severity: 'error', value: +a.keyLight.toFixed(3), limit: KEY_LIGHT_MIN,
       detail: `${who}: rim delta ${a.keyLight.toFixed(3)} — the key light does not agree with LIT (top-left)` });
+  }
+  // THE RULE THAT MEASURES THE SCREEN, NOT THE ATLAS. Every rule above judges the packed sheet;
+  // this one runs the sheet through a representative lighting + grade pass first (`sceneValue`),
+  // WITH the renderer's capped read-lift, and asks whether a player would see a creature or a hole.
+  if (a.litMedian < LIT_VALUE_FLOOR) {
+    v.push({ rule: 'value-lit', severity: 'error', value: +a.litMedian.toFixed(3), limit: LIT_VALUE_FLOOR,
+      detail: `${who}: reads at ${a.litMedian.toFixed(3)} under scene lighting even with the renderer's strongest read-lift (x^${a.readLift.toFixed(2)}) — a black hole at the play camera (floor ${LIT_VALUE_FLOOR})` });
+  }
+  if (a.litRange < LIT_RANGE_MIN) {
+    v.push({ rule: 'lit-contrast', severity: 'error', value: +a.litRange.toFixed(3), limit: LIT_RANGE_MIN,
+      detail: `${who}: its ramp spans only ${a.litRange.toFixed(2)} of screen value once lit and graded (file range ${a.range.toFixed(2)}) — the form flattens out at the play camera (min ${LIT_RANGE_MIN})` });
+  }
+  if (a.unaidedMedian < LIT_VALUE_FLOOR) {
+    v.push({ rule: 'value-lit-unaided', severity: 'warning', value: +a.unaidedMedian.toFixed(3), limit: LIT_VALUE_FLOOR,
+      detail: `${who}: as painted it reads at ${a.unaidedMedian.toFixed(3)} on screen (median ${a.median.toFixed(2)}) and only the renderer's read-lift x^${a.readLift.toFixed(2)} keeps it out of the floor — repaint it lighter` });
   }
   if (a.readThrough < READ_THROUGH_TARGET) {
     v.push({ rule: 'read-through', severity: 'warning', value: +a.readThrough.toFixed(3), limit: READ_THROUGH_TARGET,

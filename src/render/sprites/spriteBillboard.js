@@ -3,9 +3,14 @@
 // spots + the torch/temple point-light pool (read straight from the scene each frame, flicker
 // included) — through a fake normal that faces the camera and tilts up, curving across the sprite so
 // side lights fall off across the body. Edge pixels get a warm rim from the nearest torch; fog-of-war
-// darkens at the feet; a per-depth tint and hurt flash sit on top. Under the hero: a two-lobe contact
-// shadow (tight core + faint ambient-occlusion halo, sized from the frame's real foot span) plus a
-// silhouette shadow stretched away from the nearest torch.
+// darkens at the feet; a per-depth tint and hurt flash sit on top. Under every figure: a contact
+// shadow with one near-opaque core PER FOOT, on the texels the frame actually stands on, inside a
+// wide faint ambient-occlusion skirt — MULTIPLIED into the floor so it is the flagstone's own colour
+// taken down — plus a silhouette shadow stretched away from the nearest torch.
+//
+// A sheet the art files painted too dark to survive the grading pass is pulled up by a per-sheet
+// albedo gamma measured in sprites/style.js (`readLift`); `lint()` judges the same curve, so a
+// creature that would be a black hole at the play camera fails the test suite instead of shipping.
 //
 // ---------------------------------------------------------------------------------------------
 // TEXEL CRISPNESS — why the quad is built in screen space
@@ -77,9 +82,20 @@
 // Because the quad is parallel to the image plane there is no 1/cos(pitch) stretch any more; the
 // old trick only approximated this under orthographic projection.
 import * as THREE from 'three';
+import { readLiftFor } from './style.js';
 
 export const PX_PER_TILE = 32;
 const MAX_POINTS = 8, MAX_SPOTS = 2;
+/** Most separate contact patches (boots, paws, claws) one frame's shadow is built from. */
+const MAX_CONTACTS = 4;
+/** How many texels up from the lowest opaque row still count as touching the floor. */
+const CONTACT_ROWS = 3;
+/** The shadow quad's front-to-back half-extent as a fraction of its half-width. */
+const BLOB_DEPTH = 0.95;
+/** A contact patch's depth on the floor as a fraction of its width — a boot, not a disc. */
+const CONTACT_DEPTH = 1.15;
+/** Height the shadow quad floats at: clear of the flagstones' own y-jitter, under everything else. */
+const BLOB_Y = 0.02;
 
 /**
  * Alpha an opaque sprite pixel writes into the HDR scene buffer. Every other opaque thing in the
@@ -206,7 +222,17 @@ function makeSpriteMaterial(texture, fog) {
     // CharacterFactory sets it per level (style.js DEPTH_TINT_CLAMP); 1,1,1 = no compensation.
     uGradeComp: { value: new THREE.Color(1, 1, 1) },
     uRimDir: { value: new THREE.Vector3(0, 1, 0) }, uRimColor: { value: new THREE.Color(0, 0, 0) },
-    uGradeAmb: { value: 0.88 }, uGradeCold: { value: 0.82 }, uGradeWarm: { value: 0.1 },
+    // READ-LIFT: the albedo gamma for THIS sheet (sprites/style.js `readLift`). 1 = untouched; the
+    // darkest sheets in the cast are pulled up to `READ_LIFT_TARGET` so they stop collapsing into
+    // the grading pass's contrast crush. Set once per sheet in the constructor.
+    uReadLift: { value: 1 },
+    // HOW MUCH OF THE ROOM'S LIGHT THE CAST IS ALLOWED TO TAKE (`grade`/`tone` above). These used
+    // to sit at 0.88/0.82: nearly every lamp in the dungeon was pulled to a warm neutral before it
+    // touched a sprite, so the cast was lit by a private light of its own and read as pasted onto
+    // the photograph. Halving them lets the lantern's blue and the depth band's cast land on the
+    // figures — they belong to the room — while the warm end stays almost untouched so a torch
+    // still keys a body with real orange instead of a flat tint.
+    uGradeAmb: { value: 0.46 }, uGradeCold: { value: 0.44 }, uGradeWarm: { value: 0.06 },
     uAmbientGain: { value: 1.15 }, uDirectGain: { value: 1.25 }, uWrap: { value: 0.55 }, uFloor: { value: 0.07 }, uEmissive: { value: 0.9 },
     // ceiling for non-emissive sprite pixels, kept under the bloom pass threshold so hand-pixelled
     // colour never smears into a glow (renderer.js sets the matching threshold)
@@ -257,7 +283,7 @@ function makeSpriteMaterial(texture, fog) {
       uniform sampler2D uMap; uniform vec2 uTexel; uniform vec4 uRect; uniform float uFlip;
       uniform vec3 uRight, uForward; uniform float uOpacity, uAlphaOut, uFlash; uniform vec3 uFlashColor, uTint;
       uniform vec3 uRimDir, uRimColor; uniform float uAmbientGain, uDirectGain, uFloor, uEmissive, uBloomSafe;
-      uniform vec3 uGradeComp;
+      uniform vec3 uGradeComp; uniform float uReadLift;
       varying vec2 vUv; varying vec2 vTex; varying vec3 vLit; varying vec2 vFogXZ;
       ${fog.glsl()}
       ${LIGHT_GLSL}
@@ -265,7 +291,11 @@ function makeSpriteMaterial(texture, fog) {
         vec4 tex = texture2D(uMap, vTex);
         if (tex.a < 0.5) discard;
         float emissive = tex.a < 0.98 ? 1.0 : 0.0;
-        vec3 albedo = tex.rgb;
+        // READ-LIFT (see uReadLift): a gamma on the albedo, applied in linear space, which is the
+        // same curve as x^uReadLift on the sRGB value the artist painted. It fixes both ends, so
+        // the ink outline stays black under the grading pass's contrast crush while the body rises
+        // out of it; a brightness ADD would grey the ink and eat the silhouette.
+        vec3 albedo = uReadLift < 0.999 ? pow(max(tex.rgb, vec3(0.0)), vec3(uReadLift)) : tex.rgb;
         // fake normal: faces the camera, tilts up, and curves left/right across the sprite
         float sx = (uFlip > 0.5 ? 1.0 - vUv.x : vUv.x) - 0.5;
         vec3 N = normalize(uForward * 1.0 + vec3(0.0, 0.62, 0.0) + uRight * sx * 1.1);
@@ -301,35 +331,68 @@ function makeSpriteMaterial(texture, fog) {
 }
 
 /**
- * Contact shadow. Two lobes on one quad:
- *  - a small, NEAR-OPAQUE CORE ellipse no wider than the stance, flat across its middle and falling
- *    off over three or four screen pixels — this is the only bit that welds a character to the
- *    floor, and it has to be a hole in the tile, not a tint on it. A Gaussian is the wrong curve
- *    here: it has no plateau, so its darkest value is one texel wide and everything else is a
- *    smudge. This is a flat disc with a smoothstep rim instead;
- *  - a wide, very faint ambient-occlusion HALO out to the quad's edge that just dirties the tile.
- * The core drifts a little away from the key light so the grounding agrees with the cast shadow.
+ * A SHADOW IS A HOLE IN THE FLOOR'S OWN LIGHT, NOT A GREY DECAL LAID OVER IT.
+ *
+ * Both floor shadows below therefore MULTIPLY the frame instead of compositing a dark colour onto
+ * it (`blendSrc = DstColor, blendDst = Zero`). That one change is what makes the grounding sit in
+ * the room: the shadow can only ever be the flagstone's own colour taken down, so it is warm brown
+ * on warm brown stone and green in the deep halls, it fades out by itself where the tile is
+ * already dark, and it can never be the cold navy puddle the old additive `vec3(0.014,0.011,0.018)`
+ * quad became once the grading pass split-toned its near-black toward blue. The tint biases blue
+ * down hardest, so what is left reads as warm shade rather than as a hole punched in the picture.
+ * Alpha is left untouched (`blendSrcAlpha = Zero, blendDstAlpha = One`) so the floor keeps its
+ * "this is not sprite art" mask tag and the film grain still crosses the shadow the way it crosses
+ * the stone — the old quad wrote its own alpha and the grain broke into dither noise on the seam.
+ */
+const SHADOW_TINT = [0.30, 0.255, 0.205];
+/** The stretched silhouette shadow is a soft occluder, not contact: it takes much less light out. */
+const CAST_TINT = [0.62, 0.575, 0.535];
+
+/**
+ * Contact shadow. Two lobes on one quad lying on the floor:
+ *  - a NEAR-OPAQUE CORE PER FOOT, two or three texels across, centred on the texels the art
+ *    actually stands on this frame (`frameContacts` reads them off the atlas). This is the only
+ *    part that welds a character to the floor and it has to be small and dark: the old single
+ *    ellipse was about twice the stance wide and centred on the pivot, so it spilled out either
+ *    side of the boots, hid its darkest part behind the body, and the cape hem cut a black band
+ *    across what was left. A flat disc with a smoothstep rim, not a Gaussian — a Gaussian has no
+ *    plateau, so its darkest value is one texel wide and the rest is a smudge;
+ *  - a MUCH WIDER, FAR FAINTER ambient-occlusion skirt out to the quad's edge that only dirties
+ *    the tile, so the pool has a soft outside and a hard middle the way real contact does.
+ * The cores drift a hair away from the key light so the grounding agrees with the cast shadow.
  */
 function makeBlobMaterial(fog) {
   return new THREE.ShaderMaterial({
     uniforms: {
-      uStrength: { value: 1 }, uCore: { value: 0.3 }, uOffset: { value: new THREE.Vector2(0, 0) },
-      // width of the core's falloff as a fraction of its radius: set per frame from the real
-      // pixels-per-world so the rim is ~3-4 device pixels at any zoom
-      uEdge: { value: 0.12 },
+      uStrength: { value: 1 }, uCore: { value: 0.88 }, uSkirt: { value: 0.2 },
+      // the falloff width of a core as a fraction of its radius: set per frame from the real
+      // pixels-per-world so the rim is ~2 device pixels at any zoom
+      uEdge: { value: 0.2 },
+      // one vec4 per foot: centre (x, y) and radii (z, w), all in quad-normalised units (-1..1).
+      // Unused slots keep zero radii, which puts their core at infinity — no dynamic loop bound.
+      uContacts: { value: Array.from({ length: MAX_CONTACTS }, () => new THREE.Vector4(0, 0, 0, 0)) },
+      uTint: { value: new THREE.Color(...SHADOW_TINT) },
       fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint,
     },
     transparent: true, depthWrite: false,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.DstColorFactor, blendDst: THREE.ZeroFactor, blendEquation: THREE.AddEquation,
+    blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation,
     vertexShader: `varying vec2 vUv; varying vec2 vFogXZ; void main() { vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vFogXZ = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `uniform float uStrength, uCore, uEdge; uniform vec2 uOffset; varying vec2 vUv; varying vec2 vFogXZ; ${fog.glsl()}
+    fragmentShader: `uniform float uStrength, uCore, uSkirt, uEdge; uniform vec4 uContacts[${MAX_CONTACTS}];
+      uniform vec3 uTint; varying vec2 vUv; varying vec2 vFogXZ; ${fog.glsl()}
       void main() {
         vec2 p = (vUv - 0.5) * 2.0;
-        float rc = length((p - uOffset) / max(0.05, uCore));
-        float core = 1.0 - smoothstep(1.0 - uEdge, 1.0 + uEdge, rc);   // flat plateau, hard rim
-        float halo = pow(max(0.0, 1.0 - length(p)), 3.0);              // faint ambient-occlusion skirt
-        float a = clamp(core * 0.9 + halo * 0.13, 0.0, 1.0) * uStrength;
-        vec2 f = fogMask(vFogXZ); a *= smoothstep(0.0, 1.0, f.r);
-        gl_FragColor = vec4(0.014, 0.011, 0.018, a);
+        float core = 0.0;
+        for (int i = 0; i < ${MAX_CONTACTS}; i++) {
+          vec2 r = max(uContacts[i].zw, vec2(1e-4));
+          float d = length((p - uContacts[i].xy) / r);
+          core = max(core, 1.0 - smoothstep(1.0 - uEdge, 1.0 + uEdge, d));
+        }
+        float skirt = pow(max(0.0, 1.0 - length(p)), 1.5);   // wide, faint ambient occlusion
+        float occ = clamp(core * uCore + skirt * uSkirt, 0.0, 1.0) * uStrength;
+        vec2 f = fogMask(vFogXZ); occ *= smoothstep(0.0, 1.0, f.r);
+        gl_FragColor = vec4(mix(vec3(1.0), uTint, occ), 1.0);   // multiplied into the floor's own light
       }`,
   });
 }
@@ -337,13 +400,59 @@ function makeBlobMaterial(fog) {
 function makeCastMaterial(texture, spriteMat) {
   const u = spriteMat.uniforms;
   return new THREE.ShaderMaterial({
-    uniforms: { uMap: { value: texture }, uRect: u.uRect, uFlip: u.uFlip, uStrength: { value: 0.3 } },
+    uniforms: { uMap: { value: texture }, uRect: u.uRect, uFlip: u.uFlip, uStrength: { value: 0.3 }, uTint: { value: new THREE.Color(...CAST_TINT) } },
     transparent: true, depthWrite: false, side: THREE.DoubleSide,
+    blending: THREE.CustomBlending,
+    blendSrc: THREE.DstColorFactor, blendDst: THREE.ZeroFactor, blendEquation: THREE.AddEquation,
+    blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.OneFactor, blendEquationAlpha: THREE.AddEquation,
     vertexShader: `uniform vec4 uRect; uniform float uFlip; varying vec2 vTex; varying float vT;
       void main() { float ux = uFlip > 0.5 ? 1.0 - uv.x : uv.x; vTex = vec2(mix(uRect.x, uRect.z, ux), mix(uRect.y, uRect.w, uv.y)); vT = uv.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-    fragmentShader: `uniform sampler2D uMap; uniform float uStrength; varying vec2 vTex; varying float vT;
-      void main() { float a = texture2D(uMap, vTex).a; if (a < 0.5) discard; gl_FragColor = vec4(0.03, 0.02, 0.05, uStrength * (1.0 - vT * 0.7)); }`,
+    fragmentShader: `uniform sampler2D uMap; uniform float uStrength; uniform vec3 uTint; varying vec2 vTex; varying float vT;
+      void main() { float a = texture2D(uMap, vTex).a; if (a < 0.5) discard;
+        gl_FragColor = vec4(mix(vec3(1.0), uTint, clamp(uStrength * (1.0 - vT * 0.7), 0.0, 1.0)), 1.0); }`,
   });
+}
+
+/**
+ * WHERE THIS FRAME ACTUALLY TOUCHES THE FLOOR, read straight off the packed atlas.
+ *
+ * `packSheet` records one `foot` span per frame — the full width of the bottom rows — which is a
+ * fine number for "how wide is the stance" and a terrible one for a shadow: it treats a man
+ * standing with his feet apart as one 20-texel slab and drops a pool between his boots. Here the
+ * bottom `CONTACT_ROWS` are scanned for RUNS of opaque texels instead, so two boots make two
+ * shadows, a wolf makes four and the fyre drake's sprawl makes the several it stands on. Runs
+ * separated by a single texel are merged (the ink seam between two toes is not two feet), and the
+ * widest `MAX_CONTACTS` survive. Memoised on the frame: the atlas never changes.
+ * @param {import('./spriteSheet.js').Sheet} sheet
+ * @param {import('./spriteSheet.js').SheetFrame} fr
+ * @returns {{list:{c:number, w:number}[], span:number, cx:number, drop:number}} texels, x relative to the pivot
+ */
+function frameContacts(sheet, fr) {
+  if (fr.contacts) return fr.contacts;
+  const W = sheet.width, D = sheet.data;
+  const solid = (x, y) => D[((fr.y + y) * W + fr.x + x) * 4 + 3] > 127;
+  let by = -1;
+  for (let y = fr.h - 1; y >= 0 && by < 0; y--) for (let x = 0; x < fr.w; x++) if (solid(x, y)) { by = y; break; }
+  let out = { list: [], span: 0, cx: 0, drop: 0 };
+  if (by >= 0) {
+    const cover = new Uint8Array(fr.w);
+    for (let y = Math.max(0, by - CONTACT_ROWS + 1); y <= by; y++) for (let x = 0; x < fr.w; x++) if (solid(x, y)) cover[x] = 1;
+    const runs = [];
+    for (let x = 0; x < fr.w; x++) {
+      if (!cover[x]) continue;
+      let e = x;
+      while (e + 1 < fr.w && (cover[e + 1] || (e + 2 < fr.w && cover[e + 2]))) e++;
+      runs.push({ c: (x + e + 1) / 2 - fr.px, w: e - x + 1 });
+      x = e;
+    }
+    runs.sort((a, b) => b.w - a.w);
+    const list = runs.slice(0, MAX_CONTACTS);
+    let lo = Infinity, hi = -Infinity;
+    for (const r of list) { lo = Math.min(lo, r.c - r.w / 2); hi = Math.max(hi, r.c + r.w / 2); }
+    out = { list, span: hi - lo, cx: (lo + hi) / 2, drop: (by + 1) - fr.py };
+  }
+  Object.defineProperty(fr, 'contacts', { value: out, enumerable: false, writable: true });
+  return out;
 }
 
 /** Plays sheet animations: clips with per-frame durations, one-shots that fall back to a base clip. */
@@ -402,7 +511,7 @@ export class SpriteBillboard {
     // contact shadow
     this.blobMat = makeBlobMaterial(fog);
     this.blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.blobMat);
-    this.blob.rotation.x = -Math.PI / 2; this.blob.position.y = 0.012; this.blob.scale.set(1, 0.62, 1);
+    this.blob.rotation.x = -Math.PI / 2; this.blob.position.y = BLOB_Y; this.blob.scale.set(1, BLOB_DEPTH, 1);
     this.blob.renderOrder = 1; this.blob.frustumCulled = false;
     this.root.add(this.blob);
     // stretched torch shadow: 4 dynamic vertices on the floor
@@ -415,6 +524,9 @@ export class SpriteBillboard {
     this.cast = new THREE.Mesh(this.castGeo, this.castMat);
     this.cast.frustumCulled = false; this.cast.renderOrder = 1;
     this.root.add(this.cast);
+    // READ-LIFT: measured once per sheet (style.js), so a creature the art files painted into the
+    // bottom of its own ramp still reads once the room's light and the grading pass have had it.
+    this.material.uniforms.uReadLift.value = readLiftFor(sheet);
     this.animator = new SpriteAnimator(sheet);
     this.flip = false;
     this.depthBias = 0.22;
@@ -430,7 +542,7 @@ export class SpriteBillboard {
     this.opacity = 1; this.flash = 0;
     /** device pixels per sprite texel — THE ONE the whole cast shares (see `frameTexelSize`) */
     this.texelPx = GRID.S; this.texelWorld = GRID.S / GRID.pxPerWorld;
-    /** eased foot metrics for the contact shadow (see updateBlob) */
+    /** eased contact metrics for the grounding shadow, in texels (see updateBlob) */
     this._footW = 12; this._footCx = 0; this._footLift = 0; this._footInit = false;
     this.lights = null; this._lightCount = -1;
     this._tmp = new THREE.Vector3(); this._tmp2 = new THREE.Vector3(); this._vp = new THREE.Vector2();
@@ -570,45 +682,74 @@ export class SpriteBillboard {
   }
 
   /**
-   * Ground the character: the blob is sized from the frame's real foot span (packSheet measures it),
-   * so it hugs the boots instead of a guessed ellipse, and its core drifts away from the key light.
-   * The quad is turned to the camera's yaw so its squashed axis is the one the camera foreshortens.
+   * GROUND THE CHARACTER. One near-opaque core per foot, sitting on the texels the art actually
+   * stands on this frame (`frameContacts`), inside a much wider and far fainter ambient-occlusion
+   * skirt. The quad is turned to the camera's yaw so its shallow axis is the one the camera
+   * foreshortens, and it is multiplied into the floor rather than laid over it (see
+   * `makeBlobMaterial`), which is what keeps the shade the flagstone's own colour.
+   *
+   * NOTHING LIT STANDS WITHOUT A SHADOW. The old strength divided straight by how far the feet had
+   * left the floor, so a sprite whose art sits a few rows above its pivot row grounded at a third
+   * of a shadow or less. A lifted boot casts a WIDER, SOFTER, weaker pool — never no pool — so the
+   * floor is never at full value right up to a standing figure's ink line.
    */
   updateBlob(lx, lz, yaw) {
     const fr = this.frame; if (!fr) return;
-    const foot = fr.foot || { w: 12, cx: 0, drop: 0 };
+    const ct = frameContacts(this.sheet, fr);
     const sq = Math.abs(this.squash.x) || 1;
+    const tw = this.texelWorld * sq;                                 // world size of one texel
     // The measured span jumps frame to frame — one boot planted mid-stride, a cape hem swinging into
     // the bottom rows — so ease it: the pool breathes with the gait instead of snapping, and it still
     // grows properly as a dying body sprawls out.
     const k = this._footInit ? 0.25 : 1; this._footInit = true;
-    this._footW += (foot.w - this._footW) * k;
-    this._footCx += (foot.cx - this._footCx) * k;
-    this._footLift += (Math.max(0, -foot.drop) - this._footLift) * k; // rows the feet are off the floor
-    const footW = Math.max(0.12, this._footW * this.texelWorld * sq); // world width of the boots
-    const halo = footW * 1.9;                                    // quad half-width: core + AO halo
+    this._footW += ((ct.span || 8) - this._footW) * k;
+    this._footCx += (ct.cx - this._footCx) * k;
+    this._footLift += (Math.max(0, -ct.drop) - this._footLift) * k;  // texels the feet are off the floor
+    const lift = this._footLift;
+    const footW = Math.max(0.1, this._footW * tw);                   // world width of the stance
+    // quad half-extents: the skirt reaches well past the stance, and a lifted body's pool spreads
+    const R = footW * (1.15 + Math.min(0.5, lift * 0.09)) + 3 * tw;
+    const RD = R * BLOB_DEPTH;                                       // front-to-back half-extent
     // lay flat (x = camera right), then yaw with the billboard
     this.blob.quaternion.setFromAxisAngle(this._xAxis, -Math.PI / 2).premultiply(this._q.setFromAxisAngle(this._up, yaw));
-    this.blob.scale.set(halo * 2, halo * 1.3, 1);
+    this.blob.scale.set(R * 2, RD * 2, 1);
     const rx = Math.cos(yaw), rz = -Math.sin(yaw);   // the quad's local +x in world
     const fx = -Math.sin(yaw), fz = -Math.cos(yaw);  // the quad's local +y in world
-    const offx = this._footCx * this.texelWorld * sq * (this.flip ? -1 : 1);
+    const mir = this.flip ? -1 : 1;
+    const offx = this._footCx * tw * mir;
     // centre it under the boots AS DRAWN: the quad is pulled `depthBias` toward the camera, which on
     // a pitched camera moves the feet a good 20 screen pixels down. Without this the whole dark core
     // hides behind the legs and only the faint outer skirt shows, which is what made the old blob
-    // read as a vague smudge instead of contact.
-    this.blob.position.set(rx * offx + this.mesh.position.x, 0.012, rz * offx + this.mesh.position.z);
+    // read as a vague smudge instead of contact. It also rides a hair above the flagstones' own
+    // jitter (`dungeonGeo.slabGeometry` tops out near y = 0.011) so it can never z-fight the floor.
+    this.blob.position.set(rx * offx + this.mesh.position.x, BLOB_Y, rz * offx + this.mesh.position.z);
     const uB = this.blobMat.uniforms;
-    // The core is an ellipse HALF the stance across, so it never spills past the boots; the falloff
-    // is pinned to ~3.5 device pixels whatever the zoom, which is what makes it read as contact
-    // rather than as a soft pool of dirt.
-    const coreWorld = footW * 0.5;
-    uB.uCore.value = Math.min(0.85, coreWorld / halo);
+    // the pool sits a hair away from the key light, so the grounding agrees with the cast shadow.
+    // It is NOT pushed forward of the feet: a core centred on the contact row is half hidden by the
+    // boot that casts it, and that overlap is exactly what reads as touching. Nudged clear of the
+    // sole it detaches and the figure hovers over its own shadow.
+    const ox = -(lx * rx + lz * rz) * 0.06, oy = -(lx * fx + lz * fz) * 0.06;
+    // ---- one core per foot, at the real contact texels
+    const list = ct.list;
+    let meanR = 0;
+    for (let i = 0; i < MAX_CONTACTS; i++) {
+      const c = uB.uContacts.value[i], f = list[i];
+      if (!f) { c.set(0, 0, 0, 0); continue; }
+      // 2-3 texels across for a boot, wider for a paw or a claw spread; softened as the foot lifts
+      const rw = (Math.max(1.1, f.w * 0.5) + 0.85 + lift * 0.35) * tw;
+      const rd = rw * CONTACT_DEPTH;
+      meanR += rw;
+      c.set(((f.c - this._footCx) * tw * mir) / R + ox, oy, rw / R, rd / RD);
+    }
+    meanR = meanR / Math.max(1, list.length) || footW * 0.3;
+    // the rim is pinned to ~2 device pixels whatever the zoom: that hardness is what reads as
+    // contact rather than as a soft pool of dirt
     const pxPerWorld = this.texelPx / Math.max(1e-4, this.texelWorld);
-    uB.uEdge.value = Math.min(0.5, Math.max(0.06, 1.75 / (pxPerWorld * coreWorld)));
-    // the core sits a hair away from the key light, so it agrees with the stretched cast shadow
-    uB.uOffset.value.set(-(lx * rx + lz * rz) * 0.05, -(lx * fx + lz * fz) * 0.05);
-    uB.uStrength.value = this.opacity / (1 + this._footLift * 0.55); // a lifted boot casts less contact
+    uB.uEdge.value = Math.min(0.75, Math.max(0.12, 2.0 / (pxPerWorld * meanR)));
+    // a lifted boot loses core and keeps skirt; a grounded one is nearly opaque. Never zero.
+    uB.uCore.value = 0.92 / (1 + lift * 0.45);
+    uB.uSkirt.value = 0.46 + Math.min(0.14, lift * 0.03);
+    uB.uStrength.value = this.opacity;
   }
 
   /** Lay the silhouette shadow on the floor, away from the light, longer for low/near lights. */

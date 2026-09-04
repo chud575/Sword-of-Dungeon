@@ -13,6 +13,8 @@ import {
   INK, INK_TOL, LIT, SCALE, HERO_SCALE, ramp, lint, lintErrors, analyseSheet, sizeFor, measureFigure,
   CHROMA_CEIL, VALUE_CEIL, VALUE_FLOOR, VALUE_RANGE_MIN, RAMP_MIN_STEPS, RAMP_MAX_STEPS,
   DENSITY_MIN, DENSITY_MAX, LADDER_RANK_MARGIN, HERO_FIGURE_PX, luminance, chroma,
+  sceneValue, readLift, readLiftFor, READ_LIFT_TARGET, READ_LIFT_MIN_GAMMA,
+  LIT_VALUE_FLOOR, LIT_RANGE_MIN, DEPTH_TINT_CLAMP,
 } from '../src/render/sprites/style.js';
 
 const hexToRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -233,4 +235,108 @@ test('the cast is painted at ONE texel density — no sheet is a zoomed sprite',
   assert.ok(spread <= 1.45, `texel-density spread across the cast is ${spread.toFixed(2)} (max 1.45)`);
   assert.ok(DENSITY_MAX / DENSITY_MIN <= 1.5,
     'the density band itself must stay tight — a wide band is how the ladder became dead code');
+});
+
+// ---------------------------------------------------------------------------------------------
+// WHAT THE PLAYER SEES, NOT WHAT THE ATLAS HOLDS
+//
+// Two audits in a row signed off sheets that lint() called clean and that then turned into holes
+// in the floor at the playing camera — demon, fyre drake, gargoyle, dark warrior, war lord,
+// werebear and assassin, all "passing" on a median the renderer went on to crush. These tests
+// guard the pass that closes that gap: sceneValue() models the room's light + the grading pass +
+// ACES, readLift() is the per-sheet rescue the billboard actually applies, and lint() now judges
+// both. See sprites/style.js "the scene tone pass".
+// ---------------------------------------------------------------------------------------------
+
+test('sceneValue models the crush that made a legal sheet a black hole', () => {
+  // monotone, and it stays inside 0..1
+  let prev = -1;
+  for (let v = 0; v <= 1.0001; v += 0.02) {
+    const s = sceneValue(v);
+    assert.ok(s >= 0 && s <= 1, `sceneValue(${v.toFixed(2)}) = ${s} is outside 0..1`);
+    assert.ok(s >= prev, `sceneValue is not monotone at ${v.toFixed(2)}`);
+    prev = s;
+  }
+  assert.equal(sceneValue(0), 0);
+  // THE BUG, in two numbers: the Demon's legal 0.22 median and the hero's 0.44 are a 2:1 gap in
+  // the file and better than a 10:1 gap on screen.
+  const demon = sceneValue(0.224), hero = sceneValue(0.441);
+  assert.ok(demon < 0.02, `an unaided 0.22 median should die on screen, got ${demon.toFixed(3)}`);
+  assert.ok(hero > 0.20, `the hero's 0.44 median should read, got ${hero.toFixed(3)}`);
+  assert.ok(hero / demon > 8, 'the crush must be strongly non-linear, or there is no bug to catch');
+});
+
+test('readLift rescues the dark sheets to one target and never more than the cap', () => {
+  assert.equal(readLift(READ_LIFT_TARGET), 1, 'a sheet already at the target is left alone');
+  assert.equal(readLift(0.8), 1, 'a bright sheet is never touched');
+  for (const m of [0.24, 0.28, 0.30, 0.33, 0.35]) {
+    const g = readLift(m);
+    assert.ok(g < 1 && g >= READ_LIFT_MIN_GAMMA, `readLift(${m}) = ${g} is outside the band`);
+    assert.ok(Math.abs(m ** g - READ_LIFT_TARGET) < 1e-6, `readLift(${m}) does not land on the target`);
+  }
+  // the cap is what keeps the rule failable: a sheet dark enough cannot be rescued at all
+  assert.equal(readLift(0.05), READ_LIFT_MIN_GAMMA);
+  assert.ok(sceneValue(0.05 ** readLift(0.05)) < LIT_VALUE_FLOOR,
+    'the cap must leave a hopeless sheet failing, or lint can never bite');
+  // gamma fixes both ends, so the ink stays black under the grading crush while the body rises
+  const g = readLift(0.224);
+  assert.ok(sceneValue(luminance(hexToRgb(INK)) ** g) < 0.02, 'the read-lift must not grey out the ink');
+});
+
+test('readLiftFor measures a sheet once and remembers it', () => {
+  const sheet = packSheet(buildHero());
+  const a = analyseSheet(sheet);
+  assert.equal(readLiftFor(sheet), readLift(a.median));
+  assert.equal(readLiftFor(sheet), sheet.readLift, 'the gamma is memoised on the sheet');
+  assert.equal(readLiftFor(sheet), readLiftFor(sheet));
+});
+
+test('every shipping sheet reads at the play camera, not just in the atlas', () => {
+  const all = [['player', packSheet(buildHero())], ...REAL_SPRITES.map((t) => [t, sheetOf(MONSTER_SPRITES[t]())])];
+  const tooDark = [], flat = [], atCap = [];
+  for (const [type, sheet] of all) {
+    const a = analyseSheet(sheet);
+    if (a.litMedian < LIT_VALUE_FLOOR) tooDark.push(`${type} ${a.litMedian.toFixed(3)}`);
+    if (a.litRange < LIT_RANGE_MIN) flat.push(`${type} ${a.litRange.toFixed(3)}`);
+    // no sheet may be so dark that the renderer runs out of rescue — that is the headroom the
+    // whole guard depends on, and it is the first thing a darker repaint spends
+    if (a.readLift <= READ_LIFT_MIN_GAMMA + 1e-9) atCap.push(`${type} ${a.median.toFixed(3)}`);
+  }
+  assert.deepEqual(tooDark, [], 'sheets that read as holes under scene lighting');
+  assert.deepEqual(flat, [], 'sheets whose ramp flattens out under scene lighting');
+  assert.deepEqual(atCap, [], 'sheets so dark the renderer cannot lift them any further');
+});
+
+test('lint catches a sheet the atlas rules call legal and the screen does not', () => {
+  // A ramp that lies LOW: five steps from 0.10 to 0.40, body median 0.25. It clears VALUE_FLOOR,
+  // it clears VALUE_RANGE_MIN, it is inked and lit correctly — and on screen its bottom two steps
+  // are crushed to black and it lands with a third of the separation the cast holds.
+  const tones = ['#1a1a1a', '#2b2b2b', '#3d3d3d', '#4f4f4f', '#6d6d6d'];
+  const rows = [];
+  for (let y = 0; y < 20; y++) {
+    let r = '';
+    for (let x = 0; x < 20; x++) r += (x === 0 || y === 0 || x === 19 || y === 19) ? '.' : '12345'[Math.min(4, Math.max(0, 4 - Math.floor((x + y) / 8)))];
+    rows.push(r);
+  }
+  const pix = outline(paint(rows), '#');
+  const palette = new Palette().set('#', INK);
+  tones.forEach((c, i) => palette.set('12345'[i], c));
+  const built = { w: 20, h: 20, pivot: { x: 10, y: 20 }, palette, anims: { idle: { S: { frames: [pix], durations: [100], loop: true } } } };
+  const a = analyseSheet(packSheet(built));
+  assert.ok(a.median >= VALUE_FLOOR, `the decoy must pass VALUE_FLOOR (median ${a.median.toFixed(3)})`);
+  assert.ok(a.range >= VALUE_RANGE_MIN, `the decoy must pass VALUE_RANGE_MIN (range ${a.range.toFixed(3)})`);
+  assert.ok(a.litMedian >= LIT_VALUE_FLOOR, 'the decoy is not merely too dark — the read-lift saves its median');
+  const rules = lint(packSheet(built), { type: 'decoy' }).filter((v) => v.severity === 'error').map((v) => v.rule);
+  assert.ok(rules.includes('lit-contrast'),
+    `the post-lighting rule must bite where the atlas value rules do not: got [${rules.join(', ')}]`);
+  for (const atlasRule of ['value-floor', 'value-range', 'value-ceil', 'ramp-steps', 'ink']) {
+    assert.ok(!rules.includes(atlasRule), `${atlasRule} must not be what catches this sheet`);
+  }
+});
+
+test('the depth grade reaches the cast without repainting the species', () => {
+  // 1.0 cancels the band outright and floats the cast off the room; 0 lets the band choose the
+  // creature's colour. The over-correction this replaces sat at 0.78.
+  assert.ok(DEPTH_TINT_CLAMP > 0.2 && DEPTH_TINT_CLAMP < 0.65,
+    `DEPTH_TINT_CLAMP ${DEPTH_TINT_CLAMP}: the room's light has to land on the cast, and the cast has to stay itself`);
 });
