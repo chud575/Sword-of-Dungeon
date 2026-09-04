@@ -58,6 +58,10 @@ export class Level {
     this.entities = [];
     /** @type {object[]} */
     this.items = [];
+    /** @type {{type:string,x:number,y:number,facing:string,variant:number,blocking:boolean}[]} ambience dressing (docs/AMBIENCE.md §4.1) */
+    this.decor = [];
+    /** movement mask for blocking decor, rebuilt by setDecor(); null while empty */
+    this.decorBlock = null;
     this.stairsUp = null;
     this.stairsDown = null;
     /** every down staircase (stairsDown is the primary/farthest one) */
@@ -85,7 +89,11 @@ export class Level {
   inBounds(x, y) { return x >= 0 && y >= 0 && x < this.width && y < this.height; }
   get(x, y) { return this.inBounds(x, y) ? this.tiles[y * this.width + x] : TILE.WALL; }
   set(x, y, t) { if (this.inBounds(x, y)) this.tiles[y * this.width + x] = t; }
-  isWalkable(x, y) { return this.inBounds(x, y) && isWalkableTile(this.tiles[y * this.width + x]); }
+  isWalkable(x, y) {
+    if (!this.inBounds(x, y)) return false;
+    const i = y * this.width + x;
+    return isWalkableTile(this.tiles[i]) && !(this.decorBlock && this.decorBlock[i] === 1);
+  }
   isOpaque(x, y) { return !this.inBounds(x, y) || isOpaqueTile(this.tiles[y * this.width + x]); }
   isExplored(x, y) { return this.inBounds(x, y) && this.explored[y * this.width + x] === 1; }
   isVisible(x, y) { return this.inBounds(x, y) && this.visible[y * this.width + x] === 1; }
@@ -111,6 +119,53 @@ export class Level {
   itemsAt(x, y) { return this.items.filter((it) => it.x === x && it.y === y); }
   trapAt(x, y) { return this.traps.find((t) => t.x === x && t.y === y) || null; }
   climbableAt(x, y) { return this.climbable.find((c) => c.x === x && c.y === y) || null; }
+  /** Every decor entry on a tile (usually 0 or 1; a decal plus a standing prop is legal). */
+  decorAt(x, y) { return this.decor.filter((d) => d.x === x && d.y === y); }
+  /** Is a piece of decor standing here that blocks movement? */
+  decorBlocked(x, y) {
+    if (!this.decorBlock || !this.inBounds(x, y)) return false;
+    return this.decorBlock[y * this.width + x] === 1;
+  }
+  /**
+   * Install the level's decor and rebuild the movement mask (AMBIENCE.md §4.3).
+   * @param {object[]} list Decor entries
+   */
+  setDecor(list) {
+    this.decor = list;
+    let mask = null;
+    for (const d of list) {
+      if (!d.blocking) continue;
+      if (!mask) mask = new Uint8Array(this.width * this.height);
+      if (this.inBounds(d.x, d.y)) mask[d.y * this.width + d.x] = 1;
+    }
+    this.decorBlock = mask;
+    return list;
+  }
+  /**
+   * Tiles decor may never occupy (AMBIENCE.md §4.4). Wall-mounted pieces are the one exception:
+   * they name the WALL tile they hang on, and are checked through their viewer tile instead.
+   * @param {number} x @param {number} y
+   * @param {boolean} standing true for a standing prop (rubble takes decals only)
+   */
+  decorForbidden(x, y, standing = false) {
+    if (!this.inBounds(x, y)) return true;
+    const t = this.get(x, y);
+    if (t === TILE.WALL || t === TILE.DOOR || t === TILE.STAIRS_UP || t === TILE.STAIRS_DOWN
+      || t === TILE.TEMPLE || t === TILE.PIT || t === TILE.WATER
+      || t === TILE.TRAP_TELEPORT || t === TILE.TRAP_PIT) return true;
+    if (standing && t === TILE.RUBBLE) return true;
+    if (this.trapAt(x, y)) return true;
+    if (this.itemsAt(x, y).length) return true;
+    if (this.entityAt(x, y)) return true;
+    // the door throat: a doorway and the walkable tile on each side of it
+    for (const d of DIRS4) if (this.get(x + d.dx, y + d.dy) === TILE.DOOR) return true;
+    // nothing crowds a staircase
+    for (const d of DIRS8) {
+      const n = this.get(x + d.dx, y + d.dy);
+      if (n === TILE.STAIRS_UP || n === TILE.STAIRS_DOWN) return true;
+    }
+    return false;
+  }
   get monsters() { return this.entities.filter((e) => e.kind === 'monster' && e.state !== 'dead'); }
 
   addEntity(e) { if (!this.entities.includes(e)) this.entities.push(e); return e; }
@@ -142,6 +197,7 @@ export class Level {
     if (this.entityAt(x, y)) return false;
     if (this.itemsAt(x, y).length) return false;
     if (this.trapAt(x, y)) return false;
+    if (this.decorBlocked(x, y)) return false;
     return true;
   }
 
@@ -244,6 +300,7 @@ export class Level {
       rooms: this.rooms.map((r) => ({ ...r })),
       entities: this.entities.filter((e) => e.kind !== 'player').map((e) => JSON.parse(JSON.stringify(e))),
       items: this.items.map((it) => ({ ...it })),
+      decor: this.decor.map((d) => ({ ...d })),
       stairsUp: this.stairsUp ? { ...this.stairsUp } : null,
       stairsDown: this.stairsDown ? { ...this.stairsDown } : null,
       stairsDownAll: this.stairsDownAll.map((s) => ({ ...s })),
@@ -267,6 +324,7 @@ export class Level {
     lv.rooms = d.rooms.map((r) => ({ ...r }));
     lv.entities = d.entities.map((e) => JSON.parse(JSON.stringify(e)));
     lv.items = d.items.map((it) => ({ ...it }));
+    lv.setDecor((d.decor || []).map((x) => ({ ...x })));
     lv.stairsUp = d.stairsUp ? { ...d.stairsUp } : null;
     lv.stairsDown = d.stairsDown ? { ...d.stairsDown } : null;
     lv.stairsDownAll = (d.stairsDownAll || []).map((s) => ({ ...s }));
