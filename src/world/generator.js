@@ -1186,7 +1186,10 @@ function assignArchetypes(level, rng, isSwordLevel) {
   }
   for (const room of level.rooms) {
     const a = ARCHETYPES[room.archetype];
-    room.lightMood = isSwordLevel && room.archetype !== 'shrine' ? 'sword' : driftMood(a.mood, room.decay);
+    let mood = isSwordLevel && room.archetype !== 'shrine' ? 'sword' : driftMood(a.mood, room.decay);
+    // a room lighting.js can hang no torch in may not claim to be torchlit (§6.3 rule 5)
+    if (mood === 'torchlit' && !spaces.get(room).wallSide.size) mood = 'ember';
+    room.lightMood = mood;
   }
   return spaces;
 }
