@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { TILE, DIRS8, DIRS4 } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
-import { createWaterMaterial, createShaftMaterial, CELLS, cellUV, ATLAS, stoneFamily } from './materials.js';
+import { createWaterMaterial, createShaftMaterial, CELLS, cellUV, ATLAS, stoneFamily, syncWorldGrid } from './materials.js';
 import { MeshBuilder, slabGeometry, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
 import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
 
@@ -75,6 +75,27 @@ function stairSpillTexture() {
   return _spillTex;
 }
 
+// ------------------------------------------------------------------ the world's texel grid
+/**
+ * THE GRID PROBE. The world is sampled on the CAST'S texel grid (materials.js "ONE TEXEL, ONE
+ * SIZE") — one integer number of device pixels per texel, chosen per frame from the camera by
+ * sprites/spriteBillboard.js `frameTexelSize`. That number has to reach the surface shaders BEFORE
+ * the first flagstone draws, and `update(dt)` has no renderer or camera in scope (nor is it called
+ * at all by a bare `draw()`). So a degenerate, colour-write-disabled triangle rides in the scene at
+ * render order -2000 purely to hand `syncWorldGrid` the live renderer and camera once per frame,
+ * ahead of everything else — the same trick damageNumbers.js uses for its screen-space slots.
+ * `castShadow` stays false, so the shadow passes (whose cameras are not the player's) never see it.
+ */
+function makeGridProbe() {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(9), 3));
+  const probe = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false }));
+  probe.name = 'world-grid-probe';
+  probe.frustumCulled = false; probe.renderOrder = -2000; probe.castShadow = false; probe.receiveShadow = false;
+  probe.onBeforeRender = (renderer, scene, camera) => { if (scene && camera && camera.isPerspectiveCamera) syncWorldGrid(renderer, camera); };
+  return probe;
+}
+
 export class DungeonView {
   /**
    * @param {THREE.Scene} scene
@@ -106,6 +127,8 @@ export class DungeonView {
     /** geometries created for the current level only (disposed on clear; shared ones live on the instance/prop cache) */
     this.ownedGeos = [];
     this.instanced = [];
+    this.gridProbe = makeGridProbe();
+    scene.add(this.gridProbe);
   }
 
   /** Register a per-level geometry so clear() can dispose it. */

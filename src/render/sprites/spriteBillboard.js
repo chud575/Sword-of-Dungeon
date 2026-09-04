@@ -130,7 +130,17 @@ export function frameTexelSize(renderer, camera, pxPerTile = PX_PER_TILE) {
   return GRID.S;
 }
 
-/** Read-only snapshot of the shared grid (probes, tests, HUD overlays). */
+/**
+ * Read-only snapshot of the shared grid (probes, tests, HUD overlays).
+ *
+ * THE WORLD READS THIS TOO. The dungeon's surfaces are sampled on the same grid: materials.js
+ * `syncWorldGrid` takes `S` and `pxPerWorld` from here and sets the floor's texel to `S /
+ * pxPerWorld` WORLD units, so one flagstone texel covers exactly the same `S` device pixels one
+ * hero texel does. Nailing the floor to a fixed 1/32 of a tile instead put the room on `want`
+ * device pixels per texel — up to a fifth of a texel away from the cast (see materials.js "ONE
+ * TEXEL, ONE SIZE"). Whatever moves `S` here moves the room with it, in the same frame.
+ * @returns {{S:number, want:number, pxPerWorld:number, depth:number}}
+ */
 export function texelGrid() { return { S: GRID.S, want: GRID.want, pxPerWorld: GRID.pxPerWorld, depth: GRID.depth }; }
 
 const LIGHT_GLSL = `

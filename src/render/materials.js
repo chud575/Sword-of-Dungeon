@@ -12,7 +12,8 @@
 // at two resolutions is the one thing HD-2D cannot survive.
 //
 // So every dungeon surface texture is now authored at `TEXELS_PER_TILE` (32) texels per world unit
-// and uploaded with NearestFilter and a crisp base level:
+// and SAMPLED ON THE CAST'S OWN GRID — see "ONE TEXEL, ONE SIZE" below — uploaded with
+// NearestFilter and a crisp base level:
 //  - the flagstone ATLAS is 8x4 cells of 32x32 TEXELS (256x128 in all). Every texel is placed by
 //    hand-style rules — a grout ring, a one-texel bevel, mottle quantised to a seven-step house
 //    ramp (sprites/style.js `ramp`), then two or three WEAR MARKS drawn from nine families
@@ -35,6 +36,7 @@ import { createRng } from '../core/rng.js';
 import { patchFog } from './lighting.js';
 import { ramp } from './sprites/style.js';
 import { toRgb } from './sprites/pixelPainter.js';
+import { frameTexelSize, texelGrid, PX_PER_TILE } from './sprites/spriteBillboard.js';
 
 /** Palette used by the renderer (linear-space friendly hex values). */
 export const PALETTE = {
@@ -64,6 +66,88 @@ export const CELLS = {
 };
 /** UV offset of an atlas cell. */
 export function cellUV(i) { return [(i % ATLAS.cols) / ATLAS.cols, 1 - (Math.floor(i / ATLAS.cols) + 1) / ATLAS.rows]; } // canvas textures are Y-flipped on upload
+
+// ------------------------------------------------------------------ ONE TEXEL, ONE SIZE
+// THE WORLD RIDES ON THE CAST'S TEXEL GRID.
+//
+// Authoring the floor at 32 texels per tile is only half of "one screen, one resolution". The cast
+// is drawn at ONE INTEGER number of device pixels per texel — `S`, chosen once per frame from the
+// camera alone (sprites/spriteBillboard.js `frameTexelSize`) — while a floor nailed to 1/32 of a
+// world unit covers the FRACTIONAL `want = pxPerWorld / 32` device pixels per texel. `S` is
+// `round(want)`, so the two grids disagreed by however much that rounding moved:
+//
+//     bestiary +19.7%   bestiary-fighters-close +20.6%   hero-showcase +7.2%
+//     combat   -12.4%   deep-level -13.4%                default -13.4%
+//
+// A fifth of a texel is not subtle: the hero's pixel blocks were a visibly different size from the
+// stone grain he stood on, and the flagstones' 3px/4px/3px stagger is exactly the mush the sprite
+// billboards go to such lengths to avoid. One screen at two resolutions is the one thing HD-2D
+// cannot survive, and it does not care whether the second resolution belongs to the floor.
+//
+// So the world's texel is no longer 1/32 of a tile. It is `S / pxPerWorld` world units — the SAME
+// world size the cast's texel has, so one floor texel is exactly `S` device pixels, exactly like
+// one hero texel, measured where the camera is actually looking. `TEXELS_PER_TILE` stays 32: that
+// is what the textures are PAINTED at. What moves is how densely they are sampled — `uWorldTexels`
+// (K = pxPerWorld / S, ~27-37) is the live number of world texels per world unit, and the surface
+// shader snaps its texture lookup to that grid (`patchSurface`, `quant`). The sample point is
+// quantised, never the mip level: mip selection still runs off the CONTINUOUS uv derivatives
+// (`texture2DGradEXT`), so the floor sits on level 0 — dead crisp — everywhere the game is played,
+// and only the far overview zoom, where a texel really is under a pixel, drops into the mip chain
+// and stays stable instead of sparkling.
+//
+// The price is a resample of at most |32/K - 1| (a fifth of a texel at the widest zoom): the odd
+// painted texel is doubled or dropped inside a slab. That is the trade every HD-2D game makes, and
+// it buys the thing a player actually sees — the stone grain and the hero's pixels are the same
+// size blocks on the same grid.
+//
+// MEASURED AT THE PLAY CAMERA, floor device pixels per texel vs sprite device pixels per texel:
+//   default 3 / 3      combat 3 / 3        deep-level 3 / 3
+//   hero-showcase 5 / 5   bestiary 2 / 2   dungeon-overview (far stop) 1 / 1
+// — every scenario dead level, where they were 13% and 20% apart. At the nominal camera (water,
+// temple, camera-zoom-out) `want` is already exactly 4, so K comes out at 32 and nothing moves:
+// the authored density was always right, it was the ROUNDING the cast does that the room had to
+// follow.
+/**
+ * THE WORLD'S SHARE OF THE CHARACTER MASK. Sprites write `SPRITE_MASK_ALPHA` (0.35) so the grading
+ * pass stops film grain crawling over flat pixel-art colour (renderer.js: <= 0.5 is fully masked,
+ * >= 0.8 not at all). Stone is pixel art too, on the same grid, and 1-device-pixel grain over a
+ * 3-device-pixel texel is the loudest way to destroy the grid this file exists to build — but the
+ * floor is also where grain earns its keep, hiding banding in the big dark washes. 0.55 keeps a
+ * whisper of it — about a sixth — where the cast keeps a tenth and the void all of it: measured at
+ * 18x on the flagstone under the hero, that is the value where the 3-device-pixel blocks come back
+ * as blocks and the frame still reads as film rather than vector.
+ */
+export const WORLD_MASK_ALPHA = 0.55;
+
+/** The live grid, as uniform objects every patched surface material shares by reference. */
+const GRID = {
+  /** K: world texels per world unit. `TEXELS_PER_TILE` until the first frame sets it from the camera. */
+  uWorldTexels: { value: TEXELS_PER_TILE },
+  /** What the world writes into the frame's alpha: the grading pass's "this is pixel art" mask. */
+  uWorldMask: { value: WORLD_MASK_ALPHA },
+};
+
+/**
+ * Put the world on the frame's texel grid. Called once per frame from the dungeon's grid probe
+ * (render order -2000, before any surface draws) with the live renderer and scene camera; every
+ * material patched by `patchSurface` shares these uniform objects, so one write moves all of them.
+ * @param {THREE.WebGLRenderer} renderer
+ * @param {THREE.Camera} camera
+ * @returns {number} K, world texels per world unit
+ */
+export function syncWorldGrid(renderer, camera) {
+  if (!renderer || !camera || !camera.isPerspectiveCamera) return GRID.uWorldTexels.value;
+  const S = frameTexelSize(renderer, camera, PX_PER_TILE); // idempotent: the cast reads the same S
+  const g = texelGrid();
+  // one world texel = S device pixels = one sprite texel, at the depth the camera is looking at
+  if (g.pxPerWorld > 0 && S > 0) GRID.uWorldTexels.value = g.pxPerWorld / S;
+  return GRID.uWorldTexels.value;
+}
+
+/** Read-only snapshot of the world grid (probes, tests, audits). */
+export function worldGrid() {
+  return { texelsPerTile: GRID.uWorldTexels.value, texelWorld: 1 / GRID.uWorldTexels.value, mask: GRID.uWorldMask.value };
+}
 
 const rng = createRng('fargoal-materials');
 
@@ -657,27 +741,43 @@ export function getTextures() {
 /**
  * Chain a dungeon-surface patch onto the fog patch:
  *  - `atlas`: per-vertex/instance `aTile` (vec2 uv offset) selects an atlas cell for map/normal/roughness;
- *  - `grunge`: multiplies albedo by the world-space grunge map at two incommensurate scales.
+ *  - `grunge`: multiplies albedo by the world-space grunge map at two incommensurate scales;
+ *  - `quant`: [u, v] uv units per WORLD unit for this geometry — the surface joins the cast's texel
+ *    grid (see "ONE TEXEL, ONE SIZE"): its texture lookup is snapped to `uWorldTexels` steps per
+ *    world unit so one stone texel is exactly as many device pixels as one hero texel, and it
+ *    writes `WORLD_MASK_ALPHA` so the grading pass treats it as pixel art. Materials without
+ *    `quant` keep the plain sampling path (their uv is not a known multiple of world space).
  * @param {THREE.Material} m
  * @param {import('./lighting.js').FogOfWar} fog
- * @param {{atlas?:boolean, grunge?:number, grungeTex?:THREE.Texture, worldUV?:number}} opts
+ * @param {{atlas?:boolean, grunge?:number, grungeTex?:THREE.Texture, quant?:number[]}} opts
  */
 export function patchSurface(m, fog, opts = {}) {
   patchFog(m, fog);
   const prev = m.onBeforeCompile;
   const grungeTex = opts.grungeTex || getTextures().grunge;
-  const key = `surface:${opts.atlas ? 'atlas' : 'uv'}:${opts.grunge ? 'g' : 'n'}`;
+  const q = opts.quant || null;
+  const key = `surface:${opts.atlas ? 'atlas' : 'uv'}:${opts.grunge ? 'g' : 'n'}:${q ? q.join(',') : 'x'}`;
   m.onBeforeCompile = (shader) => {
     prev(shader);
+    m.userData.surfaceUniforms = shader.uniforms;   // audits and probes reach the live grid from here
+    if (opts.grunge || q) {
+      // the live world texel grid: one uniform object shared by every surface material
+      shader.uniforms.uWorldTexels = GRID.uWorldTexels;
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uWorldTexels;');
+    }
     if (opts.atlas) {
       shader.uniforms.uAtlas = { value: new THREE.Vector2(1 / ATLAS.cols, 1 / ATLAS.rows) };
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>\nattribute vec2 aTile; uniform vec2 uAtlas;\nconst float CELL = ${ATLAS.cell.toFixed(1)};`)
+        .replace('#include <common>', `#include <common>\nattribute vec2 aTile; uniform vec2 uAtlas;\nconst float CELL = ${ATLAS.cell.toFixed(1)};\nvarying vec2 vSlabUv; varying vec2 vCellUv;`)
         // uv 0..1 across a slab maps to the CENTRES of the cell's first and last texel: with
         // NearestFilter, uv == 1.0 would otherwise land on the first texel of the NEXT atlas cell
-        // and bleed a neighbour's stone around the rim.
+        // and bleed a neighbour's stone around the rim. `vMapUv` keeps the CONTINUOUS mapping (the
+        // tangent frame and the mip level are read off its derivatives); the fragment shader snaps
+        // the sample point itself from `vSlabUv`.
         .replace('#include <uv_vertex>', `#include <uv_vertex>
         { vec2 tuv = (uv * (CELL - 1.0) + 0.5) / CELL * uAtlas + aTile;
+          vSlabUv = uv; vCellUv = aTile;
           #ifdef USE_MAP
           vMapUv = tuv;
           #endif
@@ -688,19 +788,61 @@ export function patchSurface(m, fog, opts = {}) {
           vRoughnessMapUv = tuv;
           #endif
         }`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\nuniform vec2 uAtlas;\nconst float CELL = ${ATLAS.cell.toFixed(1)};\nvarying vec2 vSlabUv; varying vec2 vCellUv;`);
     }
     if (opts.grunge) {
       shader.uniforms.uGrunge = { value: grungeTex };
       shader.uniforms.uGrungeAmt = { value: opts.grunge };
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', '#include <common>\nuniform sampler2D uGrunge; uniform float uGrungeAmt;')
-        // sampled on the WORLD TEXEL GRID (1/32 of a tile, the sprite grid): macro wear that steps
-        // with the stone instead of airbrushing a soft gradient across the pixel structure
+        // sampled on the WORLD TEXEL GRID — the cast's grid, `uWorldTexels` steps per world unit:
+        // macro wear that steps with the stone instead of airbrushing a soft gradient across the
+        // pixel structure
         .replace('#include <map_fragment>', `#include <map_fragment>
-        { vec2 gp = floor(vFogXZ * ${TEXELS_PER_TILE.toFixed(1)}) / ${TEXELS_PER_TILE.toFixed(1)};
+        { vec2 gp = floor(vFogXZ * uWorldTexels) / uWorldTexels;
           vec3 g1 = texture2D(uGrunge, gp * 0.071 + 0.13).rgb * 1.5;
           vec3 g2 = texture2D(uGrunge, gp * 0.0293 + 0.61).rgb * 1.5;
           diffuseColor.rgb *= mix(vec3(1.0), g1 * g2, uGrungeAmt); }`);
+    }
+    if (q) {
+      // ---- the surface joins the cast's texel grid (see "ONE TEXEL, ONE SIZE") ----
+      shader.uniforms.uWorldMask = GRID.uWorldMask;
+      shader.uniforms.uUvPerWorld = { value: new THREE.Vector2(q[0], q[1]) };
+      // `qStep` is one world texel expressed in this geometry's uv; `qUv` is the snapped sample
+      // point and `qDx`/`qDy` are the CONTINUOUS derivatives, which is what keeps the mip level
+      // honest — sampling with a quantised uv's own derivatives would spike the LOD at every block
+      // edge and blur the floor into exactly the mush this grid exists to kill.
+      const snap = opts.atlas ? `
+        vec2 qStep = uUvPerWorld / uWorldTexels;
+        vec2 qSlab = clamp((floor(vSlabUv / qStep) + 0.5) * qStep, 0.0, 1.0);
+        qUv = (qSlab * (CELL - 1.0) + 0.5) / CELL * uAtlas + vCellUv;
+        vec2 qCont = (vSlabUv * (CELL - 1.0) + 0.5) / CELL * uAtlas + vCellUv;
+        qDx = dFdx(qCont); qDy = dFdy(qCont);` : `
+        vec2 qStep = uUvPerWorld / uWorldTexels;
+        qUv = (floor(vMapUv / qStep) + 0.5) * qStep;
+        qDx = dFdx(vMapUv); qDy = dFdy(vMapUv);`;
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', '#include <common>\nuniform float uWorldMask; uniform vec2 uUvPerWorld;\nvec2 qUv; vec2 qDx; vec2 qDy;')
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>\n{${snap}\n}`)
+        .replace('#include <map_fragment>', `
+        #ifdef USE_MAP
+          diffuseColor *= texture2DGradEXT( map, qUv, qDx, qDy );
+        #endif`)
+        .replace('#include <roughnessmap_fragment>', `
+        float roughnessFactor = roughness;
+        #ifdef USE_ROUGHNESSMAP
+          roughnessFactor *= texture2DGradEXT( roughnessMap, qUv, qDx, qDy ).g;
+        #endif`)
+        .replace('#include <normal_fragment_maps>', `
+        #ifdef USE_NORMALMAP_TANGENTSPACE
+          vec3 mapN = texture2DGradEXT( normalMap, qUv, qDx, qDy ).xyz * 2.0 - 1.0;
+          mapN.xy *= normalScale;
+          normal = normalize( tbn * mapN );
+        #endif`)
+        // tag the frame's alpha: stone is hand-pixelled art too, so the grading pass holds most of
+        // the film grain off it (renderer.js character mask; sprites write 0.35, the void 1.0)
+        .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n gl_FragColor.a = uWorldMask;');
     }
   };
   m.customProgramCacheKey = () => 'fogofwar-v1|' + key;
@@ -717,22 +859,26 @@ export function createMaterials(fog) {
   const surf = (opts, p) => { const m = new THREE.MeshStandardMaterial(opts); patchSurface(m, fog, p); return m; };
   const A = T.atlas, M = T.masonry;
   const normalScale = new THREE.Vector2(0.9, 0.9);
+  // uv units per WORLD unit for each geometry family, so the shader can snap the lookup to the
+  // cast's texel grid (see "ONE TEXEL, ONE SIZE"). A slab's uv spans its own 0.985-unit top face;
+  // a capstone's spans its tile; masonry runs 0.25 uv per world unit across and 1 up.
+  const SLAB_Q = [1 / 0.985, 1 / 0.985], CAP_Q = [1, 1], MASONRY_Q = [0.25, 1];
   const mats = {
     // instanced flagstones (aTile per instance, AO/tint via instanceColor)
-    floor: surf({ map: A.albedo, normalMap: A.normal, normalScale, roughnessMap: A.rough, roughness: 1, metalness: 0.02 }, { atlas: true, grunge: 0.55 }),
+    floor: surf({ map: A.albedo, normalMap: A.normal, normalScale, roughnessMap: A.rough, roughness: 1, metalness: 0.02 }, { atlas: true, grunge: 0.55, quant: SLAB_Q }),
     // merged wall caps: same atlas, per-vertex colour
-    floorCap: surf({ map: A.albedo, normalMap: A.normal, normalScale, roughnessMap: A.rough, roughness: 1, metalness: 0.02, vertexColors: true }, { atlas: true, grunge: 0.45 }),
+    floorCap: surf({ map: A.albedo, normalMap: A.normal, normalScale, roughnessMap: A.rough, roughness: 1, metalness: 0.02, vertexColors: true }, { atlas: true, grunge: 0.45, quant: CAP_Q }),
     // merged wall bodies mapped in world units
-    wall: surf({ map: M.albedo, normalMap: M.normal, normalScale: new THREE.Vector2(1.0, 1.0), roughnessMap: M.rough, roughness: 1, metalness: 0, vertexColors: true }, { grunge: 0.5 }),
-    obsidianFloor: surf({ map: A.obsidian, normalMap: A.normal, normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.5, metalness: 0.12 }, { atlas: true, grunge: 0.35 }),
-    obsidianCap: surf({ map: A.obsidian, normalMap: A.normal, normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.5, metalness: 0.12, vertexColors: true }, { atlas: true, grunge: 0.35 }),
-    obsidianWall: surf({ map: M.obsidian, normalMap: M.normal, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.5, metalness: 0.15, color: 0xcdbde0, vertexColors: true }, { grunge: 0.3 }),
+    wall: surf({ map: M.albedo, normalMap: M.normal, normalScale: new THREE.Vector2(1.0, 1.0), roughnessMap: M.rough, roughness: 1, metalness: 0, vertexColors: true }, { grunge: 0.5, quant: MASONRY_Q }),
+    obsidianFloor: surf({ map: A.obsidian, normalMap: A.normal, normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.5, metalness: 0.12 }, { atlas: true, grunge: 0.35, quant: SLAB_Q }),
+    obsidianCap: surf({ map: A.obsidian, normalMap: A.normal, normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.5, metalness: 0.12, vertexColors: true }, { atlas: true, grunge: 0.35, quant: CAP_Q }),
+    obsidianWall: surf({ map: M.obsidian, normalMap: M.normal, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.5, metalness: 0.15, color: 0xcdbde0, vertexColors: true }, { grunge: 0.3, quant: MASONRY_Q }),
     marble: std({ map: T.marble, roughness: 0.35, metalness: 0.05 }),
     medallion: std({ map: T.medallion, roughness: 0.45, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     checker: std({ map: T.checker, roughness: 0.8 }),
     dirt: std({ map: T.dirt, roughness: 1 }),
     dark: std({ color: 0x050405, roughness: 1 }),
-    pitWall: surf({ map: M.albedo, normalMap: M.normal, roughnessMap: M.rough, roughness: 1, color: 0xd8d0c8, vertexColors: true }, { grunge: 0.5 }),
+    pitWall: surf({ map: M.albedo, normalMap: M.normal, roughnessMap: M.rough, roughness: 1, color: 0xd8d0c8, vertexColors: true }, { grunge: 0.5, quant: MASONRY_Q }),
     rim: std({ color: 0x6a6058, roughness: 0.9 }),
     cutStone: surf({ map: T.cutStone, roughness: 0.88, metalness: 0.02, color: 0xcfc6bc }, { grunge: 0.5 }),
     rock: std({ color: 0x7a7068, roughness: 0.95, flatShading: true }),
