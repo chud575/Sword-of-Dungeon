@@ -82,6 +82,29 @@ export const INK_LIT = '#4e4459';
  */
 export const INK_DEEP = '#120c1c';
 
+/**
+ * EVERY near-black in the game, and there are exactly three. `lint()` used to check only the ONE
+ * colour that held most of a sheet's OUTER EDGE, which meant a private near-black painted anywhere
+ * else was invisible to this file: an auditor swapped all 269 of the hero's `INK_DEEP` texels for a
+ * private '#0a0410' and `lint()` returned CLEAN. A rule nothing can fail is not a rule. Every tone
+ * a sheet paints below `NEAR_BLACK_L` must now be one of these three, within `INK_TOL`.
+ */
+export const DECLARED_INKS = [INK, INK_LIT, INK_DEEP];
+
+/**
+ * The luminance below which a tone is a NEAR-BLACK — a hole, a contour or a void — and not a step
+ * of some material's ramp. Above it a dark tone is paint and answers to `VALUE_FLOOR` and the ramp
+ * rules; below it, it is one of `DECLARED_INKS` or it is a bug.
+ *
+ * 0.105 is measured, not chosen: across the hero and all 22 shipping monster sheets the darkest
+ * PAINT is the Demon's '#2b1226' at 0.109 and the Assassin's '#1c163b' at 0.110, while the only
+ * tones under 0.105 anywhere in the cast are INK itself (0.080) and INK_DEEP (0.061). So the line
+ * sits in the gap between the game's darkest legitimate colour and its declared blacks — the five
+ * legacy inks (0.087-0.095) land above INK and stay covered by `INK_TOL`, and the '#0a0410' of the
+ * substitution above lands at 0.028 with nothing within 40 units of it.
+ */
+export const NEAR_BLACK_L = 0.105;
+
 // ------------------------------------------------------------------------------------ the light
 /**
  * THE key-light direction, in sprite/screen space with y pointing DOWN: {x:-1, y:-1} is up-and-left.
@@ -578,7 +601,22 @@ export const LIT_RANGE_MIN = 0.40;
  * and a single dark pixel sitting between two lighter ones is replaced by their mean before the
  * profile is judged. Without that, every seam in the cast turns its own row into a false positive.
  */
-export const FORM_RUN_MIN = 8;
+export const FORM_RUN_MIN = 4;
+
+/**
+ * AND THE DENOMINATOR IS THE WHOLE BODY. It was not: `formPx` used to count only the pixels inside
+ * runs at least `FORM_RUN_MIN` long, so the rule reported a fraction OF THE PART OF THE SHEET IT
+ * HAD LOOKED AT. At the old FORM_RUN_MIN of 8 that was 18% of the Rogue, 21% of the Elvin Ranger,
+ * 34% of the hero and 15-46% of the human sheets generally — a pillow could be painted across every
+ * short run in a figure and the number would not move, and a sheet could improve its score by
+ * BREAKING its long forms up. Now every non-ink body pixel is counted in the denominator, whatever
+ * length of run it sits in, and `FORM_RUN_MIN` only decides which runs are long enough to HAVE a
+ * middle and two ends worth judging (four is a form a player can read; three is a rivet). The cast
+ * measures 0.02-0.11 under the whole-body denominator against 0.02-0.12 under the old partial one,
+ * so the limits below are unchanged — what changed is that the number can no longer be gamed by
+ * where the rule was pointed.
+ */
+export const FORM_WHOLE_BODY = true;
 /**
  * How far two neighbouring pixels may sit apart in RGB and still count as one material. It has to
  * clear a whole ramp step at its widest: the War Lord's plate reads four steps off a seven-step
@@ -591,7 +629,8 @@ export const FORM_STEP = 0.035;
 /** How near the two ends of a run must be, as a fraction of the centre's lift, to read as symmetric. */
 export const FORM_SYMMETRY = 0.6;
 /**
- * Fraction of a sheet's form pixels that may be centre-lit before it is a bug. The repainted cast
+ * Fraction of a sheet's BODY pixels (see `FORM_WHOLE_BODY`) that may be centre-lit before it is a
+ * bug. The repainted cast
  * runs 0.02-0.12 (worst: the Wyvern); the state this rule was written against ran to 0.35 on the War
  * Lord, 0.30 on the Dwarven Guard and two flat crimson slabs on the hero, so it bites hard on the
  * failure and leaves a few points of room for a sheet mid-repaint.
@@ -601,8 +640,9 @@ export const FORM_PILLOW_MAX = 0.15;
 export const FORM_PILLOW_TARGET = 0.06;
 
 /**
- * Measure how much of a sheet's form is lit down the middle instead of from `LIT`. Pure analysis;
- * `lint()` turns it into a violation. See `FORM_RUN_MIN` for the method.
+ * Measure how much of a sheet's body is lit down the middle instead of from `LIT`. Pure analysis;
+ * `lint()` turns it into a violation. See `FORM_RUN_MIN` and `FORM_WHOLE_BODY` for the method:
+ * `formPx` is EVERY non-ink body pixel, `pillowPx` those inside a centre-lit form.
  * @param {import('./spriteSheet.js').Sheet} sheet
  * @param {{skipAnims?:string[]}} [o]
  * @returns {{formPx:number, pillowPx:number, pillow:number, worst:null|{anim:string, facing:string, y:number, x:number, n:number}}}
@@ -617,8 +657,8 @@ export function analyseForms(sheet, { skipAnims = LINT_SKIP_ANIMS } = {}) {
       let run = [], prev = null;
       const flush = (xEnd) => {
         const n = run.length;
+        formPx += n;                                        // EVERY body pixel, run or not
         if (n >= FORM_RUN_MIN) {
-          formPx += n;
           const p = run.slice();                            // read through one-pixel drawn seams
           for (let i = 1; i < n - 1; i++) {
             if (run[i] < run[i - 1] - 0.05 && run[i] < run[i + 1] - 0.05) p[i] = (run[i - 1] + run[i + 1]) / 2;
@@ -708,6 +748,22 @@ export function analyseSheet(sheet, { skipAnims = LINT_SKIP_ANIMS } = {}) {
     }
   }
   const interiorInk = inkPx ? innerInk / inkPx : 0;
+  // ---- EVERY NEAR-BLACK MUST BE DECLARED IN THIS FILE. `ink` above is only the most common colour
+  // on the OUTER EDGE, so a private near-black used anywhere else — an eye socket, a cape lining,
+  // 269 texels of the hero — never came near this measurement and shipped clean. Here we walk the
+  // whole histogram instead: any tone under `NEAR_BLACK_L` that is not within `INK_TOL` of one of
+  // `DECLARED_INKS` is a second ink layer, and `lint()` fails it by name.
+  const declaredRgb = DECLARED_INKS.map(toRgb);
+  const strayInk = [];
+  for (const [k, n] of counts) {
+    const c = k.split(',').map(Number);
+    const L = luminance(c);
+    if (L >= NEAR_BLACK_L) continue;
+    const off = Math.min(...declaredRgb.map((d) => dist(c, d)));
+    if (off <= INK_TOL) continue;
+    strayInk.push({ hex: hex(c), rgb: c, n, coverage: n / pixels, lum: +L.toFixed(3), off: +off.toFixed(1) });
+  }
+  strayInk.sort((a, b) => b.n - a.n);
   const fills = [...counts.entries()].filter(([k]) => k !== inkKey && !emissive.has(k));
   const total = fills.reduce((s, [, n]) => s + n, 0) || 1;
   const tones = fills.map(([k, n]) => {
@@ -729,7 +785,7 @@ export function analyseSheet(sheet, { skipAnims = LINT_SKIP_ANIMS } = {}) {
   const litRange = (area.length ? Math.max(...area.map((t) => sceneValue(t.lum ** gamma))) : sceneValue(maxLum ** gamma))
     - sceneValue(minLum ** gamma);
   return {
-    ink, inkHex: hex(ink), tones, area, steps: tones.length, median, minLum, maxLum,
+    ink, inkHex: hex(ink), strayInk, tones, area, steps: tones.length, median, minLum, maxLum,
     range: maxLum - minLum, readThrough, readLift: gamma, litMedian, unaidedMedian, litRange,
     peakChroma: area.length ? Math.max(...area.map((t) => t.chroma)) : 0,
     meanChroma: tones.reduce((s, t) => s + t.chroma * t.coverage, 0),
@@ -762,6 +818,11 @@ export function lint(sheet, meta = {}) {
   if (inkOff > INK_TOL) {
     v.push({ rule: 'ink', severity: 'error', value: +inkOff.toFixed(1), limit: INK_TOL,
       detail: `${who}: outlined in ${a.inkHex}, house ink is ${INK} (off by ${inkOff.toFixed(1)}, tolerance ${INK_TOL})` });
+  }
+  if (a.strayInk.length) {
+    const total = a.strayInk.reduce((s, x) => s + x.n, 0), worst = a.strayInk[0];
+    v.push({ rule: 'ink-undeclared', severity: 'error', value: a.strayInk.length, limit: 0,
+      detail: `${who}: ${total} texels painted in ${a.strayInk.length} near-black${a.strayInk.length > 1 ? 's' : ''} style.js does not declare — worst ${worst.hex} x${worst.n} (luminance ${worst.lum}, ${worst.off} from the nearest of ${DECLARED_INKS.join('/')}). This file declares EVERY near-black in the game: INK for the outer contour, INK_LIT for its lit side, INK_DEEP for a hole in a body; an internal seam is a dark step of the material's own ramp (pixelPainter.seamInk), never a private black` });
   }
   if (a.steps < RAMP_MIN_STEPS) {
     v.push({ rule: 'ramp-steps', severity: 'error', value: a.steps, limit: RAMP_MIN_STEPS,
