@@ -28,9 +28,9 @@
 //              above its own head, a long S neck and the signature — two swept horns making a
 //              lyre over the skull, with cold blue fire in the eyes and throat.
 //  demon       broad-shouldered and still: two curling RAM HORNS with daylight inside the curl and
-//              a hard ink gap where they leave the skull, wings folded down the back into two
-//              hanging blades, cloven hooves, one furnace split down the breastbone, and the
-//              signature — the ring of stolen soul-light hanging above its open palm.
+//              a hard ink gap where they leave the skull, wings FOLDED INTO TWO SPIRES that break
+//              the skyline over those horns, cloven hooves, one furnace split down the breastbone,
+//              and the signature — the ring of stolen soul-light hanging above its open palm.
 import { Palette, paint, outline, houseOutline, keyShade, makePix, setPx, getPx, shift, smearArc, mirrorLit, blit } from '../pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
@@ -110,10 +110,16 @@ export const BOSS_PALETTE = new HousePalette()
   //   · the keratin WAS '#a99a86' picked at steps 2/4/6 — chalk-white horns, which is exactly what
   //     a wig looks like at gameplay distance. It is now a black horn that never reaches past the
   //     middle of its own curve; only its top-left ridge and the tooth tips ('V') catch anything.
-  .band('ABCDOP', '#5a2842')                                  // hide: wine · wine · plum · dusty rose · ash · light ash
-  .band('GHIQV', '#4e4038', { steps: 6, pick: [0, 1, 2, 3, 4] })  // horn, hoof, tooth — dark keratin
-  .band('JKL', '#2f2038', { steps: 6, pick: [0, 1, 2] })      // wing membrane: plum-black
-  .set('M', '#ffb347').set('S', '#d8571c').set('N', '#2a0f18')  // furnace core / furnace bleed / char
+  // hide: black plum · oxblood · wine · then OFF THE PINK — the top three steps desaturate into a
+  // cold bruise-grey ash, so the lit plane reads as LIGHT LANDING ON BLACK HIDE. A `band()` off one
+  // wine base keeps drifting its highlights back toward rose (#a55d73, #b08d90), which is the exact
+  // tone the old "pink man" was made of; these six are set by hand so the shadows still gain
+  // saturation and drift violet while the lights lose ALL of it.
+  .set('A', '#2b1226').set('B', '#48203a').set('C', '#66354a')
+  .set('D', '#87626a').set('O', '#9c817c').set('P', '#bcaca1')
+  .band('GHIQV', '#3f342f', { steps: 6, pick: [0, 1, 2, 3, 4] })  // horn, hoof, tooth — dark keratin
+  .band('JKL', '#2a1c33', { steps: 6, pick: [0, 1, 2] })      // wing membrane: plum-black
+  .set('M', '#ffb347').set('S', '#d8571c').set('N', '#210d17')  // furnace core / furnace bleed / char
   // shared
   .set('E', '#1b1424').set('W', '#fff7ea').set('R', '#ff6a4a')  // eye, catch-light, red iris
   .set('F', '#fff4f0');                                        // hurt flash
@@ -909,7 +915,20 @@ export function buildDragon() {
 //  · IT READ AS A PINK MAN IN A WIG. The hide was a mid crimson ('#7c2434') on a four-step ramp,
 //    which is two steps from the warm brick it stands on; the torso came out as two or three flat
 //    rose patches. It is now SIX steps of a colder, darker wine, and the body is painted in the
-//    bottom half of them so the lit plane has somewhere to go.
+//    bottom half of them so the lit plane has somewhere to go. The PINK SURVIVED one pass of that
+//    fix, because a `band()` off a wine base keeps drifting its highlights back toward rose and
+//    `rimLight` then piped the top two of them round every part in the frame. The top three steps
+//    are now set by hand into a cold bruise-grey ash and the rim is one step of local lift on the
+//    OUTSIDE of the figure only (see `rimLight`).
+//  · IT STOOD IN A HANG-GLIDER. The wings fanned sideways from the shoulders at mid-height on
+//    every idle frame: a wide, flat, symmetrical shape, which is the least frightening thing a
+//    silhouette can be. Folded, the wrist now stands twenty pixels ABOVE the shoulder and the
+//    membrane hangs off it in a narrow tattered curtain — two black spires over the horns — and
+//    only the attack throws the fan open (see `demonWing`).
+//  · THE LIT PLANE HAD NO FORM IN IT. The top of a capsule faces the light everywhere at once, so
+//    the trapezius came back as one shoulder-wide bar of the lit tone under the jaw, and in profile
+//    the whole back was a pale slab. `castShadow` drops the head's shadow onto the chest and five
+//    gap-bitten keratin spurs give the profile back a spine to model.
 //  · THE KEY LIGHT RAN BACKWARDS. Each mass was shaded against its own centre, so the ball of the
 //    top-LEFT shoulder turned away from the light and became the darkest thing on the creature.
 //    Every form here is now biased by `gl()` — ONE plane across the whole figure, brighter up and
@@ -997,25 +1016,53 @@ function ridges(p, pts, key, every = 3) {
 }
 
 /**
- * THE KEY-LIGHT RIM. `tone()` lights each form against its own terminator, which gets the modelling
- * right and still leaves the FIGURE without a single edge that says where the light is. This lays
- * the top two steps of the hide along the outer silhouette that faces `LIT`: the brightest step on
- * the corners open both up AND left, one step of lift on the edges open one way. The two-deep test
- * is what keeps it on the outside of the creature — a one-pixel ink gap between a horn and a skull
- * is open on one side only, so it never picks up a rim and never turns into piping.
+ * THE KEY-LIGHT RIM — one step of lift, on the outside only.
+ *
+ * WHAT THIS USED TO DO, AND WHY IT MADE A TOY. It slammed the top two steps of the hide (an ash at
+ * L 0.60 and a near-white at L 0.73) onto EVERY pixel with two rows of air above or to the left of
+ * it, anywhere in the frame. On a figure assembled from fifteen gap-bitten parts that is not a rim,
+ * it is piping: every arm, every leg, every pectoral, every horn came back drawn round in pale
+ * lilac, which is what turned a black-hide demon back into a pink man in a wig no matter what the
+ * ramp underneath it said.
+ *
+ * The rule now:
+ *   · OUTSIDE ONLY. The air is flood-filled from the border, so only the figure's true silhouette
+ *     can catch light. The one-pixel ink gaps `gapBlit` bites between a horn and a skull, or an arm
+ *     and a rib, are interior air and stay black — which is what makes those forms read apart.
+ *   · ONE STEP. An edge open up OR left is lifted exactly one step of its OWN local tone, so a form
+ *     in shadow gets a dark rim and a form in the light gets a bright one. Only a true top-left
+ *     CORNER — air above and air to the left — takes the top of the ramp, and only when the tone
+ *     under it has already been lit. That is a handful of pixels per frame: the crown of a shoulder,
+ *     the brow, the top of a horn.
  * @param {Pix} p @param {string} keys the hide ramp, darkest first
  */
 function rimLight(p, keys) {
-  const idx = new Map([...keys].map((c, i) => [c.charCodeAt(0), i]));
+  const ks = [...keys], idx = new Map(ks.map((c, i) => [c.charCodeAt(0), i]));
   const snap = new Uint16Array(p.d);
-  const at = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : snap[y * p.w + x]);
-  const top = keys[keys.length - 1], second = keys[keys.length - 2];
+  // the OUTSIDE: transparent pixels reachable from the border of the cell
+  const air = new Uint8Array(p.w * p.h), st = [];
+  for (let x = 0; x < p.w; x++) st.push(x, 0, x, p.h - 1);
+  for (let y = 0; y < p.h; y++) st.push(0, y, p.w - 1, y);
+  while (st.length) {
+    const y = st.pop(), x = st.pop();
+    if (x < 0 || y < 0 || x >= p.w || y >= p.h) continue;
+    const i = y * p.w + x;
+    if (air[i] || snap[i]) continue;
+    air[i] = 1;
+    st.push(x + 1, y, x - 1, y, x, y + 1, x, y - 1);
+  }
+  const out = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 1 : air[y * p.w + x]);
   for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
     const i = idx.get(snap[y * p.w + x]);
     if (i === undefined) continue;
-    const up = !at(x, y - 1) && !at(x, y - 2), lf = !at(x - 1, y) && !at(x - 2, y);
-    if ((up && lf) || ((up || lf) && i >= 1)) setPx(p, x, y, top);
-    else if (up || lf) setPx(p, x, y, second);
+    const up = out(x, y - 1), lf = out(x - 1, y);
+    if (!up && !lf) continue;
+    // one step of lift on a shadowed edge, two where the plane is already turned into the light,
+    // and the top of the ramp on a true up-AND-left corner: a rim that follows the form instead of
+    // drawing round it.
+    const top = ks.length - 1;
+    const lift = (up && lf && i >= 1) ? top - i : i >= 3 ? 2 : 1;
+    setPx(p, x, y, ks[Math.min(top, i + lift)]);
   }
   return p;
 }
@@ -1064,30 +1111,37 @@ function demonHorn(p, x, y, dir, k = 1, arc = 6) {
  * amber studs ringed in black, which at gameplay distance read as measles.
  */
 function furnace(p, cx, cy, glow) {
-  const crack = (x0, y0, x1, y1) => {
-    const n = Math.max(2, Math.round(Math.hypot(x1 - x0, y1 - y0)));
+  const put = (x, y, k) => { if (getPx(p, x, y)) setPx(p, x, y, k); };
+  // 1. THE BURN. The hide around the split is charred back into a soft patch, so the fissure sits
+  //    in its own shadow. Without it the glow is a decal stuck on a flat chest.
+  for (let dy = -10; dy <= 12; dy++) {
+    const w = Math.round(4.8 - Math.abs(dy) * 0.30 - (dy > 4 ? (dy - 4) * 0.30 : 0));
+    for (let dx = -w; dx <= w; dx++) put(cx + dx, cy + dy, 'N');
+  }
+  // 2. THE CRACKS running off the split along the ribs: hot where they leave it, char where they die.
+  for (const [ex, ey, sy] of [[-10, -7, -5], [10, -6, -5], [-11, 2, 0], [11, 3, 0], [-9, 10, 6], [9, 11, 6]]) {
+    const n = Math.max(2, Math.round(Math.abs(ex)));
     for (let i = 0; i <= n; i++) {
-      const t = i / n, x = Math.round(lerp(x0, x1, t)), y = Math.round(lerp(y0, y1, t));
-      // a crack is hot where it is nearest the furnace and char where it has cooled — which is
-      // what makes it read as a SPLIT IN A SHELL rather than as a scratch drawn on top of one
-      if (getPx(p, x, y)) setPx(p, x, y, t < 0.42 && glow > 0.45 ? 'S' : 'N');
-    }
-  };
-  crack(cx, cy - 9, cx, cy + 9);                                  // the breastbone fissure
-  for (const [dx, dy] of [[-8, -5], [8, -5], [-9, 1], [9, 1], [-7, 7], [7, 7]]) crack(cx, cy + dy * 0.35, cx + dx, cy + dy);
-  // the cavity: one contiguous glow, hottest up-left of centre because the light plane says so
-  // the cavity is a FISSURE — widest at the sternum, ragged down both edges, one hot column at its
-  // centre. A clean ellipse of amber here reads as a lantern hung on the creature's chest.
-  for (let dy = -7; dy <= 7; dy++) {
-    const hw = 3.4 - Math.abs(dy) * 0.44 + ((dy + 9) % 3) * 0.35;
-    if (hw <= 0.4) continue;
-    for (let dx = -Math.round(hw); dx <= Math.round(hw); dx++) {
-      if (!getPx(p, cx + dx, cy + dy)) continue;
-      const t = Math.abs(dx) / hw;
-      setPx(p, cx + dx, cy + dy, t < 0.36 && glow > 0.25 ? 'M' : t < 0.78 ? 'S' : 'N');
+      const t = i / n;
+      const x = Math.round(cx + ex * t), y = Math.round(cy + lerp(sy, ey, t) + Math.sin(t * 3.2) * 1.1);
+      put(x, y, t < 0.4 && glow > 0.4 ? 'S' : 'N');
     }
   }
-  // the spill: firelight running DOWN the belly out of the open chest, dimming as it goes
+  // 3. THE SPLIT. A ragged vertical fissure — a jagged half-width per row and a wandering centre —
+  //    with one thin white-hot line inside it. A clean ellipse of amber here is a lantern hung on
+  //    the creature; a straight bar of it is a radiator grille; isolated studs were the measles.
+  const prof = [1, 1, 2, 2, 3, 2, 3, 3, 2, 3, 2, 2, 1, 1, 0];
+  const jit = [0, 0, -1, 0, 0, 1, 0, 0, -1, 0, 1, 0, 0, 0, 0];
+  for (let i = 0; i < prof.length; i++) {
+    const y = cy - 8 + i, hw = prof[i], jx = cx + jit[i];
+    for (let dx = -hw; dx <= hw; dx++) {
+      if (!getPx(p, jx + dx, y)) continue;
+      const a = Math.abs(dx);
+      const hot = a <= Math.max(0, hw - 2) && glow > 0.25;
+      setPx(p, jx + dx, y, a >= hw ? 'N' : hot ? 'M' : 'S');
+    }
+  }
+  // 4. THE SPILL: firelight running DOWN the belly out of the open chest, dimming as it goes.
   const drop = Math.round(3 + glow * 4);
   for (let y = cy + 7; y < cy + 7 + drop; y++) for (let x = cx - 2; x <= cx + 2; x++) {
     if (!getPx(p, x, y)) continue;
@@ -1098,11 +1152,13 @@ function furnace(p, cx, cy, glow) {
 
 /** The ring of stolen soul-light: a hot rim round a hole, hovering over an upturned palm. */
 function soulRing(p, cx, cy, r, phase) {
-  const ry = Math.max(2.4, r * 0.86);
+  // a WIDE, THIN annulus: the old one was 7 px across with a 2 px hole, which at gameplay distance
+  // is a solid amber dot — a bead, not a ring of stolen light.
+  const ry = Math.max(3.0, r * 0.80);
   for (let y = -Math.ceil(ry); y <= Math.ceil(ry); y++) for (let x = -Math.ceil(r); x <= Math.ceil(r); x++) {
     const q = (x * x) / (r * r) + (y * y) / (ry * ry);
     if (q > 1) continue;
-    setPx(p, Math.round(cx + x), Math.round(cy + y), q > 0.40 ? (y < 0.5 ? 'M' : 'S') : 'N');
+    setPx(p, Math.round(cx + x), Math.round(cy + y), q < 0.46 ? 'N' : q > 0.86 ? 'S' : (y < 0.5 ? 'M' : 'S'));
   }
   const sa = phase * 2.4;
   setPx(p, Math.round(cx + Math.cos(sa) * r), Math.round(cy + Math.sin(sa) * ry), 'W');
@@ -1115,17 +1171,57 @@ function soulRing(p, cx, cy, r, phase) {
  * behind, so the figure reads in front of its own wings instead of inside a pair of pale epaulets.
  */
 function demonWing(p, cx, cy, k, dir) {
+  // THE WRIST IS THE SILHOUETTE. Folded, it stands twenty pixels ABOVE the shoulder and barely
+  // outside it: two black spires that break the skyline over the demon's own horns, with the
+  // membrane hanging off them in a tattered curtain behind the arms. The old wing rooted its whole
+  // fan at the shoulder and spread it sideways at mid-height, which drew a hang-glider — a wide,
+  // flat, symmetrical shape that is the least frightening thing a silhouette can be. Opening it
+  // (k -> 1) walks the wrist out and down and swings the fan open around it.
+  // the fold does not RELAX open: `k` is cubed, so the idle and walk breaths (k 0.1-0.35) leave the
+  // wing shut and only the attack (k -> 1) throws it. A linear blend here opened the fan a third of
+  // the way on every idle frame, which is how the demon ended up standing in a hang-glider.
+  const s = k * k * k;
+  // THE ROOT TRAVELS. Folded, the fan hangs off the WRIST high above the shoulder; thrown open, the
+  // root walks back down to the shoulder so the membrane spans the whole arm. Keeping the fan on
+  // the wrist at full spread left the shoulder-to-wrist bone as a bare stick with the membrane
+  // hanging off its far end — two purple spikes out of the ribs, not a pair of wings.
+  const wx = cx + dir * lerp(6, 0, s), wy = cy - lerp(23, 0, s);
   const fingers = [
-    { a: lerp(0.80, -1.52, k), r: lerp(34, 36, k) },
-    { a: lerp(1.02, -1.00, k), r: lerp(31, 39, k) },
-    { a: lerp(1.24, -0.34, k), r: lerp(26, 34, k) },
-    { a: lerp(1.42, 0.24, k), r: lerp(19, 26, k) },
-    { a: lerp(1.57, 0.78, k), r: lerp(12, 17, k) },
+    { a: lerp(1.24, -1.10, s), r: lerp(20, 29, s) },
+    { a: lerp(1.34, -0.55, s), r: lerp(28, 31, s) },
+    { a: lerp(1.43, 0.05, s), r: lerp(33, 27, s) },
+    { a: lerp(1.51, 0.60, s), r: lerp(34, 24, s) },
+    { a: lerp(1.58, 1.05, s), r: lerp(29, 18, s) },
   ];
-  wingFan(p, cx, cy, fingers, dir, WING + 'H', { scallop: 2.4, tatter: 1.8 });
-  const sx = cx + (4 + 2.5 * (1 - k)) * dir, sy = cy - (5 + 3 * (1 - k));
-  limb(p, cx, cy, sx, sy, 2.2, 1, WING, -0.02);
-  setPx(p, Math.round(sx), Math.round(sy), 'I'); setPx(p, Math.round(sx + dir), Math.round(sy - 1), 'Q');
+  wingFan(p, wx, wy, fingers, dir, WING + 'H', { scallop: 2.2, tatter: 2.0 });
+  // the leading-edge arm running shoulder -> wrist, and the hooked claw at the crown of it
+  if (s < 0.55) limb(p, cx, cy, wx, wy, 2.6, 1.5, WING, -0.02);
+  const hx = Math.round(wx + dir), hy = Math.round(wy - 2);
+  setPx(p, hx, hy + 1, 'I'); setPx(p, hx, hy, 'Q'); setPx(p, hx + dir, hy + 1, 'H');
+}
+
+/**
+ * THE HEAD'S SHADOW, dropped onto the chest under it.
+ *
+ * `tone()` shades the torso as a capsule, and the top of a capsule faces the light everywhere at
+ * once — so the trapezius came back as one shoulder-wide bar of the lit tone running from deltoid
+ * to deltoid under the jaw. On a figure that reads as a toga. Nothing in a lit scene is brighter
+ * than the thing standing over it, so the skull and horns are given the one piece of contact
+ * lighting a figure cannot do without: an elliptical core shadow, two steps down the hide ramp with
+ * a one-step penumbra, thrown DOWN AND RIGHT of the head because the key light is up and left.
+ * @param {Pix} p @param {string} keys the hide ramp, darkest first
+ */
+function castShadow(p, cx, cy, rx, ry, keys, n = 2) {
+  const ks = [...keys], idx = new Map(ks.map((c, i) => [c.charCodeAt(0), i]));
+  for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++)
+    for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+      const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry;
+      const q = dx * dx + dy * dy;
+      if (q > 1) continue;
+      const i = idx.get(getPx(p, x, y));
+      if (i === undefined) continue;
+      setPx(p, x, y, ks[Math.max(0, i - (q > 0.55 ? n - 1 : n))]);
+    }
 }
 
 /**
@@ -1198,8 +1294,16 @@ function demonFace(p, cx, hy, glow, { half = false, dir = 1, w = 6 } = {}) {
   // even teeth at this size reads as a zip fastener; four interlocking fangs read as a mouth.
   const my = hy + 5;
   for (let x = cx - w; x <= cx + w; x++) for (let y = 0; y <= 1; y++) if (getPx(p, x, my + y)) setPx(p, x, my + y, '#');
-  for (let fx = cx - w + 1; fx <= cx + w - 1; fx += 3) if (getPx(p, fx, my)) setPx(p, fx, my, TOOTH);
-  for (let fx = cx - w + 2; fx <= cx + w - 1; fx += 3) if (getPx(p, fx, my + 1)) setPx(p, fx, my + 1, 'Q');
+  // FOUR fangs, interlocking: two corner tusks biting UP out of the lower jaw and two hanging down
+  // between them. An even comb of teeth every third pixel is a zip fastener at gameplay distance.
+  for (const fx of [cx - w + 1, cx + w - 1]) {
+    if (getPx(p, fx, my + 1)) setPx(p, fx, my + 1, TOOTH);
+    if (getPx(p, fx, my)) setPx(p, fx, my, 'Q');
+  }
+  for (const fx of [cx - Math.round(w * 0.35), cx + Math.round(w * 0.35)]) {
+    if (getPx(p, fx, my)) setPx(p, fx, my, TOOTH);
+    if (getPx(p, fx, my + 1)) setPx(p, fx, my + 1, 'Q');
+  }
 }
 
 /**
@@ -1221,19 +1325,18 @@ function demonFrame(f, o = {}) {
     demonWing(back, 45 + WX, 28 + b + WY, k, 1);
     // the torso is ONE TAPER, shoulder to waist — the old two stacked ellipses made a pear
     DL(p, 30, 26 + b, 30, 43 + b, 12.6, 6.4, SKIN, 0.02);
-    DM(p, 23, 31 + b, 6.2, 4.6, SKIN, { n: 2.4, bias: 0.05 });                    // pectoral, lit
+    DM(p, 23, 31 + b, 6.2, 4.6, SKIN, { n: 2.4, bias: -0.04 });                   // pectoral, lit
     DM(p, 37, 31 + b, 6.2, 4.6, SKIN, { n: 2.4, bias: -0.10 });                   // pectoral, shadow
     DM(p, 30, 44 + b, 6.4, 5.0, SKIN, { n: 2.6, bias: -0.08 });                   // the hard belly
     DM(p, 30, 48 + b + c, 7.6, 4.2, SKIN, { n: 2.8, bias: -0.14 });               // the pelvis
-    DM(p, 16, 27 + b, 5.6, 4.8, SKIN, { n: 2.4, bias: 0.02 });                    // deltoid, lit
+    DM(p, 16, 27 + b, 5.6, 4.8, SKIN, { n: 2.4, bias: -0.06 });                   // deltoid, lit
     DM(p, 44, 27 + b, 5.6, 4.8, SKIN, { n: 2.2, bias: -0.12 });                   // deltoid, shadow
-    furnace(p, 30, 33 + b, glow);
     // THE LEGS COME DOWN THROUGH THE PELVIS, not out from under it: drawn over it and gap-bitten,
     // so the hip joint is an ink line and the player can count two legs from across the room
     demonLeg(p, 24, 50 + b + c, -1, lLift, -0.02);
     demonLeg(p, 36, 50 + b + c, 1, rLift, -0.14);
     { const q = makePix(DE_SW, DE_SH);                                            // the loin drape
-      DC(q, [[30, 45 + b + c], [30, 52 + b + c], [30, 58 + b + c]], 4.6, 0.9, WING, -0.10);
+      DC(q, [[30, 45 + b + c], [30, 52 + b + c], [30, 57 + b + c]], 3.4, 0.9, WING, -0.22);
       gapBlit(p, q); }
     // the arms hang past the hip: nothing about this build is a man's
     { const q = makePix(DE_SW, DE_SH);
@@ -1246,15 +1349,20 @@ function demonFrame(f, o = {}) {
       gapBlit(p, q); }
     // the neck, then the head laid down with ink between it and the shoulders behind it
     DL(p, 30, 17 + b, 30, 26 + b, 3.6, 5.4, SKIN, -0.18);
+    // THE FURNACE GOES ON AFTER THE NECK. Painted before it, the neck capsule (which reaches to
+    // y+5 below its own end) covered the top six rows of the split and left a stub of glow low on
+    // the belly that read as a badge instead of a chest torn open.
+    furnace(p, 30, 35 + b, glow);
+    castShadow(p, 31, 24 + b, 11, 5.5, SKIN);                                     // the head's shadow
     { const q = makePix(DE_SW, DE_SH);
-      DM(q, 30, hy, 7.8, 7.0, SKIN, { n: 2.9, bias: -0.02 });                     // the skull
+      DM(q, 30, hy, 7.8, 7.0, SKIN, { n: 2.9, bias: -0.16 });                     // the skull
       DM(q, 30, hy + 6, 5.6, 4.0, SKIN, { n: 2.6, bias: -0.12 });                 // the jaw
-      DM(q, 30, hy - 5, 7.4, 2.0, SKIN, { n: 3.4, bias: 0.03 });                  // the brow shelf
+      DM(q, 30, hy - 5, 7.4, 2.0, SKIN, { n: 3.4, bias: -0.10 });                 // the brow shelf
       demonFace(q, 30, hy, glow, { w: 7 });
       gapBlit(p, q); }
-    demonHorn(p, 23, hy - 3, -1);
-    demonHorn(p, 37, hy - 3, 1);
-    if (glow > 0.15) soulRing(p, 49, 37 + b - reach, 2.8 + glow * 1.1, o.ring || 0);
+    demonHorn(p, 25, hy - 5, -1);
+    demonHorn(p, 35, hy - 5, 1);
+    if (glow > 0.15) soulRing(p, 49, 37 + b - reach, 4.0 + glow * 1.2, o.ring || 0);
     return deSeat(back, p, front);
   }
 
@@ -1266,32 +1374,44 @@ function demonFrame(f, o = {}) {
     demonLeg(p, 27, 50 + b + c, -1, rLift, -0.24);                                // the far leg
     DL(p, 28, 26 + b, 31, 43 + b, 10.6, 6.4, SKIN, 0.0);                          // the torso, in profile
     DM(p, 35, 31 + b, 6.0, 5.4, SKIN, { n: 2.4, bias: -0.06 });                   // the chest, forward
-    DM(p, 25, 29 + b, 5.8, 5.4, SKIN, { n: 2.4, bias: -0.06 });                   // the back
+    DM(p, 25, 29 + b, 5.8, 5.4, SKIN, { n: 2.4, bias: -0.24 });                   // the back
     DM(p, 32, 44 + b, 5.8, 4.8, SKIN, { n: 2.6, bias: -0.08 });                   // the belly
     DM(p, 30, 48 + b + c, 6.8, 4.2, SKIN, { n: 2.8, bias: -0.12 });               // the pelvis
-    furnace(p, 36, 32 + b, glow);
     demonLeg(p, 33, 50 + b + c, 1, lLift, -0.04);                                 // the near leg
     { const q = makePix(DE_SW, DE_SH);
-      DC(q, [[30, 45 + b + c], [30, 52 + b + c], [30, 58 + b + c]], 4.4, 0.9, WING, -0.12);
+      DC(q, [[30, 45 + b + c], [30, 52 + b + c], [30, 57 + b + c]], 3.2, 0.9, WING, -0.22);
       gapBlit(p, q); }
     { const q = makePix(DE_SW, DE_SH);                                            // the far arm
-      DC(q, [[27, 29 + b], [22, 40 + b], [25, 50 + b]], 3.0, 1.9, SKIN, -0.16);
+      DC(q, [[27, 29 + b], [22, 40 + b], [25, 50 + b]], 3.0, 1.9, SKIN, -0.34);
       demonHand(q, 25, 53 + b, -1);
       gapBlit(p, q); }
     DL(p, 33, 17 + b, 30, 26 + b, 3.8, 5.4, SKIN, -0.16);                         // the neck
+    furnace(p, 37, 33 + b, glow);                                                 // after the neck: see "S"; on the chest FRONT, clear of the near arm
+    castShadow(p, 32, 24 + b, 12, 5.5, SKIN);
+    // THE SPINE, IN PROFILE. The back is the plane that faces the key light, so in this facing the
+    // whole shoulder came back as one shapeless slab of the lit tone — a lit plane with no form in
+    // it. Five keratin spurs, each gap-bitten so the ink pass separates it from the next, give the
+    // back a contour to model and a hunched, ridged read at gameplay distance.
+    { const q = makePix(DE_SW, DE_SH);
+      for (let i = 0; i < 5; i++) DM(q, 18.5 + Math.abs(i - 2) * 0.9, 24 + b + i * 4.2, 2.4, 1.7, KERA, { n: 2.2, bias: -0.30 });
+      gapBlit(p, q); }
     demonHorn(p, 31, hy - 4, -1, 0.6, 5);                                         // the far horn
     { const q = makePix(DE_SW, DE_SH);
-      DM(q, 33, hy, 7.0, 6.8, SKIN, { n: 2.9, bias: -0.02 });                     // the skull
+      DM(q, 33, hy, 7.0, 6.8, SKIN, { n: 2.9, bias: -0.16 });                     // the skull
       DM(q, 39, hy + 3, 4.8, 3.4, SKIN, { n: 2.6, bias: -0.10 });                 // the muzzle, forward
-      DM(q, 33, hy - 5, 6.6, 2.0, SKIN, { n: 3.4, bias: 0.03 });                  // the brow shelf
+      DM(q, 33, hy - 5, 6.6, 2.0, SKIN, { n: 3.4, bias: -0.10 });                 // the brow shelf
       demonFace(q, 36, hy, glow, { half: true, dir: 1, w: 4 });
       gapBlit(p, q); }
     demonHorn(p, 33, hy - 3, -1, 1, 5);                                           // the near horn
     { const q = makePix(DE_SW, DE_SH);                                            // the near arm
-      DC(q, [[35, 29 + b], [41, 38 + b - reach], [37, 45 + b - reach]], 3.2, 2.0, SKIN, -0.02);
-      demonHand(q, 37, 47 + b - reach, 1, true);
+      // rooted INSIDE the shoulder: gapBlit bites a pixel of air all round whatever it lays down,
+      // so an arm started at the edge of the torso comes back floating clear of it. Started under
+      // the deltoid, the same gap reads as the armpit crease. Dark, because it is the near arm and
+      // the light is behind the demon's back on this facing.
+      DC(q, [[35, 28 + b], [45, 37 + b - reach], [43, 45 + b - reach]], 3.2, 2.0, SKIN, -0.26);
+      demonHand(q, 43, 47 + b - reach, 1, true);
       gapBlit(p, q); }
-    if (glow > 0.15) soulRing(p, 40, 37 + b - reach, 2.8 + glow * 1.0, o.ring || 0);
+    if (glow > 0.15) soulRing(p, 47, 37 + b - reach, 3.9 + glow * 1.2, o.ring || 0);
     return deSeat(back, p, front);
   }
 
@@ -1314,7 +1434,7 @@ function demonFrame(f, o = {}) {
   demonLeg(p, 24, 50 + b + c, -1, lLift, -0.10);
   demonLeg(p, 36, 50 + b + c, 1, rLift, -0.20);
   { const q = makePix(DE_SW, DE_SH);
-    DC(q, [[30, 45 + b + c], [30, 52 + b + c], [30, 58 + b + c]], 4.6, 0.9, WING, -0.14);
+    DC(q, [[30, 45 + b + c], [30, 52 + b + c], [30, 57 + b + c]], 3.4, 0.9, WING, -0.24);
     gapBlit(p, q); }
   { const q = makePix(DE_SW, DE_SH);
     DC(q, [[16, 29 + b], [10, 40 + b], [13, 50 + b]], 3.3, 2.1, SKIN, -0.08);
@@ -1325,11 +1445,12 @@ function demonFrame(f, o = {}) {
     demonHand(q, 47, 53 + b, 1);
     gapBlit(p, q); }
   DL(p, 30, 17 + b, 30, 26 + b, 3.8, 5.4, SKIN, -0.20);
+  castShadow(p, 31, 24 + b, 11, 5.5, SKIN);
   { const q = makePix(DE_SW, DE_SH);
     DM(q, 30, hy + 1, 7.6, 6.8, SKIN, { n: 2.9, bias: -0.10 });
     gapBlit(p, q); }
-  demonHorn(p, 24, hy - 2, -1);
-  demonHorn(p, 36, hy - 2, 1);
+  demonHorn(p, 26, hy - 4, -1);
+  demonHorn(p, 34, hy - 4, 1);
   return deSeat(back, p, front);
 }
 

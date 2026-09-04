@@ -458,18 +458,71 @@ export function buildShadowDragon() {
 //   LEGS  four of them, each with a shoulder/haunch mass, a shank angled out to the elbow or hock,
 //         a vertical cannon and `talons` planted on the floor — and the near pair is gap-bitten off
 //         the body so the join is an ink line rather than a merge.
-//   WING  a furled wing lying along the spine with its wrist spur standing above the shoulder: the
+//   WING  a folded wing on the FLANK with its wrist knuckle standing clear above the spine: the
 //         wing LINE a drake needs to stop reading as a lizard, without the span that would make it
-//         another wyvern.
+//         another wyvern. (Its first pass was a five-finger `wingFan` at radius 5-14 sitting on the
+//         back, which at that size resolves into three ragged spurs — and on the head-on and back
+//         facings the pair of them read as two extra little HEADS growing out of the shoulders.)
+//
+// THE SECOND PASS, once it had a head and legs and still read as a brown farm animal:
+//   VALUE   a barrel twenty texels across presents a long shallow arc to the key light, so `tone()`
+//           quantised five or six pixels' depth of it into the top hide step and the drake wore a
+//           cream saddle that outshone its own skull. `capRim` puts the top of the ramp back on the
+//           rim where it belongs, and the belly and jaw plates — undersides, all of them — were
+//           moved off the top of THEIR ramp and onto a darker ochre.
+//   VEINS   the molten seams ran ALONG the flank: three horizontal bars strapped round a barrel,
+//           i.e. a harness, and a 1-px diagonal seam broke into the dotted line this creature was
+//           named for. They now fall ACROSS the ribs the way split crust actually opens, and
+//           `veins()` fills the elbow of every diagonal step so a seam is 4-connected.
+//   HORNS   painted out of the polished-bone ramp and swept back flat, one horn read as a pale
+//           hadrosaur crest and a pair of them, head-on, read as rabbit ears. They are dark keratin
+//           now, ringed, and head-on they are drawn FORESHORTENED — thick splayed nubs, not the
+//           full blade stood on end.
+//   TEETH   a fang every second pixel along the jaw is a zip fastener: three, interlocking.
+//   FEET    `talons()` puts two pixels of bone on the floor per toe, which under a creature this
+//           wide is a row of six white blocks; `fdFoot` keeps the toes hide-coloured and lights
+//           one claw pixel each.
 const FD_SW = 78, FD_SH = 74;
 const FD_DX = 5, FD_DY = 3, FD_W = FD_SW + 10, FD_H = FD_SH + 5;
 const FD_PIV = { x: 40 + FD_DX, y: 74 + FD_DY };
 const FD_SOLE = 72;                                  // the contact row: fills stop here
+/**
+ * PULL THE LIT PLANE BACK ONTO THE RIM.
+ *
+ * A barrel twenty texels across presents a long shallow arc to the key light, so `tone()` quantises
+ * five or six pixels' DEPTH of that arc into the top step of the hide — and the drake comes back
+ * wearing a cream saddle over its shoulders that outshines its own head. Value belongs where the
+ * form turns: the top step is allowed within one pixel of air, the step below it within three, and
+ * anything further inside the silhouette drops to the body tone. The terminator and the shadow side
+ * are untouched, so the form still turns; what goes is the flat blob of highlight in the middle.
+ * @param {Pix} p @param {string} keys the material ramp, darkest first
+ */
+function capRim(p, keys) {
+  const ks = [...keys];
+  for (const [i, keep] of [[ks.length - 1, 1], [ks.length - 2, 3]]) {
+    const step = ks[i].charCodeAt(0), down = ks[i - 1];
+    const snap = new Uint16Array(p.d);
+    const solid = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : snap[y * p.w + x]);
+    for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+      if (snap[y * p.w + x] !== step) continue;
+      let near = false;
+      for (let dy = -keep; dy <= keep && !near; dy++) for (let dx = -keep; dx <= keep; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) > keep) continue;
+        if (!solid(x + dx, y + dy)) { near = true; break; }
+      }
+      if (!near) setPx(p, x, y, down);
+    }
+  }
+  return p;
+}
+
 /** Seat the pose, plus a cell-space layer for the breath (which reaches past the body's scratch). */
 function fdSeat(body, front) {
   const cell = makePix(FD_W, FD_H);
   blit(cell, body, FD_DX, FD_DY);
   if (front) blit(cell, front, 0, 0);
+  capRim(cell, FD_HIDE);
+  capRim(cell, FD_PLATE);
   return ink(cell);
 }
 const FD = drakePalette()
@@ -477,11 +530,16 @@ const FD = drakePalette()
   // at gameplay distance a three-tile creature vanished into the flagstones. This is cooler and
   // darker, and it makes the veins in it the only warm thing on the animal.
   .band('123456', '#4a332f', HUE)   // cooled basalt hide
-  .band('qrstu', '#8a6440', HUE)    // hot ochre belly and jaw plate
+  .band('qrstu', '#66452c', HUE)    // dark ochre belly and jaw plate: the fire under it is what glows, not the plate
   .band('vwxyz', '#9b9082', BONE)   // tooth, claw, horn
+  .band('ABCDG', '#3d3243', { satShift: 0.02 })   // the folded wing: cold slate, darker than the hide
+  .band('HIJKL', '#4a3f36', BONE)   // HORN — dark keratin. 'vwxyz' is polished bone, and a horn
+                                    // painted out of it swept back over the neck like a pale
+                                    // hadrosaur crest: the brightest shape on a creature whose
+                                    // brightest thing is supposed to be the fire inside it.
   .set('k', '#b8401a').set('l', '#ff8f30').set('m', '#ffe6a4')  // vein core / vein / white-hot
-  .set('E', '#1c1420');
-const FD_HIDE = '123456', FD_PLATE = 'qrstu', FD_HORN = 'vwxy';
+  .set('E', '#150e18');   // eye socket, nostril, mouth hollow — the one tone below the whole hide
+const FD_HIDE = '123456', FD_PLATE = 'qrstu', FD_HORN = 'HIJK', FD_MEM = 'ABC';
 /** Cooled basalt: dark enough that the molten veins in it are the brightest thing on the creature. */
 const FD_TB = -0.34;
 
@@ -511,12 +569,16 @@ function fdGap(p, q, r = 1) {
 
 /** A molten vein: a broken seam that brightens where the hide has split widest. */
 function veins(p, pts, heat) {
-  let n0 = 0;
+  let n0 = 0, lx = -9, ly = -9;
   for (let i = 0; i + 1 < pts.length; i++) {
     const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
     const n = Math.max(2, Math.round(Math.hypot(bx - ax, by - ay)));
     for (let s = 0; s <= n; s++, n0++) {
       const t = s / n, x = Math.round(lerp(ax, bx, t)), y = Math.round(lerp(ay, by, t));
+      // a 1-px DIAGONAL run touches only at its corners, which at gameplay distance is exactly the
+      // dotted seam this drake was named after: fill the elbow so the seam is 4-connected
+      if (s > 0 && x !== lx && y !== ly && getPx(p, lx, y)) setPx(p, lx, y, 'l');
+      lx = x; ly = y;
       if (!getPx(p, x, y)) continue;
       // CONTINUOUS, and lipped: the seam itself never breaks, a char lip runs under it and the
       // hide above it is pulled back to its darkest step. A vein drawn as alternating hot and dark
@@ -551,6 +613,23 @@ function gout(p, x, y, dx, dy, len) {
 }
 
 /**
+ * THE DRAKE'S FOOT. `talons()` puts two pixels of bone on the floor per toe, which on a creature
+ * this wide came back as a row of six white blocks under each leg — a zip fastener lying on the
+ * flagstones. Here the toes are hide and only the leading pixel of each claw catches light.
+ */
+function fdFoot(p, cx, y, dir) {
+  const c = Math.round(cx);
+  for (let i = -3; i <= 4; i++) setPx(p, c + i * dir, y - 3, '2');          // the arch
+  for (const off of [-3, 0, 3]) {
+    const tx = c + off * dir;
+    for (let r = 2; r >= 1; r--) { setPx(p, tx, y - r, '3'); setPx(p, tx + dir, y - r, '2'); }
+    setPx(p, tx, y, '2'); setPx(p, tx + dir, y, 'w');                       // one lit claw each
+  }
+  setPx(p, c - 5 * dir, y - 2, '2'); setPx(p, c - 5 * dir, y - 1, '2'); setPx(p, c - 5 * dir, y, 'w');
+  return p;
+}
+
+/**
  * ONE LEG, in four pieces and drawn into its own scratch so the caller can bite an ink gap between
  * it and the barrel it hangs off. `dir` points the knee/hock away from the body; `sweep` is how far
  * forward or back the foot is planted.
@@ -558,10 +637,16 @@ function gout(p, x, y, dx, dy, len) {
 function fdLeg(p, hx, hy, dir, sweep, lift, bias, gap = true) {
   const q = gap ? makePix(p.w, p.h) : p;
   const sole = FD_SOLE - lift;
-  FM(q, hx, hy, 5.2, 6.4, FD_HIDE, { n: 2.5, bias: bias - 0.16 });                    // shoulder / haunch
-  FC(q, [[hx, hy + 3], [hx + dir * 3.4, hy + 8], [hx + dir * 2 + sweep, hy + 13]], 4.0, 3.0, FD_HIDE, bias - 0.06);
-  FL(q, hx + dir * 2 + sweep, hy + 12, hx + dir * 1.4 + sweep, sole - 4, 3.0, 2.5, FD_HIDE, bias - 0.12);
-  talons(q, hx + dir * 1.4 + sweep, sole, dir >= 0 ? 1 : -1, 'x', '2');
+  FM(q, hx, hy, 5.2, 6.4, FD_HIDE, { n: 2.5, bias: bias - 0.30 });                    // shoulder / haunch
+  FC(q, [[hx, hy + 3], [hx + dir * 3.4, hy + 8], [hx + dir * 2 + sweep, hy + 13]], 3.8, 2.6, FD_HIDE, bias - 0.22);
+  FL(q, hx + dir * 2 + sweep, hy + 12, hx + dir * 1.4 + sweep, sole - 4, 2.6, 2.2, FD_HIDE, bias - 0.30);
+  // THE HOCK CREASE: one dark row where the shank meets the cannon. Without it the two capsules
+  // fuse into a single rounded slab and the leg has no joint anywhere along its length.
+  for (let x = -4; x <= 4; x++) {
+    const px = Math.round(hx + dir * 2 + sweep) + x, py = Math.round(hy + 12);
+    if (getPx(q, px, py)) setPx(q, px, py, x < -1 ? '2' : '1');
+  }
+  fdFoot(q, hx + dir * 1.4 + sweep, sole, dir >= 0 ? 1 : -1);
   return gap ? fdGap(p, q) : p;
 }
 
@@ -572,41 +657,127 @@ function fdLeg(p, hx, hy, dir, sweep, lift, bias, gap = true) {
  */
 function fdHead(p, hx, hy, dir, heat, both = false) {
   const q = makePix(p.w, p.h);
-  FM(q, hx, hy, 7.4, 5.0, FD_HIDE, { n: 2.7 });                                       // the cranium
-  FL(q, hx + dir * 3, hy + 1, hx + dir * 10, hy + 2, 4.4, 2.8, FD_HIDE, -0.02);       // the muzzle
+  FM(q, hx, hy, 7.4, 5.0, FD_HIDE, { n: 2.7, bias: -0.12 });                          // the cranium
+  FL(q, hx + dir * 3, hy + 1, hx + dir * 9, hy + 2, 4.4, 2.5, FD_HIDE, -0.22);        // the muzzle
   FM(q, hx - dir * 1, hy - 4, 6.2, 1.8, FD_HIDE, { n: 3.2, bias: 0.0 });              // the brow ridge
-  FL(q, hx + dir * 2, hy + 5, hx + dir * 9, hy + 5, 3.2, 2.0, FD_PLATE, -0.08);       // the jaw, slung under
-  for (let x = 0; x <= 11; x++) {                                                     // THE MOUTH LINE
+  FL(q, hx + dir * 1, hy + 5, hx + dir * 9, hy + 4, 2.8, 1.6, FD_PLATE, -0.14);       // the jaw, slung under
+  for (let x = 1; x <= 9; x++) {                                                      // THE MOUTH LINE
     const mx = hx + dir * x, my = hy + 3;
     if (getPx(q, mx, my)) setPx(q, mx, my, '#');
   }
-  fangs(q, Math.min(hx + dir * 2, hx + dir * 9), Math.max(hx + dir * 2, hx + dir * 9), hy + 2, 'y');
-  fangs(q, Math.min(hx + dir * 3, hx + dir * 8), Math.max(hx + dir * 3, hx + dir * 8), hy + 4, 'x');
-  C(q, [[hx - dir * 4, hy - 3], [hx - dir * 9, hy - 7], [hx - dir * 14, hy - 9]], 2.2, 0.5, FD_HORN, TB - 0.10);
-  if (both) C(q, [[hx + dir * 4, hy - 3], [hx + dir * 9, hy - 7], [hx + dir * 14, hy - 9]], 2.2, 0.5, FD_HORN, TB - 0.22);
+  // THREE fangs, interlocking, not a comb of them every second pixel: at this scale an even row
+  // reads as a zip fastener sewn along the jaw.
+  for (const t of [2, 5, 8]) if (getPx(q, hx + dir * t, hy + 2)) setPx(q, hx + dir * t, hy + 2, 'y');
+  for (const t of [3, 6]) if (getPx(q, hx + dir * t, hy + 4)) setPx(q, hx + dir * t, hy + 4, 'x');
+  // A PAIR of short thick horns off the crown, swept back over the neck — the near one over the
+  // far one, so a profile still reads two. A single long blade here is a duck-billed crest.
+  C(q, [[hx - dir * 5, hy - 4], [hx - dir * 8, hy - 9], [hx - dir * 10, hy - 13]], 1.6, 0.5, FD_HORN, TB - 0.46);
+  // the NEAR horn is bitten in over the far one, so the ink pass lays a line between the two and a
+  // profile still reads a pair instead of one dark clump on the crown
+  { const h = makePix(q.w, q.h);
+    C(h, [[hx - dir * 1, hy - 5], [hx - dir * 3, hy - 10], [hx - dir * 4, hy - 15]], 2.2, 0.6, FD_HORN, TB - 0.18);
+    fdGap(q, h); }
+  if (both) C(q, [[hx + dir * 3, hy - 5], [hx + dir * 6, hy - 10], [hx + dir * 8, hy - 14]], 2.2, 0.6, FD_HORN, TB - 0.46);
   setPx(q, hx + dir * 9, hy + 1, 'E');                                                // the nostril
-  setPx(q, hx + dir * 2, hy - 1, 'E'); setPx(q, hx + dir * 3, hy - 1, 'E');            // the eye socket
-  setPx(q, hx + dir * 2, hy, heat > 0.4 ? 'm' : 'l'); setPx(q, hx + dir * 3, hy, 'l');
-  underLight(q, Math.min(hx, hx + dir * 10), Math.max(hx, hx + dir * 10), hy + 6, heat > 0.6 ? 'l' : 'k');
+  // the eye: a SLIT under the brow, not a lit panel. Four dark pixels and two of ember.
+  for (let x = 1; x <= 3; x++) for (let y = -1; y <= 0; y++) if (getPx(q, hx + dir * x, hy + y)) setPx(q, hx + dir * x, hy + y, 'E');
+  setPx(q, hx + dir * 2, hy, heat > 0.4 ? 'm' : 'l');
+  if (heat > 0.6) underLight(q, Math.min(hx + dir * 2, hx + dir * 9), Math.max(hx + dir * 2, hx + dir * 9), hy + 6, 'k');
   return fdGap(p, q);
 }
 
 /**
- * A FURLED WING lying along the spine — the wing LINE that stops a drake reading as a lizard,
- * without the span that would make it a second wyvern. `dir` points along the animal's back.
+ * THE FOLDED WING, ON THE FLANK — the wing LINE a drake needs so it does not read as a lizard,
+ * without the span that would make it a second wyvern.
+ *
+ * WHAT THIS REPLACES. The old furled wing was a five-finger `wingFan` at radius 5-14 sitting on the
+ * spine: at that size the fan resolves into three or four ragged spurs, and on the head-on and
+ * back facings the pair of them read as two extra little HEADS poking out of the shoulders. This
+ * draws the thing a folded wing actually is — a wrist knuckle standing above the shoulder and a
+ * tapered leather blade folded back down the ribs from it, with the finger bones showing through —
+ * in the one colour on the animal that is neither basalt nor fire, so it separates by hue as well
+ * as by value.
+ * @param {Pix} p @param {number} sx @param {number} sy the shoulder
+ * @param {number} dir +1 = the animal faces screen right, so the wing folds back to the left
  */
-function fdWing(p, cx, cy, dir, k = 0.12) {
-  const fingers = [
-    { a: lerp(-0.10, -1.30, k), r: lerp(14, 27, k) },
-    { a: lerp(0.14, -0.80, k), r: lerp(13, 29, k) },
-    { a: lerp(0.40, -0.24, k), r: lerp(11, 25, k) },
-    { a: lerp(0.68, 0.32, k), r: lerp(8, 18, k) },
-    { a: lerp(0.96, 0.84, k), r: lerp(5, 11, k) },
-  ];
-  wingFan(p, cx, cy, fingers, dir, 'qrs' + '2', { scallop: 2.4, tatter: 1.6 });
-  const sx = cx + (3 + 2 * (1 - k)) * dir, sy = cy - (3 + 2 * (1 - k));
-  LB(p, cx, cy, sx, sy, 2.0, 1.0, FD_PLATE, -0.06);
-  setPx(p, Math.round(sx), Math.round(sy), 'x'); setPx(p, Math.round(sx + dir), Math.round(sy - 1), 'w');
+function fdWingSide(p, sx, sy, dir) {
+  const q = makePix(p.w, p.h);
+  // the knuckle stands ABOVE the spine: a folded wing that never breaks the back's silhouette is
+  // just a dark patch on the ribs, and the whole point of it is the wing LINE
+  const wx = sx - dir * 4, wy = sy - 13;
+  FC(q, [[wx, wy + 1], [wx - dir * 7, wy + 7], [wx - dir * 15, wy + 15]], 4.2, 1.1, FD_MEM, -0.36);
+  FL(q, sx, sy, wx, wy + 1, 2.8, 1.9, FD_MEM, -0.42);
+  // one pixel of light down the leading edge, so the fold reads as leather and not as shadow
+  for (let i = 0; i <= 14; i++) {
+    const x = Math.round(wx - dir * i), y = Math.round(wy + 1 + i * 0.55);
+    if ('AB'.includes(String.fromCharCode(getPx(q, x, y - 1)))) setPx(q, x, y - 1, 'C');
+  }
+  // the finger bones lying across the fold, drawn only where the membrane already is
+  for (let i = 1; i <= 3; i++) {
+    const t = i / 4, ex = wx - dir * 15 * t, ey = wy + 15 * t;
+    const n = Math.max(2, Math.round(Math.hypot(ex - wx, ey - wy)));
+    for (let j = 0; j <= n; j++) {
+      const x = Math.round(lerp(wx, ex, j / n)), y = Math.round(lerp(wy, ey, j / n));
+      if ('AB'.includes(String.fromCharCode(getPx(q, x, y)))) setPx(q, x, y, 'C');
+    }
+  }
+  setPx(q, Math.round(wx + dir), Math.round(wy - 2), 'x');                // the wrist claw
+  setPx(q, Math.round(wx + dir), Math.round(wy - 1), 'w');
+  return fdGap(p, q);
+}
+
+/**
+ * The same wing seen from the front or the back: a short leather blade standing up and out off the
+ * shoulder with the wrist claw at its crown — enough to break the shoulder line, never enough to
+ * be mistaken for a span.
+ */
+function fdWingBack(p, cx, cy, dir) {
+  const q = makePix(p.w, p.h);
+  const wx = cx + dir * 5, wy = cy - 9;
+  FC(q, [[cx, cy + 3], [cx + dir * 3, cy - 3], [wx, wy]], 3.2, 1.3, FD_MEM, -0.42);
+  setPx(q, Math.round(wx + dir), Math.round(wy), 'x');
+  setPx(q, Math.round(wx), Math.round(wy - 1), 'w');
+  return fdGap(p, q);
+}
+
+/**
+ * THE SKULL, HEAD-ON. The profile head (`fdHead`) drawn straight at the camera gives a muzzle
+ * pointing off to one side and one horn where there should be two — which is how the front facing
+ * ended up with a pair of swept horns sitting either side of the mouth like a handlebar moustache.
+ * This is its own drawing: a broad brow wider than the cranium, the snout coming AT the viewer, a
+ * jaw slung under an ink mouth line with three interlocking fangs, two ember eyes in dark sockets,
+ * and both horns leaving the CROWN and sweeping back and out.
+ */
+function fdHeadFront(p, hx, hy, heat) {
+  const q = makePix(p.w, p.h);
+  FM(q, hx, hy, 7.8, 4.8, FD_HIDE, { n: 2.7, bias: -0.10 });                          // the cranium
+  FM(q, hx, hy - 3, 9.0, 2.4, FD_HIDE, { n: 3.4, bias: -0.06 });                      // the brow shelf
+  FM(q, hx, hy + 5, 5.4, 3.4, FD_HIDE, { n: 2.6, bias: -0.14 });                      // the snout
+  FM(q, hx, hy + 8, 5.0, 2.0, FD_PLATE, { n: 3.0, bias: -0.40 });                     // the jaw
+  for (let x = hx - 6; x <= hx + 6; x++) for (let y = 6; y <= 7; y++) {                // THE MOUTH LINE
+    if (getPx(q, x, hy + y)) setPx(q, x, hy + y, '#');
+  }
+  for (const fx of [hx - 5, hx, hx + 5]) if (getPx(q, fx, hy + 6)) setPx(q, fx, hy + 6, 'y');
+  for (const fx of [hx - 3, hx + 3]) if (getPx(q, fx, hy + 7)) setPx(q, fx, hy + 7, 'x');
+  for (const ex of [hx - 5, hx + 3]) {                                                 // the eye pits
+    for (let x = 0; x <= 2; x++) for (let y = -1; y <= 1; y++) if (getPx(q, ex + x, hy + y)) setPx(q, ex + x, hy + y, 'E');
+    for (let x = 0; x <= 1; x++) if (getPx(q, ex + x, hy)) setPx(q, ex + x, hy, heat > 0.4 ? 'm' : 'l');
+  }
+  setPx(q, hx - 2, hy + 4, 'E'); setPx(q, hx + 2, hy + 4, 'E');                         // the nostrils
+  for (let x = hx - 7; x <= hx + 7; x++) if (getPx(q, x, hy - 2)) setPx(q, x, hy - 2, '1');  // under the brow
+  // HEAD-ON, A BACK-SWEPT HORN IS A STUB. Drawn at its true length it stands straight up off the
+  // skull as a long tapering blade — which, in a pair, either side of a rounded cranium, is a
+  // rabbit. Foreshortened it is what it should be: a thick splayed nub at each top corner.
+  for (const d of [-1, 1]) {
+    C(q, [[hx + d * 4, hy - 3], [hx + d * 9, hy - 5], [hx + d * 14, hy - 7]], 2.8, 0.7, FD_HORN, TB - (d < 0 ? 0.22 : 0.42));
+    // growth rings: three dark bands across the horn. Without them a tapered cone at this size is
+    // an ear, whatever angle it leaves the skull at.
+    for (const t of [4, 7, 10]) for (let k = -3; k <= 3; k++) {
+      const x = Math.round(hx + d * (4 + t)), y = Math.round(hy - 3 - t * 0.28) + k;
+      if ('IJK'.includes(String.fromCharCode(getPx(q, x, y)))) setPx(q, x, y, 'H');
+    }
+  }
+  return fdGap(p, q);
 }
 
 /**
@@ -628,23 +799,28 @@ function fdFrame(f, o = {}) {
     fdLeg(p, 30, 50 + b, -1, -2, Math.max(0, g) * 2, -0.24, false);                    // far hind
     fdLeg(p, 52, 50 + b, 1, 1, Math.max(0, -g) * 2, -0.22, false);                     // far fore
     // the barrel: deep, slung low, deeper at the chest than at the hip
-    FM(p, 40, bodyY, 20.0, 10.4, FD_HIDE, { n: 2.7 });
-    FM(p, 50, bodyY + 1, 12.0, 9.4, FD_HIDE, { n: 2.6, bias: -0.02 });                 // the chest
-    FM(p, 42, bodyY + 8, 15.0, 4.4, FD_PLATE, { n: 2.9, bias: -0.08 });                // the belly plates
-    for (let x = 28; x < 58; x += 3) setPx(p, x, bodyY + 11, 'r');
-    fdWing(p, 40, bodyY - 7, -1, o.rear ? 0.5 : 0.12);
-    crest(p, [[22, bodyY - 6], [32, bodyY - 9], [44, bodyY - 10], [54, bodyY - 8]], 4, FD_HIDE, { tip: 'l' });
+    FM(p, 40, bodyY, 20.0, 10.4, FD_HIDE, { n: 2.7, bias: -0.18 });
+    FM(p, 50, bodyY + 1, 12.0, 9.4, FD_HIDE, { n: 2.6, bias: -0.14 });                 // the chest
+    // the belly plates sit in the animal's OWN shadow — an underside lit from the top left is the
+    // darkest plane on it, and this band came back the palest thing in the frame
+    FM(p, 42, bodyY + 8, 15.0, 4.4, FD_PLATE, { n: 2.9, bias: -0.46 });                // the belly plates
+    crest(p, [[22, bodyY - 6], [32, bodyY - 9], [44, bodyY - 10], [54, bodyY - 8]], 5, '1223', { tip: 'v' });
+    fdWingSide(p, 50, bodyY - 4, 1);
     // THE NECK: short, thick, and it RISES — this is where the drake's height comes from
     FC(p, [[53, bodyY - 6], [60, 32 + b - rear], [64, 27 + b - rear * 1.4]], 8.4, 6.2, FD_HIDE, -0.04);
     fdHead(p, 66, 21 + b - rear * 1.6, 1, heat);
     // THE VEINS GO ON THE BODY, BEFORE THE NEAR LEGS. Painted afterwards they run straight across
     // the leg in front of it, and a molten seam crossing a limb reads as a harness strap.
-    veins(p, [[24, bodyY - 4], [34, bodyY - 6], [46, bodyY - 5], [54, bodyY - 2]], heat);
-    veins(p, [[30, bodyY + 3], [38, bodyY + 4], [46, bodyY + 2]], heat * 0.8);
+    // THE VEINS RUN WITH THE RIBS, DOWN. Drawn along the flank they came back as three horizontal
+    // bars strapped round the barrel — a harness, or the "orange dotted seam" this drake is named
+    // for. Split crust opens ACROSS the direction the hide is stretched, so the seams fall.
+    veins(p, [[33, bodyY - 9], [32, bodyY - 2], [34, bodyY + 5]], heat);
+    veins(p, [[43, bodyY - 10], [42, bodyY - 3], [44, bodyY + 4]], heat * 0.85);
+    veins(p, [[25, bodyY - 6], [24, bodyY + 1]], heat * 0.7);
     veins(p, [[58, 32 + b - rear], [63, 26 + b - rear * 1.3]], heat);
     fdLeg(p, 34, 50 + b, -1, 2, Math.max(0, -g) * 2, -0.04);                           // near hind
     fdLeg(p, 55, 51 + b, 1, -1, Math.max(0, g) * 2, 0.0);                              // near fore
-    underLight(p, 26, 58, bodyY + 11, heat > 0.6 ? 'l' : 'k');
+    underLight(p, 32, 52, bodyY + 11, 'k');
     if (fx) gout(fx, 76 + FD_DX, 22 + b - rear * 1.6 + FD_DY, 1, 0, o.breath);
     return fdSeat(p, fx);
   }
@@ -656,12 +832,12 @@ function fdFrame(f, o = {}) {
     FC(p, [[34, bodyY], [24 + sw * 0.4, bodyY - 5], [13 + sw, bodyY - 8], [5 + sw * 1.4, bodyY - 3]], 5.6, 1.4, FD_HIDE, -0.18);
     fdLeg(p, 22, 48 + b, -1, -1, Math.max(0, g) * 2, -0.20, false);                    // far hind
     fdLeg(p, 58, 48 + b, 1, 1, Math.max(0, -g) * 2, -0.24, false);                     // far hind
-    FM(p, 40, bodyY, 19.0, 9.6, FD_HIDE, { n: 2.7, bias: -0.04 });                     // the barrel behind
-    crest(p, [[28, bodyY - 7], [40, bodyY - 9], [52, bodyY - 7]], 3, FD_HIDE, { tip: 'l' });
-    fdWing(p, 26, bodyY - 6, -1, 0.12);
-    fdWing(p, 54, bodyY - 6, 1, 0.12);
-    FM(p, 40, 40 + b, 13.4, 8.6, FD_HIDE, { n: 2.6 });                                 // the chest
-    FM(p, 40, 45 + b, 10.0, 4.4, FD_PLATE, { n: 2.9, bias: -0.08 });                   // the breast plates
+    FM(p, 40, bodyY, 19.0, 9.6, FD_HIDE, { n: 2.7, bias: -0.18 });                     // the barrel behind
+    crest(p, [[28, bodyY - 7], [40, bodyY - 9], [52, bodyY - 7]], 4, '1223', { tip: 'v' });
+    fdWingBack(p, 26, bodyY - 6, -1);
+    fdWingBack(p, 54, bodyY - 6, 1);
+    FM(p, 40, 40 + b, 13.4, 8.6, FD_HIDE, { n: 2.6, bias: -0.12 });                    // the chest
+    FM(p, 40, 45 + b, 10.0, 4.4, FD_PLATE, { n: 2.9, bias: -0.42 });                   // the breast plates
     // head-on the veins run DOWN the chest, not across it: three parallel bars stacked on a
     // barrel read as a radiator grille, which is how the old drake got its "orange seam" — and
     // they go on before the near legs, so no seam ever crosses a limb like a harness strap
@@ -671,9 +847,8 @@ function fdFrame(f, o = {}) {
     fdLeg(p, 28, 44 + b, -1, -2, Math.max(0, -g) * 2, -0.02);                          // near fore
     fdLeg(p, 52, 44 + b, 1, 2, Math.max(0, g) * 2, -0.10);                             // near fore
     FC(p, [[40, 38 + b], [40, 33 + b - rear], [40, 29 + b - rear]], 7.6, 6.2, FD_HIDE, -0.02);
-    fdHead(p, 40, 23 + b - rear, 1, heat, true);
-    setPx(p, 36, 22 + b - rear, 'E'); setPx(p, 36, 23 + b - rear, heat > 0.4 ? 'm' : 'l');
-    underLight(p, 30, 50, 49 + b, heat > 0.6 ? 'l' : 'k');
+    fdHeadFront(p, 40, 23 + b - rear, heat);
+
     if (fx) gout(fx, 40 + FD_DX, 30 + b - rear + FD_DY, 0, 1, o.breath);
     return fdSeat(p, fx);
   }
@@ -686,15 +861,15 @@ function fdFrame(f, o = {}) {
   fdLeg(p, 58, 46 + b, 1, 1, Math.max(0, -g) * 2, -0.22, false);
   fdLeg(p, 26, 42 + b, -1, -2, Math.max(0, -g) * 2, -0.06);
   fdLeg(p, 54, 42 + b, 1, 2, Math.max(0, g) * 2, -0.12);
-  FM(p, 40, bodyY, 19.0, 10.0, FD_HIDE, { n: 2.7, bias: -0.06 });
-  fdWing(p, 27, bodyY - 6, -1, 0.12);
-  fdWing(p, 53, bodyY - 6, 1, 0.12);
-  crest(p, [[40, bodyY - 9], [40, bodyY - 1], [40, bodyY + 6]], 3.4, FD_HIDE, { tip: 'l' });
+  FM(p, 40, bodyY, 19.0, 10.0, FD_HIDE, { n: 2.7, bias: -0.18 });
+  fdWingBack(p, 27, bodyY - 6, -1);
+  fdWingBack(p, 53, bodyY - 6, 1);
+  crest(p, [[40, bodyY - 9], [40, bodyY - 1], [40, bodyY + 6]], 4, '1223', { tip: 'v' });
   FC(p, [[40, 36 + b], [40, 31 + b], [40, 28 + b]], 7.6, 6.2, FD_HIDE, -0.06);
   { const q = makePix(FD_SW, FD_SH);
-    FM(q, 40, 23 + b, 7.4, 5.2, FD_HIDE, { n: 2.7, bias: -0.04 });
-    C(q, [[37, 21 + b], [32, 18 + b], [28, 15 + b]], 2.4, 0.6, FD_HORN, TB - 0.10);
-    C(q, [[43, 21 + b], [48, 18 + b], [52, 15 + b]], 2.4, 0.6, FD_HORN, TB - 0.20);
+    FM(q, 40, 23 + b, 7.4, 5.2, FD_HIDE, { n: 2.7, bias: -0.26 });
+    C(q, [[36, 19 + b], [31, 16 + b], [26, 14 + b]], 2.1, 0.6, FD_HORN, TB - 0.26);
+    C(q, [[44, 19 + b], [49, 16 + b], [54, 14 + b]], 2.1, 0.6, FD_HORN, TB - 0.40);
     fdGap(p, q); }
   veins(p, [[28, bodyY - 4], [32, bodyY + 6]], heat);
   veins(p, [[52, bodyY - 4], [48, bodyY + 6]], heat);
