@@ -75,16 +75,24 @@
 // holding one of the ramp keys it is given, so structure drawn in those keys is erased — a coat's
 // front edge typed in '7' simply disappears. Two consequences, both used here: structure inside a
 // re-lit block is drawn in a DIFFERENT vocabulary (the swordsman's placket in leather, his buttons
-// and the monk's stole in accent), and the Dark Warrior's plate — which is all structure and no
-// cloth — is hand-valued with `body()` instead, one lit pixel of the top step down every top-left
-// facing edge and the ramp running left to right across the form.
+// and the monk's stole in accent), and plate — which is all structure and no cloth: the Dark
+// Warrior, the War Lord, the dwarf's domed helm — is hand-valued and then TILTED (`tilted()` /
+// `keyTilt` below) rather than re-keyed, so the drawing survives and only the light moves.
+//
+// AND THE PILLOW THAT SURVIVED BOTH. Hand-valued plate was typed SYMMETRICALLY —
+// `aabbccdddddccbbbbbbccdddddccbbaa` is one value pattern mirrored about the sprite's centre line,
+// a helm bright down its middle with the shadow ringed round it — and the cloaks were shaded by
+// their fold phase alone, which is the same on both sides of the cloth. A third of the War Lord's
+// body area and a third of the Dwarven Guard's measured centre-lit. `style.js lint()` now fails a
+// sheet for it (`form-pillow`), and every block here is either re-keyed off the terminator or
+// tilted into it.
 //
 // FACINGS south / east / north are each drawn; west is the mirrored east.
 // CLIPS idle(4) walk(6) attack(4) hurt(2) death(5).
 import {
-  Palette, paint, compose, mirrorLit, outline, houseOutline, keyShade, line, setPx, solid, makePix, smearArc, recolor, clone,
+  Palette, paint, compose, mirrorLit, outline, houseOutline, seamInk, keyShade, line, setPx, solid, makePix, smearArc, recolor, clone,
 } from '../pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from '../style.js';
 
 // ------------------------------------------------------------------------------------ geometry
 /** @typedef {{w:number,h:number,px:number,py:number,legX:number,legY:number,k:number}} Geom */
@@ -132,12 +140,21 @@ export function humanPalette(o) {
   put('efg', o.accent, 'accent');
   return p
     .set('T', o.tooth || '#ded2b8')
-    .set('E', '#191322')
+    .set('E', INK_DEEP)
     .set('W', '#e6dcc8')
     .set('Y', o.eye)
     .set('G', '#efe9dd')
     .set('F', '#fff4f0');
 }
+
+/**
+ * THE SEAM VOCABULARY (pixelPainter `seamInk`): each material's keys DARKEST FIRST. An ink pixel
+ * that holds no part of the outer contour is not outline, it is a seam between two planes of one
+ * garment — and a seam is drawn a step down that garment's own ramp, never in INK. Without this the
+ * barbarian shipped a black bar across the collarbone, black rings round both arms and a black
+ * notch under the belt, all of which read at the play camera as holes punched through him.
+ */
+const SEAM_RAMPS = ['123', '7456', 's890', 'abcd', 'efg'];
 
 // ------------------------------------------------------------------------------------ inking
 const LIGHT_KEYS = new Set(['3', '6', '0', 'c', 'd', 'g', 'T', 'W'].map((c) => c.charCodeAt(0)));
@@ -154,6 +171,46 @@ const body = (rows) => ink(paint(rows));
  * is pillow shading and is banned by style.js.
  */
 const keyed = (rows, keys, o = {}) => ink(keyShade(paint(rows), keys, { lit: LIT, ...o }));
+
+/**
+ * TILT A HAND-VALUED BLOCK INTO THE KEY LIGHT — the other half of the anti-pillow tooling.
+ *
+ * `keyed()` cannot be used on a suit of plate: it re-keys every pixel it is given, so a breastplate
+ * whose pauldrons, lames and rivets are DRAWN in those keys comes back as a smooth gradient with the
+ * armour erased. But the reason those blocks pillow is not the drawing, it is that they are typed
+ * SYMMETRICALLY — `aabbccdddddccbbbbbbccdddddccbbaa` is a value pattern mirrored about the sprite's
+ * own centre line, which is a form lit from the front by nothing. So: keep every relationship the
+ * artist typed, and slide the whole block along the key axis. Every pixel moves up the ramp toward
+ * the top-left and down it toward the bottom-right, which turns a mirrored pattern into a lit one
+ * without touching what it draws. The last pixel of a run in the shadow half then takes one step
+ * back up: the reflected light a form needs at its far edge.
+ *
+ * @param {import('../pixelPainter.js').Pix} p @param {string} keys the material ramp, darkest first
+ * @param {{across?:number, down?:number, rim?:number}} [o] steps of shift from edge to edge
+ */
+function keyTilt(p, keys, o = {}) {
+  const ks = [...keys], N = ks.length;
+  const rank = new Map(ks.map((c, i) => [c.charCodeAt(0), i]));
+  const across = o.across ?? 2.4, down = o.down ?? 1.0, rim = o.rim ?? 1;
+  let x0 = p.w, x1 = -1, y0 = p.h, y1 = -1;
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) if (rank.has(p.d[y * p.w + x])) {
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return p;
+  const out = { w: p.w, h: p.h, d: new Uint16Array(p.d) };
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    const i = rank.get(p.d[y * p.w + x]);
+    if (i === undefined) continue;
+    const u = x1 > x0 ? (x - x0) / (x1 - x0) : 0.5, v = y1 > y0 ? (y - y0) / (y1 - y0) : 0.5;
+    const key = across * (0.5 - u) + down * (0.5 - v);
+    let k = i + Math.round(key);
+    if (rim && key < -0.2 && !rank.has(p.d[y * p.w + x + 1])) k += rim;   // reflected light
+    out.d[y * p.w + x] = ks[k < 0 ? 0 : k >= N ? N - 1 : k].charCodeAt(0);
+  }
+  return out;
+}
+/** A hand-valued block, tilted into the key light and then inked. */
+const tilted = (rows, keys, o = {}) => ink(keyTilt(paint(rows), keys, o));
 
 /** Soften a composed frame's remaining hard outline where a light tone meets empty space top-left. */
 function softenLit(p) {
@@ -677,12 +734,21 @@ function capePix(G, cx, cy, o = {}) {
       const u = x / half;
       const cut = hemAt(u);
       if (y > h - 1 - cut) continue;
-      // three broad folds, lit from the top-left: the cloth turns, it does not pillow
-      const fold = Math.cos(u * 5.6 + 0.7);
-      let key = fold > 0.55 ? '6' : fold > -0.05 ? '5' : fold > -0.7 ? '4' : '7';
-      if (u < -0.82 || u > 0.86) key = '7';
-      if (back && u > -0.12 && u < 0.12) key = '5';
-      if (y > h - 3.2 - cut) key = '7';                 // the turned hem, in its own shadow
+      // FORM FIRST, FOLDS SECOND — and this is where the biggest cloak in the game used to pillow.
+      // It was shaded by `cos(u * 5.6)` alone: a value that depends only on the fold phase is the
+      // SAME on both sides of the cloth, so the cape came out light down its middle with '7' pinned
+      // to both edges, and the key light had no say in it at all. The value now falls across the
+      // cloth from the lit edge to the shadow edge and from the shoulders to the hem, and the folds
+      // ride on top as a fraction of a step. Then the three things a form needs and this had none
+      // of: the terminator, ONE core-shadow band just inside the shadow edge, and ONE step of
+      // reflected light on the edge itself.
+      const shade = 0.80 - 0.55 * (u * 0.5 + 0.5) - 0.26 * t + 0.09 * Math.cos(u * 5.6 + 0.7);
+      let key = shade > 0.62 ? '6' : shade > 0.40 ? '5' : shade > 0.18 ? '4' : '7';
+      if (u < -0.86) key = '6';                         // rim of key light down the lit edge
+      else if (u > 0.88) key = '4';                     // reflected light off the wall behind him
+      else if (u > 0.68) key = '7';                     // the core shadow, the darkest band on him
+      if (back && u > -0.10 && u < 0.14) key = key === '7' ? '4' : key;   // the clasp fold catches
+      if (y > h - 3.2 - cut) key = key === '6' ? '5' : '7';   // the turned hem, in its own shadow
       setPx(p, r(cx + x + off), r(cy + y), key);
     }
   }
@@ -731,7 +797,8 @@ function frame(S, f, o = {}) {
   // warrior's sword arm, the war lord's cape edge). `houseOutline` peels the second coats, lays one
   // pixel of INK around whatever is still bare, and re-keys the whole silhouette against the
   // FIGURE's own normal — so the softening to '@' follows the man, not the part he is made of.
-  return houseOutline(softenLit(compose(G.w, G.h, layers)), { key: '#', litKey: '@', lit: LIT });
+  return seamInk(houseOutline(softenLit(compose(G.w, G.h, layers)), { key: '#', litKey: '@', lit: LIT }),
+    { ramps: SEAM_RAMPS, keep: 'E' });
 }
 
 // ------------------------------------------------------------------------------------ the rig
@@ -954,7 +1021,7 @@ const MER_TORSO_S = keyed(`
 .....55555555555555.....
 .....55555555555555.....
 .....55555.5555.555.....
-......555...55..55......`, '7456', { gain: 0.58, mid: 0.52, up: 0.52, local: 0.32 });
+......555...55..55......`, '7456', { gain: 0.92, mid: 0.56, up: 0.52, local: 0, dome: 0 });
 const MER_TORSO_E = keyed(`
 ..........555555........
 ..........555555........
@@ -973,7 +1040,7 @@ const MER_TORSO_E = keyed(`
 ......55555555555555....
 ......55555555555555....
 ......55555.5555.555....
-.......555...55..55.....`, '7456', { gain: 0.58, mid: 0.52, up: 0.52, local: 0.32 });
+.......555...55..55.....`, '7456', { gain: 0.92, mid: 0.56, up: 0.52, local: 0, dome: 0 });
 const MER_TORSO_N = keyed(`
 .........555555.........
 .........555555.........
@@ -992,7 +1059,7 @@ const MER_TORSO_N = keyed(`
 .....55555555555555.....
 .....55555555555555.....
 .....55555.5555.555.....
-......555...55..55......`, '7456', { gain: 0.58, mid: 0.52, up: 0.52, local: 0.32 });
+......555...55..55......`, '7456', { gain: 0.92, mid: 0.56, up: 0.52, local: 0, dome: 0 });
 
 const MERCENARY = {
   G: MAN,
@@ -1101,7 +1168,7 @@ const SWD_TORSO_S = keyed(`
 ..55555555....55555555..
 .555555555....555555555.
 .55555555......55555555.
-.555555..........555555.`, '7456', { gain: 0.50, mid: 0.56, up: 0.5, local: 0.28 });
+.555555..........555555.`, '7456', { gain: 0.90, mid: 0.56, up: 0.5, local: 0, dome: 0 });
 const SWD_TORSO_E = keyed(`
 ........................
 ......555555555555......
@@ -1124,7 +1191,7 @@ const SWD_TORSO_E = keyed(`
 ..55555555....55555555..
 ..55555555....55555555..
 ..5555555......5555555..
-..555555........555555..`, '7456', { gain: 0.50, mid: 0.56, up: 0.5, local: 0.28 });
+..555555........555555..`, '7456', { gain: 0.90, mid: 0.56, up: 0.5, local: 0, dome: 0 });
 const SWD_TORSO_N = keyed(`
 ........................
 .....55555555555555.....
@@ -1148,7 +1215,7 @@ const SWD_TORSO_N = keyed(`
 ..55555555....55555555..
 .555555555....555555555.
 .55555555......55555555.
-.555555..........555555.`, '7456', { gain: 0.50, mid: 0.56, up: 0.5, local: 0.28 });
+.555555..........555555.`, '7456', { gain: 0.90, mid: 0.56, up: 0.5, local: 0, dome: 0 });
 
 const SWORDSMAN = {
   G: MAN,
@@ -1257,7 +1324,7 @@ const MNK_TORSO_S = keyed(`
 ....5555555555555555....
 ....5555555555555555....
 ....55555.5555.55555....
-.....555........555.....`, '7456', { gain: 0.48, mid: 0.60, up: 0.46, local: 0.26 });
+.....555........555.....`, '7456', { gain: 0.82, mid: 0.58, up: 0.46, local: 0, dome: 0 });
 const MNK_TORSO_E = keyed(`
 ........................
 .........55555555.......
@@ -1283,7 +1350,7 @@ const MNK_TORSO_E = keyed(`
 .....5555555555555555...
 .....5555555555555555...
 .....55555.5555.55555...
-......555........555....`, '7456', { gain: 0.48, mid: 0.60, up: 0.46, local: 0.26 });
+......555........555....`, '7456', { gain: 0.82, mid: 0.58, up: 0.46, local: 0, dome: 0 });
 const MNK_TORSO_N = keyed(`
 ........................
 ........55555555........
@@ -1309,7 +1376,7 @@ const MNK_TORSO_N = keyed(`
 ....5555555555555555....
 ....5555555555555555....
 ....55555.5555.55555....
-.....555........555.....`, '7456', { gain: 0.48, mid: 0.60, up: 0.46, local: 0.26 });
+.....555........555.....`, '7456', { gain: 0.82, mid: 0.58, up: 0.46, local: 0, dome: 0 });
 
 /**
  * Bare feet under the robe. The shared boot block is repainted skin (`BAREFOOT`) and then SHAVED:
@@ -1380,7 +1447,7 @@ const MONK = {
 // (`c` lit, `b` body, `a` shadow, exactly the top-left key light) and every top-left facing edge
 // carries one pixel of `d`: that rim is what a near-black creature has instead of a highlight, and
 // without it his whole value range collapses to 0.31 and style.js starts warning.
-const DKW_HEAD_S = body(`
+const DKW_HEAD_S = tilted(`
 ....................
 .9................8.
 .99..............88.
@@ -1396,8 +1463,8 @@ const DKW_HEAD_S = body(`
 ....dcbbbbbbbaaa....
 .....cbbbbbbaaa.....
 .....cbbbbbaaaa.....
-......cbbaaaaa......`);
-const DKW_HEAD_E = body(`
+......cbbaaaaa......`, 'abcd', { across: 2.6, down: 0.8 });
+const DKW_HEAD_E = tilted(`
 ....................
 .9................8.
 .99..............88.
@@ -1413,8 +1480,8 @@ const DKW_HEAD_E = body(`
 ....dcbbbbbbbaaa....
 .....cbbbbbbaaa.....
 .....cbbbbbaaaa.....
-......cbbaaaaa......`);
-const DKW_HEAD_N = body(`
+......cbbaaaaa......`, 'abcd', { across: 2.6, down: 0.8 });
+const DKW_HEAD_N = tilted(`
 ....................
 .9................8.
 .99..............88.
@@ -1430,8 +1497,8 @@ const DKW_HEAD_N = body(`
 ....dcbbbbbbbaaa....
 .....cbbbbbbaaa.....
 .....cbbbbbaaaa.....
-......cbbaaaaa......`);
-const DKW_TORSO_S = body(`
+......cbbaaaaa......`, 'abcd', { across: 2.6, down: 0.8 });
+const DKW_TORSO_S = tilted(`
 ........................
 ........dcbbbbaa........
 .......dccbbbbbaa.......
@@ -1451,8 +1518,8 @@ const DKW_TORSO_S = body(`
 .....dcbbbbbbbaaaaa.....
 .....dcbbbbbbaaaaaa.....
 ......dcbbbbbaaaaa......
-.......dcbbbaaaaa.......`);
-const DKW_TORSO_E = body(`
+.......dcbbbaaaaa.......`, 'abcd', { across: 2.6, down: 0.8 });
+const DKW_TORSO_E = tilted(`
 ........................
 ........dcbbbbaa........
 .......dccbbbbbaa.......
@@ -1472,8 +1539,8 @@ const DKW_TORSO_E = body(`
 .....dcbbbbbbbaaaaa.....
 .....dcbbbbbbaaaaaa.....
 ......dcbbbbbaaaaa......
-.......dcbbbaaaaa.......`);
-const DKW_TORSO_N = body(`
+.......dcbbbaaaaa.......`, 'abcd', { across: 2.6, down: 0.8 });
+const DKW_TORSO_N = tilted(`
 ........................
 ........dcbbbbaa........
 .......dccbbbbbaa.......
@@ -1493,7 +1560,7 @@ const DKW_TORSO_N = body(`
 .....dcbbbbbbbaaaaa.....
 .....dcbbbbbbaaaaaa.....
 ......dcbbbbbaaaaa......
-.......dcbbbaaaaa.......`);
+.......dcbbbaaaaa.......`, 'abcd', { across: 2.6, down: 0.8 });
 /** His cloak: a fall of the same near-black cloth from the gorget to the floor, drawn behind. */
 // hung one row higher than the boots: an idle may move anything above the belt, and the one thing
 // it may never move is the row the figure stands on — a cloak hem at the pivot row breathes with him
@@ -1533,7 +1600,7 @@ const DARK_WARRIOR = {
 //
 // The hauberk is a long surcoat cut into tabs at the hem, so almost no leg shows; the weight is
 // all in the top half. The BEARDED AXE hangs on his off side, its single crescent half his height.
-const DWG_HEAD_S = body(`
+const DWG_HEAD_S = tilted(`
 ..........ccba..........
 ........bcddccba........
 .......bccddccbba.......
@@ -1550,8 +1617,8 @@ const DWG_HEAD_S = body(`
 ...fffeeeeeeeeeeeeeee...
 ....ffeeeeeeeeeeeeee....
 ....ffeeee....eeeeee....
-.....feee......eeee.....`);
-const DWG_HEAD_E = body(`
+.....feee......eeee.....`, 'abcd', { across: 2.6, down: 0.8 });
+const DWG_HEAD_E = tilted(`
 ..........ccba..........
 ........bcddccba........
 .......bccddccbba.......
@@ -1568,8 +1635,8 @@ const DWG_HEAD_E = body(`
 ...fffeeeeeeeeeeeeeee...
 ....ffeeeeeeeeeeeeee....
 ....ffeeee....eeeeee....
-.....feee......eeee.....`);
-const DWG_HEAD_N = body(`
+.....feee......eeee.....`, 'abcd', { across: 2.6, down: 0.8 });
+const DWG_HEAD_N = tilted(`
 ..........ccba..........
 ........bcddccba........
 .......bccddccbba.......
@@ -1586,7 +1653,7 @@ const DWG_HEAD_N = body(`
 ...fffeeeeeeeeeeeeeee...
 ....ffeeeeeeeeeeeeee....
 ....ffeeee....eeeeee....
-.....feee......eeee.....`);
+.....feee......eeee.....`, 'abcd', { across: 2.6, down: 0.8 });
 const DWG_TORSO_S = keyed(`
 ........................
 ......555555555555......
@@ -1607,7 +1674,7 @@ const DWG_TORSO_S = keyed(`
 ....5555555555555555....
 ....5555555555555555....
 ....55555.5555.55555....
-.....555...55...555.....`, '7456', { gain: 0.56, mid: 0.50, up: 0.5, local: 0.3 });
+.....555...55...555.....`, '7456', { gain: 0.86, mid: 0.58, up: 0.52, local: 0, dome: 0 });
 const DWG_TORSO_E = keyed(`
 ........................
 .......555555555555.....
@@ -1628,7 +1695,7 @@ const DWG_TORSO_E = keyed(`
 .....5555555555555555...
 .....5555555555555555...
 .....55555.5555.55555...
-......555...55...555....`, '7456', { gain: 0.56, mid: 0.50, up: 0.5, local: 0.3 });
+......555...55...555....`, '7456', { gain: 0.86, mid: 0.58, up: 0.52, local: 0, dome: 0 });
 const DWG_TORSO_N = keyed(`
 ........................
 ......555555555555......
@@ -1649,7 +1716,7 @@ const DWG_TORSO_N = keyed(`
 ....5555555555555555....
 ....5555555555555555....
 ....55555.5555.55555....
-.....555...55...555.....`, '7456', { gain: 0.56, mid: 0.50, up: 0.5, local: 0.3 });
+.....555...55...555.....`, '7456', { gain: 0.86, mid: 0.58, up: 0.52, local: 0, dome: 0 });
 
 const DWARVEN_GUARD = {
   G: MAN,
@@ -1679,7 +1746,7 @@ const DWARVEN_GUARD = {
 // those texels were a horsehair crest standing eleven rows over the helm and a greatsword carried
 // three rows clear of it. The crest is now a four-row brush and the sword rides lower; the ARMOURED
 // MAN underneath is untouched, and he still tops every other human in the game.
-const WLD_HEAD_S = body(`
+const WLD_HEAD_S = tilted(`
 ..........65554444..........
 ..........65554444..........
 ...........655444...........
@@ -1696,8 +1763,8 @@ const WLD_HEAD_S = body(`
 .......abbccccccccbaa.......
 .......abbccccccccbaa.......
 ........abbccccccbaa........
-.........abbccccbaa.........`);
-const WLD_HEAD_E = body(`
+.........abbccccbaa.........`, 'abcd', { across: 2.6, down: 0.8 });
+const WLD_HEAD_E = tilted(`
 ........65554444............
 ........65554444............
 .........655444.............
@@ -1714,8 +1781,8 @@ const WLD_HEAD_E = body(`
 ......abbccccccccccbaa......
 ......abbccccccccccbaa......
 .......abbccccccccbaa.......
-........abbccccccbaa........`);
-const WLD_HEAD_N = body(`
+........abbccccccbaa........`, 'abcd', { across: 2.6, down: 0.8 });
+const WLD_HEAD_N = tilted(`
 ..........65554444..........
 ..........65554444..........
 ...........655444...........
@@ -1732,8 +1799,8 @@ const WLD_HEAD_N = body(`
 .......abbccccccccbaa.......
 .......abbccccccccbaa.......
 ........abbccccccbaa........
-.........abbccccbaa.........`);
-const WLD_TORSO_S = body(`
+.........abbccccbaa.........`, 'abcd', { across: 2.6, down: 0.8 });
+const WLD_TORSO_S = tilted(`
 ..................................
 ..........ggffffffffffee..........
 .......aabbccccccccccccbbaa.......
@@ -1765,8 +1832,8 @@ const WLD_TORSO_S = body(`
 ......aabbbbbbbbbbbbbbbbbbaa......
 .......aaaaaaaaaaaaaaaaaaaa.......
 ..................................
-..................................`);
-const WLD_TORSO_E = body(`
+..................................`, 'abcd', { across: 2.5, down: 1.0 });
+const WLD_TORSO_E = tilted(`
 ..................................
 .........ggffffffffffee...........
 ......aabbccccccccccccbbaa........
@@ -1798,7 +1865,7 @@ const WLD_TORSO_E = body(`
 ........aabbbbbbbbbbbbbbbbbbaa....
 .........aaaaaaaaaaaaaaaaaaaa.....
 ..................................
-..................................`);
+..................................`, 'abcd', { across: 2.5, down: 1.0 });
 const WLD_CAPE_S = capePix(LORD, 32, 31, { w: 18, h: 34 });
 const WLD_CAPE_N = capePix(LORD, 32, 33, { w: 15, h: 31, back: true });
 

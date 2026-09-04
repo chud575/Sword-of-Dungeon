@@ -45,9 +45,9 @@
 // FACINGS south / east / north are each drawn deliberately; west is the mirrored east (the
 // billboard flips it). CLIPS idle(4) walk(6) attack(4) hurt(2) death(5).
 import {
-  Palette, paint, compose, outline, houseOutline, makePix, setPx, getPx, line, solid,
+  Palette, paint, compose, outline, houseOutline, seamInk, makePix, setPx, getPx, line, solid,
 } from '../pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
@@ -75,6 +75,13 @@ const RAMP_PICK = {
 };
 
 /**
+ * THE SEAM VOCABULARY (pixelPainter `seamInk`): every material of this group, DARKEST FIRST.
+ * INK and INK_LIT are the outer contour and nothing else; a crease in a robe, the line where a
+ * sleeve crosses the chest and the joint of a staff are all drawn a step down their own ramp.
+ */
+const SEAM_RAMPS = ['4567', '123', '89', 'abcd', 'efg', 'mno', 'stu'];
+
+/**
  * One species palette over the shared key vocabulary.
  * @param {{skin:string, cloth:string, trim:string, metal:string, accent:string, magic:string,
  *   eye:string, spark?:string, shimmer?:string, voidCol?:string,
@@ -96,8 +103,8 @@ export function casterPalette(o) {
   put('stu', o.shimmer || '#8fd0ff', 'shimmer');
   return p
     .set('p', o.spark || '#fff6d8')
-    .set('v', o.voidCol || '#170e28')
-    .set('E', '#171020')
+    .set('v', o.voidCol || INK_DEEP)
+    .set('E', INK_DEEP)
     .set('W', '#e6dcc8')
     .set('Y', o.eye)
     .set('G', '#efe9dd')
@@ -678,7 +685,12 @@ function buildCaster(S) {
   // arrive carrying their own ring, so before this the coat was two pixels thick down every join and
   // gone wherever a sleeve covered the robe's. This peels the second coats, lays one pixel of INK
   // round whatever is bare and re-keys the silhouette against the finished figure.
-  const inked = (a) => ({ ...a, frames: a.frames.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT })) });
+  // …then THE SEAM PASS (pixelPainter.seamInk): once the contour is right, any ink still sitting
+  // INSIDE the figure is a fold in a robe or the line where a sleeve crosses it, and a fold is a
+  // step down the robe's own ramp. INK there is the darkest tone the law allows and the grade
+  // crushes it to a hole. The hood's void ('v') and the eye ('E') are their own key — INK_DEEP —
+  // so `keep` leaves the ink that rims them alone.
+  const inked = (a) => ({ ...a, frames: a.frames.map((p) => seamInk(houseOutline(p, { key: '#', litKey: '@', lit: LIT }), { ramps: SEAM_RAMPS, keep: 'vE' })) });
   const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...inked(a) }; };
   for (const f of ['S', 'E', 'N']) {
     put('idle', f, idleClip(S, f));
@@ -751,7 +763,6 @@ const WARLOCK = {
   palette: casterPalette({
     skin: '#9d8f9c', cloth: '#4c2a63', trim: '#3a2136', metal: '#8b7f96',
     accent: '#cfc3a6', magic: '#b98cff', eye: '#ff7a3c', spark: '#f0dcff',
-    voidCol: '#150b26',
   }),
   head: { S: WAR_HEAD_S, E: WAR_HEAD_E, N: WAR_HEAD_N },
   headAt: { S: [9, 4], E: [9, 4], N: [9, 4] },
@@ -956,7 +967,7 @@ function spriteWake(n, phase, spread = 5, cx = 13, cy = 20) {
 function buildSprite() {
   const clip = (frames, durations, loop) => ({ frames, durations, loop });
   const anims = {};
-  const inked = (c) => ({ ...c, frames: c.frames.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT })) });
+  const inked = (c) => ({ ...c, frames: c.frames.map((p) => seamInk(houseOutline(p, { key: '#', litKey: '@', lit: LIT }), { ramps: SEAM_RAMPS, keep: 'vE' })) });
   const put = (name, f, c) => { (anims[name] ||= {})[f] = { name, facing: f, ...inked(c) }; };
   for (const f of ['S', 'E', 'N']) {
     put('idle', f, clip(

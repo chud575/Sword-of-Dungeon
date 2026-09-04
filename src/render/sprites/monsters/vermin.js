@@ -23,8 +23,8 @@
 //              inner nucleus that drifts as the body wobbles, and a drip on the crown.
 //  kobold      small hunched dog-snouted humanoid, two backswept horns, a ragged hide kilt and a
 //              crude bone-tipped spear held across the body.
-import { Palette, paint, compose, mirrorLit, outline, houseOutline, makePix, setPx, line } from '../pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { Palette, paint, compose, mirrorLit, outline, houseOutline, seamInk, makePix, setPx, line } from '../pixelPainter.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
@@ -76,8 +76,16 @@ export const VERMIN_PALETTE = new HousePalette()
   .ramp('xyz', '#5b4130', { pick: [1, 3, 5] })              // leather straps and kilt
   .ramp('ST', '#98a0ae', { pick: [3, 6] })                  // lashings / steel
   // shared
-  .set('E', '#1c1424').set('W', '#fff7ea').set('R', '#ff6a4a')  // eye, catch-light, red iris
+  .set('E', INK_DEEP).set('W', '#fff7ea').set('R', '#ff6a4a')  // eye, catch-light, red iris
   .set('F', '#fff4f0');                                     // hurt flash
+
+/**
+ * THE SEAM VOCABULARY (pixelPainter `seamInk`): INK and INK_LIT are the outer contour, nothing else.
+ * Fur, flesh, bone, wing membrane, chitin, gel, hide, leather, steel — every material of this
+ * group, DARKEST FIRST. A crease in a wing or the line between two chitin plates is a step down
+ * that material's own ramp, never the silhouette ink.
+ */
+const SEAM_RAMPS = ['1234', '567', '89', 'abc', 'def', 'ghij', 'mnop', 'tuvw', 'xyz', 'ST'];
 
 const L = (p, x, y) => (p ? { p, x, y } : null);
 /** Compose layers and lay the single selective outline on last (the house treatment). */
@@ -106,7 +114,11 @@ function clips(make) {
   // covered another's ring; the west facing is a mirror, which puts the lit-edge softening on the
   // wrong side. This peels every second coat, lays exactly one pixel of INK round anything bare and
   // re-keys the whole silhouette against the frame as it finally stands.
-  const inked = (fr) => fr.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT }));
+  // …and then THE SEAM PASS (pixelPainter.seamInk): with the contour right, ink left INSIDE the
+  // figure is drawing, and INK is the wrong colour for drawing — it is the darkest tone the law
+  // allows and the scene grade crushes it to a hole. Interior seams fall to a dark step of the
+  // material they cut through.
+  const inked = (fr) => fr.map((p) => seamInk(houseOutline(p, { key: '#', litKey: '@', lit: LIT }), { ramps: SEAM_RAMPS, keep: 'E' }));
   const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a, frames: inked(a.frames) }; };
   for (const f of ['S', 'E', 'N']) for (const [name, a] of Object.entries(make(f))) put(name, f, a);
   for (const name of Object.keys(anims)) {

@@ -36,9 +36,9 @@
 // FACINGS south / east / north are each drawn deliberately; west is the mirrored east.
 // CLIPS idle(4) walk(6) attack(4) hurt(2) death(5).
 import {
-  Palette, paint, compose, mirrorLit, outline, houseOutline, keyShade, line, setPx, solid, makePix, smearArc,
+  Palette, paint, compose, mirrorLit, outline, houseOutline, seamInk, keyShade, line, setPx, solid, makePix, smearArc,
 } from '../pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from '../style.js';
 
 export const MON_W = 40, MON_H = 40, PIVOT_X = 20, PIVOT_Y = 37;
 
@@ -105,6 +105,13 @@ const ro = (v) => Math.round(v * CUR.k);
 function relight(p, keys, o = {}) {
   return keyShade(p, keys, { lit: LIT, ...o });
 }
+// `local` and `dome` are the two knobs here that DO NOT point at the key light: `local` mixes in
+// each ROW's own centre line and `dome` adds a bump that peaks in the middle of the block, so a
+// figure shaded at local 0.42 / dome 0.08 comes out lightest down its own spine with the shadow
+// ringed round it — pillow shading, arrived at by dialling it in rather than by typing it. Every
+// call below now runs them at a fraction of that (0.14-0.16 / 0.02-0.03): enough that a limb still
+// turns as a cylinder, not enough to outvote the terminator. `style.js lint()` fails a sheet whose
+// forms measure centre-lit, and the barbarian's bare torso was the loudest of them.
 
 /**
  * Re-shade several materials of one hand-drawn block to the house key light in one call:
@@ -150,12 +157,21 @@ function humanoidPalette(o) {
   put('efg', o.accent, 'accent');
   return p
     .set('T', o.tooth || '#ded2b8')
-    .set('E', '#191322')
+    .set('E', INK_DEEP)
     .set('W', '#e6dcc8')
     .set('Y', o.eye)
     .set('G', '#efe9dd')
     .set('F', '#fff4f0');
 }
+
+/**
+ * THE SEAM VOCABULARY (pixelPainter `seamInk`): each material's keys DARKEST FIRST. An ink pixel
+ * that holds no part of the outer contour is not outline, it is a seam between two planes of one
+ * garment — and a seam is drawn a step down that garment's own ramp, never in INK. Without this the
+ * barbarian shipped a black bar across the collarbone, black rings round both arms and a black
+ * notch under the belt, all of which read at the play camera as holes punched through him.
+ */
+const SEAM_RAMPS = ['123', '7456', 's890', 'abcd', 'efg'];
 
 // ------------------------------------------------------------------------------------ shared legs
 // 18 wide, 12 tall, stamped at (G.legX, G.legY): two 3-px legs with a 2-px gap, boots flaring outward.
@@ -528,7 +544,8 @@ function frame(S, f, o = {}) {
   // every join and lost wherever one part covered another's. `houseOutline` peels the second coats,
   // lays one pixel of INK round whatever is bare, and re-keys the silhouette against the FIGURE's
   // own normal, so the softening to '@' follows the creature and not the part it is made of.
-  return houseOutline(softenLit(compose(CUR.w, CUR.h, layers)), { key: '#', litKey: '@', lit: LIT });
+  return seamInk(houseOutline(softenLit(compose(CUR.w, CUR.h, layers)), { key: '#', litKey: '@', lit: LIT }),
+    { ramps: SEAM_RAMPS, keep: 'E' });
 }
 
 // ------------------------------------------------------------------------------------ poses
@@ -1021,7 +1038,7 @@ const BAR_HEAD_S = keyed(`
 ...#eeffee##eeffee#...
 ..#eeefffeeeefffeee#..
 ..#eeeeffeeeeffeeee#..
-...#eeeeeeeeeeeeee#...`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.46, dome: 0.06 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }]]);
+...#eeeeeeeeeeeeee#...`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.16, dome: 0.02 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }]]);
 const BAR_HEAD_E = keyed(`
 ......#eeffee#........
 ....#eeffggffee#......
@@ -1039,7 +1056,7 @@ const BAR_HEAD_E = keyed(`
 ....#eeeffe#33#.......
 ....#eeefffeee#.......
 .....#eeeffeee#.......
-.....#eeeeeee#........`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.46, dome: 0.06 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }]]);
+.....#eeeeeee#........`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.16, dome: 0.02 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }]]);
 const BAR_HEAD_N = keyed(`
 .......#efggfe#.......
 .....#efggggggfe#.....
@@ -1057,7 +1074,7 @@ const BAR_HEAD_N = keyed(`
 ....#eeffeeeeffee#....
 .....#eeffeeffee#.....
 ......#eefeefee#......
-.....#eeeeeeeeee#.....`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.46, dome: 0.06 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }]]);
+.....#eeeeeeeeee#.....`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.16, dome: 0.02 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }]]);
 const BAR_TORSO_S = keyed(`
 .........#333333#.........
 .......#3333333333#.......
@@ -1080,7 +1097,7 @@ const BAR_TORSO_S = keyed(`
 ....#5566666666666654#....
 .....#55666666666654#.....
 ......#556666666654#......
-.......############.......`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.46, dome: 0.06 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }]]);
+.......############.......`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.16, dome: 0.02 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }]]);
 const BAR_TORSO_E = keyed(`
 ..........#3333#..........
 ........#33333333#........
@@ -1103,7 +1120,7 @@ const BAR_TORSO_E = keyed(`
 .....#55666666666654#.....
 ......#556666666654#......
 .......#5566666654#.......
-........##########........`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.46, dome: 0.06 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }]]);
+........##########........`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.16, dome: 0.02 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }]]);
 const BAR_TORSO_N = keyed(`
 .........#333333#.........
 .......#3333333333#.......
@@ -1126,7 +1143,7 @@ const BAR_TORSO_N = keyed(`
 ....#5566666666666654#....
 .....#55666666666654#.....
 ......#556666666654#......
-.......############.......`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.46, dome: 0.06 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }]]);
+.......############.......`, [['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }], ['efg', { gain: 0.56, mid: 0.44, up: 0.48, local: 0.16, dome: 0.02 }], ['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }]]);
 
 // HIS OWN LEGS. The shared 18x12 block is three texels of shin and a two-row boot; under a torso
 // this size it read as a barrel on sticks. These are 25x17: a five-texel thigh, a knee that pinches,
@@ -1395,7 +1412,7 @@ const RAN_HEAD_S = keyed(`
 ..#455#222#56#..
 ...#44555566#...
 ....########....
-................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }]]);
+................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }]]);
 const RAN_HEAD_E = keyed(`
 .....###........
 ...##5566#......
@@ -1408,7 +1425,7 @@ const RAN_HEAD_E = keyed(`
 .#455#3222#.....
 ..#4455566#.....
 ...#######......
-................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }]]);
+................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }]]);
 const RAN_HEAD_N = keyed(`
 .......###......
 .....##566#.....
@@ -1421,7 +1438,7 @@ const RAN_HEAD_N = keyed(`
 ..#445556666#...
 ...#44555666#...
 ....########....
-................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }]]);
+................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }]]);
 const RAN_TORSO_S = keyed(`
 .....######.....
 ..###444455###..
@@ -1438,7 +1455,7 @@ const RAN_TORSO_S = keyed(`
 ...#44555444#...
 ...#44555444#...
 ....########....
-................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }]]);
+................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }]]);
 const RAN_TORSO_E = keyed(`
 ......####......
 ....########....
@@ -1455,7 +1472,7 @@ const RAN_TORSO_E = keyed(`
 ..#4455554444#..
 ...#44555444#...
 ....########....
-................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }]]);
+................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }]]);
 const RAN_TORSO_N = keyed(`
 .....######.....
 ..###444455###..
@@ -1472,7 +1489,7 @@ const RAN_TORSO_N = keyed(`
 ...#44555444#...
 ...#44555444#...
 ....########....
-................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.40, dome: 0.08 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.42, dome: 0.08 }]]);
+................`, [['7456', { gain: 0.58, mid: 0.50, up: 0.50, local: 0.14, dome: 0.03 }], ['123', { gain: 0.60, mid: 0.50, up: 0.52, local: 0.14, dome: 0.03 }]]);
 // The quiver: arrow shafts and fletchings crossing behind the shoulder (the ranger's tell).
 const QUIVER = paint(`
 .#g#.#f#..

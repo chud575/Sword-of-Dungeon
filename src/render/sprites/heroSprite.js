@@ -18,7 +18,8 @@
 //  softened lit edge is `INK_LIT`, the key light is `LIT`, and every ramp is built by the house
 //  `ramp()` — the hero used to be the one figure in the game off the law, hard-coding '#1b1426' and
 //  its own ramp maths while all 22 monsters were migrated onto style.js.
-//    steel 12345 (5 = specular)  · crimson eabcd (plume, mantle, buckler, hose)  · leather hijkl
+//    steel 12345 (5 = specular)  · crimson feabcdg (plume, mantle, buckler, hose; f = core shadow,
+//      g = sheen — SEVEN steps, because the mantle is the largest mass on the figure)  · leather hijkl
 //    skin mno  · gold uvw (comb, guard, buckle, boss)  · tan pqr (cloth trim)  · magic xyz
 //    # INK outline  @ INK_LIT lit-edge / inner line
 //  Ramp discipline: the house ramp takes `step`/`range` so a material can be narrow — hue and sat
@@ -29,8 +30,8 @@
 //  Light: style.js LIT (top-left). One INK outline, selectively softened to INK_LIT on the lit edge.
 //  Facings: south (front), east (side; west = mirrored east), north (back). Every facing is drawn
 //  deliberately; nothing is a rotation of anything else.
-import { Palette, paint, compose, mirrorLit, outline, line, setPx, solid, recolor, smearArc, makePix, shift, rotate90 } from './pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from './style.js';
+import { Palette, paint, compose, mirrorLit, outline, seamInk, line, setPx, solid, recolor, smearArc, makePix, shift, rotate90 } from './pixelPainter.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from './style.js';
 
 export const HERO_W = 48, HERO_H = 48, HERO_PIVOT_X = 24, HERO_PIVOT_Y = 46;
 
@@ -42,8 +43,16 @@ export const HERO_W = 48, HERO_H = 48, HERO_PIVOT_X = 24, HERO_PIVOT_Y = 46;
 const mid3 = (r) => r.slice(1, 4);
 /** plate: near-neutral so it still reads as steel under the dungeon's very blue ambient. '5' is the specular. */
 const STEEL = ramp('#8f97a6', 5, { step: 0.10, range: 0.46, mid: 1, hueShift: 0.05, satShift: 0.08 });
-/** crimson cloth (plume, mantle, buckler, hose): narrow, so the shadows stay red and never go magenta. */
-const CRIMSON = ramp('#b02f3a', 5, { step: 0.082, range: 0.30, mid: 2, hueShift: 0.016, satShift: 0.04 });
+/**
+ * crimson cloth (plume, mantle, buckler, hose): narrow in hue, so the shadows stay red and never go
+ * magenta — but SEVEN steps wide in value, because the mantle is the biggest single mass on the
+ * hero and the two panels used to be ONE tone each with a one-pixel hem. Seven steps is what a
+ * form needs: highlight, light, mid, terminator, shadow, core shadow and a step of reflected light
+ * to put back at the shadow edge. `f` is the core and `g` the sheen; `eabcd` keep their old jobs.
+ */
+const CRIMSON = ramp('#b02f3a', 7, { step: 0.082, range: 0.36, mid: 3, hueShift: 0.016, satShift: 0.035 });
+/** The mantle's ramp, darkest first, as `formShade` wants it. */
+const CRIMSON_KEYS = 'feabcdg';
 /** leather (belt, straps, boots): lifted off the old #300814 crease, which had sunk into the ink. */
 const LEATHER = ramp('#7a4a2c', 5, { step: 0.09, range: 0.34, mid: 2, hueShift: 0.03, satShift: 0.06 });
 /** cloak lining / cloth trim (warm tan). */
@@ -59,17 +68,25 @@ export const HERO_PALETTE = new Palette()
   .set('#', INK)                // THE house outline: near-black violet, never pure black
   .set('@', INK_LIT)            // the lit-edge / inner line the outline softens to (style.js)
   .set('G', '#ffffff')          // sword glint (emissive)
-  .set('E', INK)                // eye: a hollow, so it is ink like every other hole in a body
+  .set('E', INK_DEEP)           // eye: a hollow, so it is style.js INK_DEEP — the one void tone
   .set('W', '#fff7ea')          // eye catch-light (a sparkle, well under the area threshold)
   .set('F', '#fff4f0')          // hurt flash (the 'hurt' clip is not colour-graded art)
   .set('S', INK);               // shadow-blob key (unused in sprites)
 [...'12345'].forEach((k, i) => HERO_PALETTE.set(k, STEEL[i]));
-[...'eabcd'].forEach((k, i) => HERO_PALETTE.set(k, CRIMSON[i]));
+[...CRIMSON_KEYS].forEach((k, i) => HERO_PALETTE.set(k, CRIMSON[i]));
 [...'hijkl'].forEach((k, i) => HERO_PALETTE.set(k, LEATHER[i]));
 [...'pqr'].forEach((k, i) => HERO_PALETTE.set(k, TAN[i]));
 [...'mno'].forEach((k, i) => HERO_PALETTE.set(k, SKIN[i]));
 [...'uvw'].forEach((k, i) => HERO_PALETTE.set(k, GOLD[i]));
 [...'xyz'].forEach((k, i) => HERO_PALETTE.set(k, MAGIC[i]));
+
+/**
+ * THE SEAM VOCABULARY (pixelPainter `seamInk`): every hero material, DARKEST FIRST. A join
+ * between two plates of the same armour, the shadow under a pauldron, the line down the leg
+ * gap — all of them are a step down the material's own ramp. INK is reserved for the outer
+ * contour, INK_LIT for the part of it that faces the light, and neither belongs inside the man.
+ */
+const HERO_SEAM_RAMPS = ['12345', CRIMSON_KEYS, 'hijkl', 'pqr', 'mno', 'uvw', 'xyz'];
 
 // ------------------------------------------------------------------------------------------ SOUTH
 // Head: helm + face + plume. 18 wide. Placed at (15, 0).
@@ -86,12 +103,12 @@ const HEAD_S = paint(`
 .#544443uvw33221#.
 .#44443443332211#.
 .#43#@@@@@@@@#21#.
-.#43#mmnnnnmm#21#.
-.#43#nWEnnWEn#21#.
-.#43#nEEnnEEn#21#.
-.#33#onnmnnno#21#.
-.#43##onmmno##21#.
-..##..#onno#....##
+.#43#oonnnnmm#21#.
+.#43#oWEnnWEm#21#.
+.#43#oEEnnEEm#21#.
+.#33#onnnmmmm#21#.
+.#43##onnmmm##21#.
+..##..#onmm#....##
 .......#####......`);
 
 // Torso: gorget, pauldrons, breastplate, belt, tassets. 20 wide. Placed at (14, 18).
@@ -108,14 +125,14 @@ const TORSO_S = paint(`
 ......#hijuwji#.....
 .....#334433221#....
 .....#344332211#....
-.....#3#43#22#1#....
-.....##.##.##.##....`);
+.....#314312211#....
+.....#111111111#....`);
 
 // Legs (south): stand + walk poses. 14 wide, placed at (17, 32); feet on row 45.
 const LEGS_S_RAW = {
   stand: paint(`
-..#aaa#..#aaa#
-..#bba#..#baa#
+..#aaa#aa#aaa#
+..#bba#ba#baa#
 ..#443#..#332#
 ..#443#..#332#
 ..#343#..#322#
@@ -130,8 +147,8 @@ const LEGS_S_RAW = {
 .####..... ####`),
   // left (screen-left) leg forward: it reads lower and larger; the right leg trails, boot lifted
   lfwd: paint(`
-..#aaa#..#aaa#
-..#bba#..#baa#
+..#aaa#aa#aaa#
+..#bba#ba#baa#
 ..#443#..#332#
 ..#443#..#332#
 ..#343#..#322#
@@ -146,8 +163,8 @@ const LEGS_S_RAW = {
 .####.........`),
   // right leg forward
   rfwd: paint(`
-..#aaa#..#aaa#
-..#bba#..#baa#
+..#aaa#aa#aaa#
+..#bba#ba#baa#
 ..#443#..#332#
 ..#443#..#332#
 ..#343#..#322#
@@ -162,8 +179,8 @@ const LEGS_S_RAW = {
 .........####.`),
   // passing: legs together, one knee crossing, body high
   pass: paint(`
-..#aaa#..#aaa#
-..#bba#..#baa#
+..#aaa#aa#aaa#
+..#bba#ba#baa#
 ..#443#..#332#
 ..#443#..#332#
 ..#343#..#322#
@@ -230,17 +247,107 @@ const LEGS_S_RAW = {
 const shadeHose = (set) => Object.fromEntries(Object.entries(set).map(([k, p]) => [k, recolor(p, { b: 'a', a: 'e' })]));
 const LEGS_S = shadeHose(LEGS_S_RAW);
 
-// The cape pooled on the floor once the hero goes down: a low crimson ellipse, lit on the left,
-// with the folds still reading. Placed under the death heap at (10, 36).
-const CLOAK_POOL = paint(`
+/**
+ * FORM SHADING — the law the hero's big cloth masses are painted by, and the reason they are typed
+ * as SHAPE (one placeholder key) instead of hand-valued.
+ *
+ * A cape is not a silhouette with a dark hem. It is a form, and a form under one key light has
+ * exactly four things on it, in this order along the light:
+ *   1. a HIGHLIGHT, and only on the plane that faces the key — up and to the left, never a stripe
+ *      down the middle of the shape;
+ *   2. the light-to-mid body of the ramp;
+ *   3. a TERMINATOR falling to the lower right, and a CORE SHADOW band just inside the far edge —
+ *      the darkest tone on the form, darker than the silhouette edge itself;
+ *   4. one step of REFLECTED LIGHT on that far edge, where the floor and the walls throw a little
+ *      light back into the shadow.
+ * Miss 3 and 4 and you get a plateau; put 1 in the middle and you get PILLOW SHADING, which is what
+ * both of the hero's cape panels were: one crimson value across ~250 texels with a 1-px dark hem,
+ * on the biggest area of the game's lead character. `style.js lint()` now fails a sheet for it.
+ *
+ * Each connected mass in `p` is shaded on its OWN axis (so the two front panels each get a whole
+ * form) and then shifted by where it sits on the figure (`panel`), so the panel on the hero's shadow
+ * side is a step or two down from the one catching the key. The reflected-light step is only put on
+ * masses that sit on the shadow side (or where `bounce` says so): the inner edge of a panel that
+ * lies against the body is occluded, not bounced, and gets the core shadow right on the edge.
+ *
+ * @param {import('./pixelPainter.js').Pix} p art whose form pixels all hold `from`
+ * @param {string} from the placeholder key
+ * @param {string} keys the material ramp, darkest first (7 steps for a mass this size)
+ * @param {{tilt?:number, form?:number, panel?:number, base?:number, core?:number, rim?:number,
+ *   span?:number, bounce?:number}} [o]
+ *   tilt = how much of the key axis is horizontal (1 = across, 0 = down the form) ·
+ *   form = how much of the ramp one mass spans · panel = how much its place on the figure shifts it ·
+ *   base = the mid tone · span = the narrowest run that gets a core shadow · bounce = force the
+ *   reflected-light step on (1) or off (0)
+ * @returns {import('./pixelPainter.js').Pix}
+ */
+function formShade(p, from, keys, o = {}) {
+  const ks = [...keys], N = ks.length, code = from.charCodeAt(0);
+  const tilt = o.tilt ?? 0.55, form = o.form ?? 0.90, panel = o.panel ?? 0.55;
+  const base = o.base ?? 0.52, core = o.core ?? 1, rim = o.rim ?? 1, span = o.span ?? 5;
+  const out = { w: p.w, h: p.h, d: new Uint16Array(p.d) };
+  const isF = (x, y) => x >= 0 && y >= 0 && x < p.w && y < p.h && p.d[y * p.w + x] === code;
+  let X0 = p.w, X1 = -1, Y0 = p.h, Y1 = -1;                    // the whole art, for the panel shift
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) if (isF(x, y)) {
+    if (x < X0) X0 = x; if (x > X1) X1 = x; if (y < Y0) Y0 = y; if (y > Y1) Y1 = y;
+  }
+  if (X1 < 0) return out;
+  // 1 where the key lands (top-left), 0 where the form turns away from it (bottom-right)
+  const axis = (x, y, x0, x1, y0, y1) =>
+    1 - (tilt * (x1 > x0 ? (x - x0) / (x1 - x0) : 0.5) + (1 - tilt) * (y1 > y0 ? (y - y0) / (y1 - y0) : 0.5));
+  const seen = new Uint8Array(p.w * p.h);
+  for (let sy = 0; sy < p.h; sy++) for (let sx = 0; sx < p.w; sx++) {
+    if (!isF(sx, sy) || seen[sy * p.w + sx]) continue;
+    const cells = [], stack = [[sx, sy]];                      // one connected mass = one form
+    seen[sy * p.w + sx] = 1;
+    let x0 = sx, x1 = sx, y0 = sy, y1 = sy;
+    while (stack.length) {
+      const [x, y] = stack.pop();
+      cells.push([x, y]);
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (isF(nx, ny) && !seen[ny * p.w + nx]) { seen[ny * p.w + nx] = 1; stack.push([nx, ny]); }
+      }
+    }
+    const gt = axis((x0 + x1) / 2, (y0 + y1) / 2, X0, X1, Y0, Y1);
+    const reach = Math.min(1, Math.max(x1 - x0, y1 - y0) / 12);  // a 2-px strap is not a torso
+    const bounce = o.bounce ?? (gt <= 0.5 ? 1 : 0);
+    const runs = new Map();                                    // every pixel's horizontal run: [width, last x]
+    for (const [x, y] of cells) {
+      if (runs.has(y * p.w + x)) continue;
+      let a = x; while (isF(a - 1, y)) a--;
+      let b = x; while (isF(b + 1, y)) b++;
+      for (let i = a; i <= b; i++) runs.set(y * p.w + i, [b - a + 1, b]);
+    }
+    for (const [x, y] of cells) {
+      const t = axis(x, y, x0, x1, y0, y1);
+      let i = Math.round((base + form * reach * (t - 0.5) + panel * (gt - 0.5)) * (N - 1));
+      const [w, end] = runs.get(y * p.w + x);
+      if (t < 0.55 && w >= span) {                             // the shadow half of the form
+        if (bounce) { if (x === end) i += rim; else if (x === end - 1) i -= core; }
+        else if (x === end) i -= core;
+      }
+      out.d[y * p.w + x] = ks[i < 0 ? 0 : i >= N ? N - 1 : i].charCodeAt(0);
+    }
+  }
+  return out;
+}
+
+/** Shorthand: a crimson cloth mass, typed as shape in 'X' and lit by `formShade`. */
+const cloth = (rows, o) => formShade(paint(rows), 'X', CRIMSON_KEYS, o);
+
+// The cape pooled on the floor once the hero goes down: a low crimson ellipse whose form runs from
+// the lit upper-left fold to a core shadow and a bounce rim on the far side. At (10, 36).
+const CLOAK_POOL = cloth(`
 ........############........
-....#ccbbbaaaaaeeeeeeee#....
-..#cccbbbbaaaaaeeeeeeeeee#..
-.#cccbbbbaaaaaaeeeeeeeeeee#.
-#ccccbbbbbaaaaaaeeeeeeeeeee#
-.#cccbbbbaaaaaaeeeeeeeeeee#.
-..#ccbbbbaaaaaaeeeeeeeeee#..
-.....##################.....`);
+....#XXXXXXXXXXXXXXXXXX#....
+..#XXXXXXXXXXXXXXXXXXXXXX#..
+.#XXXXXXXXXXXXXXXXXXXXXXXX#.
+#XXXXXXXXXXXXXXXXXXXXXXXXXX#
+.#XXXXXXXXXXXXXXXXXXXXXXXX#.
+..#XXXXXXXXXXXXXXXXXXXXXX#..
+.....##################.....`, { tilt: 0.78, form: 0.95, span: 8 });
 
 // Round buckler on the off arm (screen-right in front view). Placed at (30, 23).
 const SHIELD_S = paint(`
@@ -252,34 +359,40 @@ const SHIELD_S = paint(`
 .#3b2#.
 ..###..`);
 
-// Cloak seen from the front: crimson panels falling outside each pauldron with the warm tan lining
-// ('q') showing where the cloth turns, and the hem running down between the legs. Placed at (11, 19).
-// Cloth moves from the shoulders down, so the sway variants shear the lower rows progressively.
-const CLOAK_S = paint(`
+// Cloak seen from the front: crimson panels falling outside each pauldron, and the hem running down
+// between the legs. Placed at (11, 19). Cloth moves from the shoulders down, so the sway variants
+// shear the lower rows progressively.
+//
+// TYPED AS SHAPE, LIT BY `formShade`. Each panel is a separate mass, so each gets a whole form: the
+// panel on the key side opens on its highlight and closes on a core shadow where it meets the body
+// (an inner edge is occluded, so it takes no bounce — `bounce: 0` is the default for a mass on the
+// lit half); the panel on the shadow side sits a step and a half lower and carries the reflected
+// light on its outer edge. What was here before was two flat crimsons, 'c' and 'a', with a 1-px hem.
+const CLOAK_S = cloth(`
 .....###..............###.....
-.....#c#..............#a#.....
-....#cc#..............#aa#....
-....#cc#..............#aa#....
-....#cbb#............#aae#....
-....#cbb#............#aae#....
-...#ccbb#............#aaee#...
-...#ccbb#............#aaee#...
-...#cbbb#............#aaee#...
-...#cbbb#............#aaee#...
-..#ccbbb#............#aaaee#..
-..#ccbbb#............#aaaee#..
-..#cbbbb#............#aaaee#..
-..#cbbbb#............#aaaee#..
-.#ccbbbb#............#aaaaee#.
-.#ccbbbb#....#ab#....#aaaaee#.
-.#cbbbbb#.....#ab#...#aaaaee#.
-.#cbbbbb#.....#ab#...#aaaaee#.
-.#bbbbbb#.....#ab#...#aaaeee#.
-.#bbbbbb#.....#ab#...#aaaeee#.
-..#bbbb#......#ab#....#aaee#..
-..#bbb#.......#ab#.....#aee#..
-...##.........#ab#......##....
-..............#ab#............`);
+.....#X#..............#X#.....
+....#XX#..............#XX#....
+....#XX#..............#XX#....
+....#XXX#............#XXX#....
+....#XXX#............#XXX#....
+...#XXXX#............#XXXX#...
+...#XXXX#............#XXXX#...
+...#XXXX#............#XXXX#...
+...#XXXX#............#XXXX#...
+..#XXXXX#............#XXXXX#..
+..#XXXXX#............#XXXXX#..
+..#XXXXX#............#XXXXX#..
+..#XXXXX#............#XXXXX#..
+.#XXXXXX#............#XXXXXX#.
+.#XXXXXX#....#XX#....#XXXXXX#.
+.#XXXXXX#.....#XX#...#XXXXXX#.
+.#XXXXXX#.....#XX#...#XXXXXX#.
+.#XXXXXX#.....#XX#...#XXXXXX#.
+.#XXXXXX#.....#XX#...#XXXXXX#.
+..#XXXX#......#XX#....#XXXX#..
+..#XXX#.......#XX#.....#XXX#..
+...##.........#XX#......##....
+..............#XX#............`, { tilt: 0.50, form: 0.80, panel: 0.95 });
 
 /**
  * Cloth swings from the top: shear a hanging Pix so each row below `from` slides a little further,
@@ -336,8 +449,8 @@ const TORSO_E = paint(`
 ......#hijuwji#.....
 .....#344332221#....
 .....#344332211#....
-.....#3#43#22#1#....
-.....##.##.##.##....`);
+.....#314312211#....
+.....#111111111#....`);
 
 // Legs (side). 14 wide, placed at (17, 32). Far leg is the darker column on the left.
 const LEGS_E_RAW = {
@@ -470,25 +583,29 @@ const LEGS_E = shadeHose(LEGS_E_RAW);
 
 // Cloak (side): hangs from the back of the pauldron, a strip behind the body that flares at the hem
 // and streams back when walking (cloakDx). Placed at (13, 21).
-const CLOAK_E = paint(`
+// It hangs BEHIND him and he faces the key, so its outer edge is the lit one and the edge that
+// meets his back is the shadow: the old art had that exactly backwards (a dark column down the
+// outside, a light one down the middle). No bounce on the inner edge — the body occludes it — so
+// the core shadow lands on the edge itself.
+const CLOAK_E = cloth(`
 .......##.
-......#ab#
-.....#abb#
-.....#abb#
-....#abbb#
-....#abbb#
-....#abbb#
-...#abbba#
-...#abbba#
-...#abbba#
-..#abbbaa#
-..#abbbaa#
-..#abbbaa#
-.#abbbaaa#
-.#abbbaa##
-.#aabaaa#.
-#aaaaaa#..
-#######...`);
+......#XX#
+.....#XXX#
+.....#XXX#
+....#XXXX#
+....#XXXX#
+....#XXXX#
+...#XXXXX#
+...#XXXXX#
+...#XXXXX#
+..#XXXXXX#
+..#XXXXXX#
+..#XXXXXX#
+.#XXXXXXX#
+.#XXXXXX##
+.#XXXXXX#.
+#XXXXXX#..
+#######...`, { tilt: 0.68, form: 0.95, base: 0.58, bounce: 0 });
 
 // Off-arm buckler seen from behind the body (side view): a sliver on the far side. Placed at (16, 24).
 const SHIELD_E = paint(`
@@ -542,28 +659,33 @@ const TORSO_N = paint(`
 .####..........####.`);
 
 // The mantle from behind: hung from the gold clasp on the back plate, NARROWER than the shoulders so
-// the pauldrons and arms flank it, falling to a scalloped knee-length hem. Four aligned folds — two
-// deep creases ('e') and a lit centre ridge ('c') — give it cloth over a body, not a flat red blob.
-// Placed at (12, 23).
-const CLOAK_N = paint(`
-.......#ebbcbbbe#.......
-.....#baebbcbbbeaa#.....
-.....#baebbcbbbeaa#.....
-.....#baebbcbbbeaa#.....
-.....#baebbcbbbeaa#.....
-....#bbaebbcbbbeaaa#....
-....#bbaebbcbbbeaaa#....
-....#cbaebbcbbbeaaa#....
-....#cbaebbcbbbeaae#....
-....#cbaebbcbbbeaae#....
-....#cbaebbcbbbeaae#....
-..#ccbbaebbcbbbeaaaee#..
-..#ccbbaebbcbbbeaaaee#..
-..#ccbbaebbcbbbeaaaee#..
-..#cbbbaebbcbbbeaaaee#..
-..#cbbbaebbcbbbeaaaee#..
-..#cbb#aebb#cbbb#aaee#..
-...###..####..####..##..`);
+// the pauldrons and arms flank it, falling to a scalloped knee-length hem. Placed at (12, 23).
+//
+// THE BIGGEST SINGLE MASS ON THE HERO, and the one that was pillow-shaded hardest: a lit ridge
+// ('c') straight down the CENTRE with a dark crease ('e') mirrored either side of it, which is a
+// tube of light down the middle of a flat sheet — the textbook mistake, and one lit from nowhere.
+// It is now one form: the highlight sits on the upper-left quarter only, the terminator falls
+// across it to the lower right, a core-shadow band runs just inside the right edge and that edge
+// carries one step of reflected light off the wall behind him.
+const CLOAK_N = cloth(`
+.......#XXXXXXXX#.......
+.....#XXXXXXXXXXXX#.....
+.....#XXXXXXXXXXXX#.....
+.....#XXXXXXXXXXXX#.....
+.....#XXXXXXXXXXXX#.....
+....#XXXXXXXXXXXXXX#....
+....#XXXXXXXXXXXXXX#....
+....#XXXXXXXXXXXXXX#....
+....#XXXXXXXXXXXXXX#....
+....#XXXXXXXXXXXXXX#....
+....#XXXXXXXXXXXXXX#....
+..#XXXXXXXXXXXXXXXXXX#..
+..#XXXXXXXXXXXXXXXXXX#..
+..#XXXXXXXXXXXXXXXXXX#..
+..#XXXXXXXXXXXXXXXXXX#..
+..#XXXXXXXXXXXXXXXXXX#..
+..#XXX#XXXX#XXXX#XXXX#..
+...###..####..####..##..`, { tilt: 0.72, form: 0.98, base: 0.57, span: 6 });
 
 // walk/idle sway: cloth trails the body, so the whole mantle shears from the shoulders down
 const CLOAK_N_SWAY = [CLOAK_N, sway(CLOAK_N, -2), sway(CLOAK_N, 2), sway(CLOAK_N, -1, 3)];
@@ -710,7 +832,13 @@ function frame(f, o = {}) {
   if (o.orb) layers.push(L(orbPix(o.orb.cx + bx, o.orb.cy + by, o.orb.r), 0, 0));
   for (const e of o.extra || []) layers.push(e);
   const px = compose(HERO_W, HERO_H, layers);
-  return softenLitEdges(px);
+  // THE INK IS THE OUTER CONTOUR AND NOTHING ELSE (pixelPainter.seamInk). Every part above was
+  // hand-typed carrying its own '#' ring, and where two of them meet inside the figure that ring
+  // became a seam drawn in the darkest tone the style law allows — which at the play camera is
+  // not a line but a HOLE: the hero shipped 2-3 texels of pure black at the neck, three blocks
+  // across the belt and a black column the length of the leg gap. Interior ink now falls to a
+  // dark step of the garment it is cutting through; ink that touches air is left exactly alone.
+  return seamInk(softenLitEdges(px), { ramps: HERO_SEAM_RAMPS });
 }
 
 // Rest poses of the sword arm per facing: shoulder -> hand, and where the grip sits.

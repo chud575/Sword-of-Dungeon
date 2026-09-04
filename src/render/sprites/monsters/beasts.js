@@ -41,8 +41,8 @@
 //             narrow ribcage, and the ARMS HANGING PAST THE KNEES with the knuckles nearly
 //             grazing the floor. The signature is the raw wound on its shoulder knitting shut with
 //             pale new flesh while it stands there.
-import { Palette, outline, houseOutline, makePix, setPx as putPx, getPx, mirrorLit, smearArc as rawSmear } from '../pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { Palette, outline, houseOutline, seamInk, makePix, setPx as putPx, getPx, mirrorLit, smearArc as rawSmear } from '../pixelPainter.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
@@ -79,9 +79,16 @@ BEAST_PALETTE
   .set('7', '#8e4d59')                                            // tongue / gum
   .set('m', '#61724a')                                            // lichen in the gargoyle's crevices
   .set('s', '#b58a82')                                            // troll: pale new flesh over a closing wound
-  .set('E', '#1c1526').set('W', '#fff3e2')                        // eye socket / catch-light
+  .set('E', INK_DEEP).set('W', '#fff3e2')                         // eye socket / catch-light
   .set('Y', '#e8a33a').set('R', '#c9503c')                        // ember iris / blood iris
   .set('F', '#fff4f0');                                           // hurt flash
+
+/**
+ * THE SEAM VOCABULARY (pixelPainter `seamInk`): every material of this group, DARKEST FIRST.
+ * Reserve INK/INK_LIT for the OUTER CONTOUR: a fold in the werebear's shag or the joint between
+ * two blocks of gargoyle is a step down that material's own ramp, not a hole punched in it.
+ */
+const SEAM_RAMPS = [PELT, FUR, STONE, HIDE, BONE, MUZZLE, MATTED];
 
 // ------------------------------------------------------------------------------- the toolkit
 /** Compose is not used here: each creature draws straight into one Pix, then takes the outline. */
@@ -169,7 +176,10 @@ function clips(make) {
   // covered another's ring; the west facing is a mirror, which puts the lit-edge softening on the
   // wrong side. This peels every second coat, lays exactly one pixel of INK round anything bare and
   // re-keys the whole silhouette against the frame as it finally stands.
-  const inked = (fr) => fr.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT }));
+  // …and then THE SEAM PASS (pixelPainter.seamInk): ink that holds no part of the outer contour is
+  // not outline, it is a crease in a pelt or a joint in stone, and it is drawn a step down that
+  // material's OWN ramp. INK inside a lit body is the one tone the grade crushes to pure black.
+  const inked = (fr) => fr.map((p) => seamInk(houseOutline(p, { key: '#', litKey: '@', lit: LIT }), { ramps: SEAM_RAMPS, keep: 'E' }));
   const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a, frames: inked(a.frames) }; };
   for (const f of ['S', 'E', 'N']) for (const [name, a] of Object.entries(make(f))) put(name, f, a);
   for (const name of Object.keys(anims)) {

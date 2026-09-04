@@ -28,8 +28,8 @@
 //            ruff over a barrel chest, reverse-jointed (digitigrade) legs and a bushy tail.
 //
 // CLIPS idle(4) walk(6) attack(4) hurt(2) death(5) on every facing.
-import { Palette, paint, compose, mirrorLit, outline, houseOutline, recolor, makePix, setPx } from '../pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { Palette, paint, compose, mirrorLit, outline, houseOutline, seamInk, recolor, makePix, setPx } from '../pixelPainter.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
@@ -62,7 +62,7 @@ class HousePalette extends Palette {
 export const UNDEAD_PALETTE = new HousePalette()
   .set('#', INK)                                                              // outline: the one house ink
   .set('@', INK_LIT)                                                          // lit edge / inner line
-  .set('V', '#0b0812')                                                        // void: inside a hood, an open maw
+  .set('V', INK_DEEP)                                                        // void: inside a hood, an open maw
   // ghoul
   .ramp('1234', '#7d9159')                                                    // corpse flesh (grave green)
   .ramp('567', '#ded2b0', { pick: [2, 4, 6] })                                // bone: jaw, teeth, claws, feet
@@ -82,11 +82,19 @@ export const UNDEAD_PALETTE = new HousePalette()
   .set('A', '#d2bd9b').set('B', '#93816a')                                    // pale ruff / belly
   .set('C', '#241a20')                                                        // nose leather, paw pads
   // shared
-  .set('E', '#150f1c')                                                        // eye socket / shadowed hollow
+  .set('E', INK_DEEP)                                                        // eye socket / shadowed hollow
   .set('W', '#fff7ea')                                                        // catch-light
   .set('R', '#ff5a44')                                                        // burning iris (emissive)
   .set('Y', '#ffcf5c')                                                        // ember glow (emissive)
   .set('F', '#fff4f0');                                                       // hurt flash
+
+/**
+ * THE SEAM VOCABULARY (pixelPainter `seamInk`): INK and INK_LIT are the outer contour, nothing else.
+ * Grave-flesh, bone, rags, shroud, cloak, lining, pallid skin, linen, hair, gold, fur — every
+ * material of this group, DARKEST FIRST. A fold in a shroud is a step down the shroud's ramp;
+ * the void inside a hood is 'V' (style.js INK_DEEP) and keeps its own ink rim.
+ */
+const SEAM_RAMPS = ['1234', '567', '890', 'abcd', 'ef', 'ghij', 'kl', 'mno', 'qp', 'rs', 'tuv', 'wxyz', 'BA'];
 
 /** Keys flagged emissive in the atlas alpha: they keep their glow under fog and torchlight. */
 const EMISSIVE = 'YRf';
@@ -136,7 +144,11 @@ function clips(make) {
   // covered another's ring; the west facing is a mirror, which puts the lit-edge softening on the
   // wrong side. This peels every second coat, lays exactly one pixel of INK round anything bare and
   // re-keys the whole silhouette against the frame as it finally stands.
-  const inked = (fr) => fr.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT }));
+  // …and then THE SEAM PASS (pixelPainter.seamInk): with the contour right, ink left INSIDE the
+  // figure is drawing, and INK is the wrong colour for drawing — it is the darkest tone the law
+  // allows and the scene grade crushes it to a hole. Interior seams fall to a dark step of the
+  // material they cut through.
+  const inked = (fr) => fr.map((p) => seamInk(houseOutline(p, { key: '#', litKey: '@', lit: LIT }), { ramps: SEAM_RAMPS, keep: 'VE' }));
   const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a, frames: inked(a.frames) }; };
   for (const f of ['S', 'E', 'N']) for (const [name, a] of Object.entries(make(f))) put(name, f, a);
   for (const name of Object.keys(anims)) {

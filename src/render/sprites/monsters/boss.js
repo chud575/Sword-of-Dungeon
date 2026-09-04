@@ -31,8 +31,8 @@
 //              a hard ink gap where they leave the skull, wings FOLDED INTO TWO SPIRES that break
 //              the skyline over those horns, cloven hooves, one furnace split down the breastbone,
 //              and the signature — the ring of stolen soul-light hanging above its open palm.
-import { Palette, paint, outline, houseOutline, keyShade, makePix, setPx as putPx, getPx, shift, smearArc as rawSmear, mirrorLit, blit } from '../pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { Palette, paint, outline, houseOutline, seamInk, keyShade, makePix, setPx as putPx, getPx, shift, smearArc as rawSmear, mirrorLit, blit } from '../pixelPainter.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
@@ -119,9 +119,11 @@ export const BOSS_PALETTE = new HousePalette()
   .set('D', '#87626a').set('O', '#9c817c').set('P', '#bcaca1')
   .band('GHIQV', '#3f342f', { steps: 6, pick: [0, 1, 2, 3, 4] })  // horn, hoof, tooth — dark keratin
   .band('JKL', '#2a1c33', { steps: 6, pick: [0, 1, 2] })      // wing membrane: plum-black
-  .set('M', '#ffb347').set('S', '#d8571c').set('N', '#210d17')  // furnace core / furnace bleed / char
+  .set('M', '#ffb347').set('S', '#d8571c').set('N', INK_DEEP)   // furnace core / furnace bleed / char
+  // ('N' is the lip of the furnace — a hole you are looking INTO, so it takes the house void tone
+  //  like every other hollow in the cast, not a tenth private near-black of its own.)
   // shared
-  .set('E', '#1b1424').set('W', '#fff7ea').set('R', '#ff6a4a')  // eye, catch-light, red iris
+  .set('E', INK_DEEP).set('W', '#fff7ea').set('R', '#ff6a4a')  // eye, catch-light, red iris
   .set('F', '#fff4f0');                                        // hurt flash
 
 /** Compose is not used here: every creature draws straight into one Pix, then takes the outline. */
@@ -199,15 +201,30 @@ function tilt(p, a, cx, cy) {
   return o;
 }
 
-/** Standard clip set assembled from per-facing frame makers; west is the mirrored east. */
-function clips(make) {
+/**
+ * THE SEAM VOCABULARY of THIS file (pixelPainter `seamInk`), every material DARKEST FIRST: ogre
+ * hide/gut/bone/leather, salamander scale/belly, shadow-dragon scale/membrane/horn, demon
+ * hide/keratin/wing. `clips()` takes its own list per caller because drakes.js shares this toolkit
+ * with a completely different key vocabulary.
+ */
+const BOSS_SEAMS = ['1234', '567', '89z', 'ab', 'defg', 'hij', 'opqr', 'stu', 'vw', 'ABCDOP', 'GHIQV', 'JKL'];
+
+/**
+ * Standard clip set assembled from per-facing frame makers; west is the mirrored east.
+ * @param {(f:string)=>object} make @param {string[]} [seams] this creature's ramps, darkest first
+ */
+function clips(make, seams = BOSS_SEAMS) {
   const anims = {};
   // THE INK, LAST AND ONCE. Frames reach here already outlined, but the death clips run `tilt()`
   // and `squashTo()` AFTERWARDS — resampling a 1-px ring into gaps and doubles — and the west
   // facing is a mirror, which puts the lit-edge softening on the wrong side of the creature.
   // `houseOutline` peels every second coat, re-lays exactly one pixel of INK round anything bare
   // and re-keys the coat against the frame as it finally stands.
-  const inked = (a) => ({ ...a, frames: a.frames.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT })) });
+  // …then THE SEAM PASS (pixelPainter.seamInk): ink that holds no part of the outer contour is not
+  // outline but drawing — the line where a wing crosses a shoulder, the joint of a horn — and
+  // drawing it in INK punches a hole through a lit body once the scene grade gets to it. Those
+  // pixels fall to a dark step of the material they cut through; 'E' (INK_DEEP) keeps its rim.
+  const inked = (a) => ({ ...a, frames: a.frames.map((p) => seamInk(houseOutline(p, { key: '#', litKey: '@', lit: LIT }), { ramps: seams, keep: 'E' })) });
   const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...inked(a) }; };
   for (const f of ['S', 'E', 'N']) for (const [name, a] of Object.entries(make(f))) put(name, f, a);
   for (const name of Object.keys(anims)) {

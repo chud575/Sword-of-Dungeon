@@ -226,8 +226,18 @@ export function houseOutline(p, { key = '#', litKey = null, lit = null, inkKeys 
   const k = key.charCodeAt(0), lk = litKey ? litKey.charCodeAt(0) : 0;
   const inks = new Set([k, lk, ...(inkKeys ? [...inkKeys].map((c) => c.charCodeAt(0)) : [])].filter(Boolean));
   const o = clone(p);
-  // 1. peel: an ink pixel open to the air with no fill anywhere around it is a second coat
-  for (let pass = 0; pass < 4; pass++) {
+  // 1. peel every coat but the first.
+  //
+  // THE TEST HAS TO BE THE EXACT COMPLEMENT OF `outline()`, OR THE HALO SURVIVES. `outline()` lays
+  // ink on an empty pixel only when a fill sits ORTHOGONALLY beside it, so an ink pixel with no
+  // orthogonal fill neighbour is, by definition, a pixel the one true coat would never occupy: it
+  // is a second coat and it goes. This test used to accept a DIAGONAL fill neighbour as proof of
+  // "holding an edge", which is why every shallow diagonal in the cast shipped two texels thick —
+  // the werebear's shoulder and the barbarian's mane and axe arm wore a 2-texel lavender halo
+  // (INK_LIT is a light violet: doubled, it stops reading as a line and starts reading as a rim
+  // light nobody drew). Peeling can never expose bare fill, because a pixel with no orthogonal
+  // fill neighbour is covering none; step 2 then re-lays the single coat.
+  for (let pass = 0; pass < 6; pass++) {
     const snap = new Uint16Array(o.d);
     const at = (x, y) => (x < 0 || y < 0 || x >= o.w || y >= o.h ? 0 : snap[y * o.w + x]);
     let peeled = 0;
@@ -235,17 +245,21 @@ export function houseOutline(p, { key = '#', litKey = null, lit = null, inkKeys 
       const i = y * o.w + x;
       if (!inks.has(snap[i])) continue;
       let open = false, fill = false;
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        if (!dx && !dy) continue;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
         const c = at(x + dx, y + dy);
-        if (!c) { if (!dx || !dy) open = true; } else if (!inks.has(c)) fill = true;
+        if (!c) open = true; else if (!inks.has(c)) fill = true;
       }
       if (open && !fill) { o.d[i] = 0; peeled++; }
     }
     if (!peeled) break;
   }
-  // 2. one fresh coat wherever fill is still bare
-  const coated = outline(o, key, { lit, litKey, keys: inkKeys });
+  // 2. one fresh coat wherever fill is still bare.
+  // `outline()` must be told that `litKey` is INK TOO. It only knows the keys it is handed, and
+  // handed just '#' it treats every softened lit-edge pixel as FILL and dutifully wraps a second
+  // coat around it — which is where the cast's 2-texel lavender rim came from, laid down again
+  // immediately after the peel above had taken it off.
+  const knownInk = `${litKey || ''}${inkKeys || ''}`;
+  const coated = outline(o, key, { lit, litKey, keys: knownInk || null });
   // 3. re-key the whole coat against the finished figure's own outward normal
   const at = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : coated.d[y * p.w + x]);
   const out = clone(coated);
@@ -260,6 +274,82 @@ export function houseOutline(p, { key = '#', litKey = null, lit = null, inkKeys 
     }
     if (!edge) continue;                                   // interior ink is drawing, leave it
     out.d[i] = lit && lk && (ex * lit.x + ey * lit.y) > 0 ? lk : k;
+  }
+  return out;
+}
+
+/**
+ * THE SEAM PASS — the other half of the ink law, run on a FINISHED frame right after
+ * `houseOutline`: INK IS THE OUTER CONTOUR AND NOTHING ELSE.
+ *
+ * `houseOutline` deliberately leaves ink INSIDE the silhouette alone, on the grounds that it is
+ * drawing rather than outline. That was half true and it cost the cast dearly. A pixel of INK
+ * (luminance 0.08 — the darkest tone the style law allows anywhere) sitting inside a lit garment is
+ * not a line, it is a HOLE: at the playing camera the grading pass crushes it to black while the
+ * plate around it reads at 0.4, so the hero shipped with pure-black blocks punched through his
+ * neck, his belt, both faulds and the full length of the leg gap, and the barbarian wore a black
+ * bar across the collarbone and black rings round both arms. A seam between two planes of the SAME
+ * garment is a step down that garment's own ramp — never the silhouette ink.
+ *
+ * So: every ink pixel with no transparent 4-neighbour (i.e. one that holds no part of the outer
+ * contour) is re-keyed ONE STEP BELOW the darker of the two planes it separates, in whichever
+ * material it is cutting through, measured from its own 8-neighbourhood — a local crease, not the
+ * bottom of the ramp. Ink that touches air is untouched, which is why this can never eat the
+ * silhouette; hollows that genuinely read as holes in a body (an eye socket, an open maw, the
+ * inside of a hood) are painted with their own key — style.js `INK_DEEP` — and are not ink, so
+ * they are not touched either.
+ *
+ * @param {Pix} p a finished frame (outline already laid)
+ * @param {{ramps?:string[], inkKeys?:string, drop?:Object<string,number>, keep?:string}} [o]
+ *   `ramps`: each material's keys DARKEST FIRST ('123' skin, '7456' cloth, …) — the same strings
+ *   the palette was built from. `drop`: how many steps BELOW the darkest neighbouring tone of that
+ *   material the seam lands (1 = one step, the house default); where the ramp has no step left the
+ *   ink stays, so a form painted at the bottom of its own curve keeps its separation. `keep`: ink
+ *   pixels whose neighbourhood is dominated by one of these keys are left alone.
+ * @returns {Pix} a new Pix
+ */
+export function seamInk(p, { ramps = [], inkKeys = '#@', drop = { '#': 1, '@': 1 }, keep = '' } = {}) {
+  if (!ramps.length) return p;
+  const inks = new Set([...inkKeys].map((c) => c.charCodeAt(0)));
+  const held = new Set([...keep].map((c) => c.charCodeAt(0)));
+  /** key code -> [material index, step within that material] */
+  const owner = new Map();
+  ramps.forEach((keys, m) => { [...keys].forEach((c, i) => { if (!owner.has(c.charCodeAt(0))) owner.set(c.charCodeAt(0), [m, i]); }); });
+  const out = clone(p);
+  const at = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : p.d[y * p.w + x]);
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+    const i = y * p.w + x, c = p.d[i];
+    if (!inks.has(c)) continue;
+    // any transparent orthogonal neighbour means this pixel is holding the outer contour
+    if (!at(x + 1, y) || !at(x - 1, y) || !at(x, y + 1) || !at(x, y - 1)) continue;
+    const votes = new Map(), lowest = new Map();
+    let held9 = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const n = at(x + dx, y + dy);
+      if (held.has(n)) { held9++; continue; }
+      const o = owner.get(n);
+      if (!o) continue;
+      votes.set(o[0], (votes.get(o[0]) || 0) + (dx && dy ? 1 : 2));   // orthogonal neighbours count double
+      const lo = lowest.get(o[0]);
+      if (lo === undefined || o[1] < lo) lowest.set(o[0], o[1]);
+    }
+    if (!votes.size || held9 > 4) continue;
+    // A seam is one step BELOW the darker of the two planes it separates — a local crease, not the
+    // bottom of the ramp, which is what keeps a lit garment lit. A material whose darkest tone is
+    // already sitting against this pixel has no step left to give, so it is not eligible and the
+    // seam is taken from the next material that voted; when NONE of them has room the ink stays,
+    // and that is the sheet saying this form is painted too low to hold a seam at all — flattening
+    // it mechanically would merge two limbs into one silhouette.
+    const fall = drop[String.fromCharCode(c)] ?? 1;
+    let best = -1, bestN = -1, bestStep = 0;
+    for (const [m, n] of votes) {
+      const step = lowest.get(m) - fall;
+      if (step < 0) continue;
+      if (n > bestN || (n === bestN && m < best)) { best = m; bestN = n; bestStep = step; }
+    }
+    if (best < 0) continue;
+    out.d[i] = ramps[best].charCodeAt(bestStep);
   }
   return out;
 }

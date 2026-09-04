@@ -24,7 +24,7 @@
 //                     feet planted wide — and a violet echo of itself standing a pixel out of
 //                     register, because half of it is somewhere else.
 import { Palette, outline, makePix, setPx as putPx, getPx, blit } from '../pixelPainter.js';
-import { INK, INK_LIT, LIT, ramp } from '../style.js';
+import { INK, INK_LIT, INK_DEEP, LIT, ramp } from '../style.js';
 import { mass, limb, curve, crest, wingFan, clips, flash, squashTo, tilt, setDrawScale, R } from './boss.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
@@ -151,8 +151,10 @@ const WY = drakePalette()
   .band('123456', '#7a6d3e', HUE)   // dry olive-tan hide
   .band('qrstu', '#93553a', HUE)    // rust wing membrane
   .band('vwxyz', '#a09684', BONE)   // horn, beak plate, talon
-  .set('E', '#1d1526').set('Y', '#ffc45a');   // eye socket, the amber eye (emissive)
+  .set('E', INK_DEEP).set('Y', '#ffc45a');   // eye socket, the amber eye (emissive)
 const WY_HIDE = '123456', WY_MEM = 'qrstu', WY_HORN = 'vwxy';
+/** Seam vocabulary (pixelPainter `seamInk`), darkest first: hide, membrane, horn. */
+const WY_SEAMS = ['123456', 'qrstu', 'vwxyz'];
 /** Sun-dried leather sits low on its ramp: this is the dusty drake, not a chalk one. */
 const WY_TB = -0.09;
 
@@ -304,7 +306,7 @@ function wyvAnims(f) {
 
 /** Wyvern: a 70x71 cell around a 60x68 pose — two-legged, wings for arms, a barbed whip tail. */
 export function buildWyvern() {
-  return { anims: clips(wyvAnims), palette: WY, w: WY_W, h: WY_H, pivot: WY_PIV, emissive: 'Y', scale: 1 };
+  return { anims: clips(wyvAnims, WY_SEAMS), palette: WY, w: WY_W, h: WY_H, pivot: WY_PIV, emissive: 'Y', scale: 1 };
 }
 
 // ==========================================================================================
@@ -329,8 +331,10 @@ const SD = drakePalette()
   .band('qrstu', '#4e3568', HUE)    // plum membrane: thin enough that the light behind it comes through
   .band('vwxyz', '#8f8a80', BONE)   // bone horn and claw
   .set('G', '#7fd8ff').set('H', '#c9f0ff').set('I', '#4a86b8')  // the inner glow: core, flare, bleed
-  .set('E', '#1a1425');
+  .set('E', INK_DEEP);
 const SD_SCL = '123456', SD_MEM = 'qrstu', SD_HORN = 'vwxy';
+/** Seam vocabulary (pixelPainter `seamInk`), darkest first: scale, membrane, horn, inner glow. */
+const SD_SEAMS = ['123456', 'qrstu', 'vwxyz', 'IGH'];
 /** The darkest body in the game: it is read by the light LEAKING OUT of it, not falling on it. */
 const SD_TB = -0.26;
 
@@ -483,7 +487,7 @@ function sdAnims(f) {
 
 /** Shadow dragon: a 90x80 cell around a 76x72 pose — four legs under a full span, lit from inside. */
 export function buildShadowDragon() {
-  return { anims: clips(sdAnims), palette: SD, w: SD_W, h: SD_H, pivot: SD_PIV, emissive: 'GH', scale: 1 };
+  return { anims: clips(sdAnims, SD_SEAMS), palette: SD, w: SD_W, h: SD_H, pivot: SD_PIV, emissive: 'GH', scale: 1 };
 }
 
 // ==========================================================================================
@@ -604,8 +608,10 @@ const FD = drakePalette()
                                     // hadrosaur crest: the brightest shape on a creature whose
                                     // brightest thing is supposed to be the fire inside it.
   .set('k', '#b8401a').set('l', '#ff8f30').set('m', '#ffe6a4')  // vein core / vein / white-hot
-  .set('E', '#150e18');   // eye socket, nostril, mouth hollow — the one tone below the whole hide
+  .set('E', INK_DEEP);   // eye socket, nostril, mouth hollow — the one tone below the whole hide
 const FD_HIDE = '123456', FD_PLATE = 'qrstu', FD_HORN = 'HIJK', FD_MEM = 'ABC';
+/** Seam vocabulary (pixelPainter `seamInk`), darkest first: hide, plate, tooth, wing, horn, vein. */
+const FD_SEAMS = ['123456', 'qrstu', 'vwxyz', 'ABCDG', 'HIJKL', 'klm'];
 /**
  * Cooled basalt: dark enough that the molten veins in it are the brightest thing on the creature.
  * IT HAD TO COME UP WHEN THE DRAKE GREW. Every form here is a solid whose RIM catches the light and
@@ -976,7 +982,7 @@ function fdAnims(f) {
 
 /** Fyre drake: an 88x79 cell around a 78x74 pose — a squat molten drake with its head up. */
 export function buildFyreDrake() {
-  return { anims: clips(fdAnims), palette: FD, w: FD_W, h: FD_H, pivot: FD_PIV, emissive: 'lm', scale: 1 };
+  return { anims: clips(fdAnims, FD_SEAMS), palette: FD, w: FD_W, h: FD_H, pivot: FD_PIV, emissive: 'lm', scale: 1 };
 }
 
 // ==========================================================================================
@@ -1003,8 +1009,10 @@ const DS = drakePalette()
   .band('qrstu', '#5d5078', HUE)    // violet underside and joints
   .set('v', '#5b4a80')              // the echo: the half of it that is elsewhere
   .set('x', '#a8ecff').set('y', '#e8f8ff')                      // shimmer, glint (emissive)
-  .set('E', '#1b1526').set('Y', '#c8f0ff');                     // eye socket, eye (emissive)
+  .set('E', INK_DEEP).set('Y', '#c8f0ff');                     // eye socket, eye (emissive)
 const DS_SHELL = '123456', DS_JOINT = 'qrstu';
+/** Seam vocabulary (pixelPainter `seamInk`), darkest first: carapace, joints. */
+const DS_SEAMS = ['123456', 'qrstu'];
 /** Cold chitin: the shell sits below its own highlights so the shimmer and the eyes stay the bright notes. */
 const DS_TB = -0.13;
 
@@ -1145,7 +1153,7 @@ function dsAnims(f) {
 
 /** Dimension spider: a 60x51 cell around a 52x46 pose — eight jointed legs and an echo out of register. */
 export function buildDimensionSpider() {
-  return { anims: clips(dsAnims), palette: DS, w: DS_W, h: DS_H, pivot: DS_PIV, emissive: 'xyY', scale: 1 };
+  return { anims: clips(dsAnims, DS_SEAMS), palette: DS, w: DS_W, h: DS_H, pivot: DS_PIV, emissive: 'xyY', scale: 1 };
 }
 
 // ---------------------------------------------------------------------------------- registry

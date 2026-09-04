@@ -18,6 +18,13 @@
 // `INK_TOL` of INK — which covers all five legacy values and nothing else — and reports anything
 // further out as a violation. New art must use INK itself.
 //
+// AND THERE WAS A SECOND INK LAYER UNDER THAT ONE. Every group also kept a private near-black for
+// eye sockets, hollows and voids — ten of them, all groping for the same colour. Those are now
+// `INK_DEEP`, declared here with the other two, so this file defines EVERY near-black in the game
+// and the three of them have three different jobs: `INK` is the outer contour, `INK_LIT` the part
+// of that contour facing the light, `INK_DEEP` the holes in a body. An internal seam is none of
+// the three — it is a dark step of the material's own ramp (`pixelPainter.seamInk`).
+//
 // THE LAW, in one paragraph: hand-pixelled 2D sprites billboarded in a lit 3D diorama. Colour comes
 // from hue-shifted ramps (shadows drift cooler / toward violet and gain saturation, highlights drift
 // warmer / toward amber and lose a little) — never a flat darken/lighten. One dark, non-black ink
@@ -29,9 +36,11 @@ import { toRgb, rgbToHsl, hslToRgb } from './pixelPainter.js';
 
 // ------------------------------------------------------------------------------------ the ink
 /**
- * THE outline colour for the whole cast: a near-black violet, never pure black. It is the darkest
- * value that may appear in any sprite, and it appears only as the one-pixel silhouette outline (and
- * the hollows that read as holes in a body: an open hood, a maw).
+ * THE outline colour for the whole cast: a near-black violet, never pure black. It belongs to the
+ * OUTER CONTOUR and to nothing else — one pixel of it, softened to `INK_LIT` where the edge faces
+ * the light. It is not a drawing colour: a seam between two planes of one garment is a step down
+ * that garment's own ramp (`pixelPainter.seamInk`), and a hollow that reads as a hole in a body —
+ * an eye socket, an open hood, a maw — is `INK_DEEP` below.
  */
 export const INK = '#17111f';
 
@@ -44,6 +53,32 @@ export const INK_TOL = 12;
 
 /** The lit-edge colour the outline softens to on light-facing edges (`outline(..., {litKey})`). */
 export const INK_LIT = '#4e4459';
+
+/**
+ * THE SECOND INK, DECLARED AT LAST — the one tone for every VOID in the game.
+ *
+ * `INK` above claims to be "the darkest value that may appear in any sprite", and for a long time
+ * that was simply not true: underneath it every group file kept a private near-black of its own for
+ * the holes in a body, and there were TEN of them — '#1c1526' (beasts), '#1b1424' (boss),
+ * '#171020' and the voids '#170e28'/'#150b26' (caster), '#1d1526'/'#1a1425'/'#150e18'/'#1b1526'
+ * (the four drakes), '#0b0812'/'#150f1c' (undead), '#191322' (humanoid + humans), '#1c1424'
+ * (vermin) and the hero's eye, which was INK itself. Averaged, nine of the ten land on #181122 —
+ * i.e. they were all groping for the same colour, one file at a time, and the tenth was three times
+ * darker than its neighbours. That is exactly the failure the top of this file was written to stop,
+ * repeated one layer down. There is now ONE:
+ *
+ *     import { INK, INK_LIT, INK_DEEP } from '../style.js';
+ *     pal.set('#', INK).set('@', INK_LIT).set('E', INK_DEEP);   // outline · lit edge · eye socket
+ *
+ * WHAT IT IS FOR, and why it is not INK. An eye socket, an open maw, the inside of a hood and the
+ * gap under a helm are not outline: they are places where the body is not there, and the eye has to
+ * read them as BEHIND the silhouette, not on it. So `INK_DEEP` sits one clear step BELOW `INK`
+ * (luminance 0.061 against 0.080, and cooler) — deep enough that a socket never reads as a stray
+ * length of contour, close enough that the two never fight. It is the only tone in the game allowed
+ * below the ink, it is only ever used INSIDE a silhouette, and nothing else in the cast may invent
+ * another one: `lint()` measures the outline, but this is the colour a player reads as a hole.
+ */
+export const INK_DEEP = '#120c1c';
 
 // ------------------------------------------------------------------------------------ the light
 /**
@@ -101,6 +136,25 @@ export const KEY_LIGHT_MIN = 0.02;
 
 /** Fraction of a sprite's pixels that must sit in the upper half of its own value range (warning-level house target). */
 export const READ_THROUGH_TARGET = 0.15;
+
+/**
+ * THE INK-DISCIPLINE TARGET: how much of a sheet's ink may sit INSIDE the silhouette rather than
+ * holding the outer contour. INK is the darkest tone the law allows, so a pixel of it in the middle
+ * of a lit garment is not a line — the scene grade crushes it to black while the plate around it
+ * reads at 0.4, and the player sees a hole punched through the armour. This measured the hero at
+ * 2-3 texels of pure black across the neck, three across the belt, notches out of both faulds and a
+ * black column the length of the leg gap; the barbarian at a bar across the collarbone and rings
+ * round both arms. A seam belongs to its own material's ramp (`pixelPainter.seamInk`), and the only
+ * ink left inside a figure should be where that material is already at the bottom of its own curve.
+ *
+ * Most of the cast now sits at 2-11% (the hero 7, the barbarian 10, the shadow dragon 2). The five
+ * still over 12 — fyre drake 30, demon 25, war lord 21, mage 16, dark warrior 16 — are the sheets
+ * whose materials are painted so low that `seamInk` finds no darker step to fall to and leaves the
+ * ink where it is. That is not the pass failing; it is the pass reporting that those hides and
+ * plates need repainting UP before their seams can be drawn at all. Warning, not error, for exactly
+ * that reason: it is a list of the sheets that still need another pass, not a gate.
+ */
+export const INTERIOR_INK_TARGET = 0.12;
 
 /** Coverage (fraction of body pixels) at which a tone stops being a sparkle and starts being paint. */
 export const AREA_MIN = 0.03;
@@ -496,6 +550,101 @@ export const LIT_VALUE_FLOOR = 0.12;
  */
 export const LIT_RANGE_MIN = 0.40;
 
+// ------------------------------------------------------------------------------- the form check
+/**
+ * PILLOW SHADING, AND WHY EVERY RULE ABOVE LET IT THROUGH.
+ *
+ * Everything above this line histograms TONES. Not one of them looks at WHERE a tone was put, so a
+ * creature can hold a perfect seven-step ramp, a legal median, a positive rim delta and the full
+ * screen contrast — and still be lit from nowhere, because the light was painted down the MIDDLE of
+ * every form with the shadow ringed symmetrically around it. That is pillow shading, the oldest
+ * mistake in pixel art, and it shipped on the largest masses in the game while lint said nothing:
+ * the hero's two cape panels (one crimson value across ~250 texels with a one-pixel dark hem), the
+ * dwarven guard's skirt, the barbarian's torso, the mercenary's tunic, the swordsman's coat and the
+ * War Lord's cloak — a third of the War Lord's body area measured centre-lit.
+ *
+ * WHAT THIS MEASURES. Along every row of every frame, a RUN is a stretch of one material (a jump of
+ * more than `FORM_MAT_TOL` in RGB ends it, and so does the ink — an outline is not form). A run at
+ * least `FORM_RUN_MIN` long is a form the player can read, and its profile is split in thirds. It
+ * FAILS when the middle third is brighter than both ends by more than `FORM_STEP` while the two
+ * ends sit within `FORM_SYMMETRY` of each other — light in the centre, shadow on both edges, which
+ * is a tube of light on a flat sheet and is exactly what a key light never does. A profile that
+ * falls one way (the light side, the terminator, the core shadow, the reflected-light edge) passes,
+ * whichever way it falls, because a form turned away from the key is still a form.
+ *
+ * ONE-PIXEL SEAMS ARE READ THROUGH. A drawn crease — `seamInk`'s job — is structure, not shading,
+ * and a single dark pixel sitting between two lighter ones is replaced by their mean before the
+ * profile is judged. Without that, every seam in the cast turns its own row into a false positive.
+ */
+export const FORM_RUN_MIN = 8;
+/**
+ * How far two neighbouring pixels may sit apart in RGB and still count as one material. It has to
+ * clear a whole ramp step at its widest: the War Lord's plate reads four steps off a seven-step
+ * curve and walks 97-105 units between neighbours, and at any tighter figure his breastplate splits
+ * into single-tone runs and the pillow on the biggest human in the game measures as nothing at all.
+ */
+export const FORM_MAT_TOL = 110;
+/** How much brighter the middle of a run must be than both its ends before it reads as a pillow. */
+export const FORM_STEP = 0.035;
+/** How near the two ends of a run must be, as a fraction of the centre's lift, to read as symmetric. */
+export const FORM_SYMMETRY = 0.6;
+/**
+ * Fraction of a sheet's form pixels that may be centre-lit before it is a bug. The repainted cast
+ * runs 0.02-0.12 (worst: the Wyvern); the state this rule was written against ran to 0.35 on the War
+ * Lord, 0.30 on the Dwarven Guard and two flat crimson slabs on the hero, so it bites hard on the
+ * failure and leaves a few points of room for a sheet mid-repaint.
+ */
+export const FORM_PILLOW_MAX = 0.15;
+/** The house target for that fraction — above it, the sheet still has a pass of form work owing. */
+export const FORM_PILLOW_TARGET = 0.06;
+
+/**
+ * Measure how much of a sheet's form is lit down the middle instead of from `LIT`. Pure analysis;
+ * `lint()` turns it into a violation. See `FORM_RUN_MIN` for the method.
+ * @param {import('./spriteSheet.js').Sheet} sheet
+ * @param {{skipAnims?:string[]}} [o]
+ * @returns {{formPx:number, pillowPx:number, pillow:number, worst:null|{anim:string, facing:string, y:number, x:number, n:number}}}
+ */
+export function analyseForms(sheet, { skipAnims = LINT_SKIP_ANIMS } = {}) {
+  const W = sheet.width, D = sheet.data, ink = toRgb(INK);
+  const at = (x, y) => { const i = (y * W + x) * 4; return D[i + 3] ? [D[i], D[i + 1], D[i + 2]] : null; };
+  let formPx = 0, pillowPx = 0, worst = null;
+  for (const fr of sheet.frames) {
+    if (skipAnims.includes(fr.name)) continue;
+    for (let y = 0; y < fr.h; y++) {
+      let run = [], prev = null;
+      const flush = (xEnd) => {
+        const n = run.length;
+        if (n >= FORM_RUN_MIN) {
+          formPx += n;
+          const p = run.slice();                            // read through one-pixel drawn seams
+          for (let i = 1; i < n - 1; i++) {
+            if (run[i] < run[i - 1] - 0.05 && run[i] < run[i + 1] - 0.05) p[i] = (run[i - 1] + run[i + 1]) / 2;
+          }
+          const t = Math.floor(n / 3);
+          const mean = (a, b) => { let s = 0; for (let i = a; i < b; i++) s += p[i]; return s / (b - a); };
+          const lo = mean(0, t), mid = mean(t, n - t), hi = mean(n - t, n);
+          const dark = Math.min(lo, hi), light = Math.max(lo, hi);
+          if (mid - light > FORM_STEP && light - dark < (mid - dark) * FORM_SYMMETRY) {
+            pillowPx += n;
+            if (!worst || n > worst.n) worst = { anim: fr.name, facing: fr.facing, y, x: xEnd - n, n };
+          }
+        }
+        run = [];
+      };
+      for (let x = 0; x < fr.w; x++) {
+        const c = at(fr.x + x, fr.y + y);
+        if (!c || dist(c, ink) <= INK_TOL) { flush(x); prev = null; continue; }
+        if (prev && dist(c, prev) > FORM_MAT_TOL) flush(x);   // a new material is a new form
+        run.push(luminance(c));
+        prev = c;
+      }
+      flush(fr.w);
+    }
+  }
+  return { formPx, pillowPx, pillow: formPx ? pillowPx / formPx : 0, worst };
+}
+
 // ------------------------------------------------------------------------------------ the lint
 /**
  * @typedef {{rule:string, severity:'error'|'warning', detail:string, value:number, limit:number}} Violation
@@ -537,6 +686,26 @@ export function analyseSheet(sheet, { skipAnims = LINT_SKIP_ANIMS } = {}) {
   if (!pixels) return null;
   const inkKey = [...edges.entries()].sort((a, b) => b[1] - a[1])[0][0];
   const ink = inkKey.split(',').map(Number);
+  // ---- INK DISCIPLINE: how much of the ink is NOT holding the outer contour. An ink pixel with no
+  // transparent 4-neighbour is inside the figure, where INK is not a line but the darkest tone the
+  // law allows sitting in the middle of a lit garment — a hole, once the scene grade reaches it.
+  // (`pixelPainter.seamInk` is the pass that takes those down to a step of the material's own ramp;
+  // this is the number that says whether a sheet has had it.)
+  let inkPx = 0, innerInk = 0;
+  for (const fr of sheet.frames) {
+    if (skipAnims.includes(fr.name)) continue;
+    for (let y = 0; y < fr.h; y++) for (let x = 0; x < fr.w; x++) {
+      const c = at(fr.x + x, fr.y + y);
+      if (!c || `${c[0]},${c[1]},${c[2]}` !== inkKey) continue;
+      inkPx++;
+      const open = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+        const px = x + dx, py = y + dy;
+        return px < 0 || py < 0 || px >= fr.w || py >= fr.h || !at(fr.x + px, fr.y + py);
+      });
+      if (!open) innerInk++;
+    }
+  }
+  const interiorInk = inkPx ? innerInk / inkPx : 0;
   const fills = [...counts.entries()].filter(([k]) => k !== inkKey && !emissive.has(k));
   const total = fills.reduce((s, [, n]) => s + n, 0) || 1;
   const tones = fills.map(([k, n]) => {
@@ -563,7 +732,7 @@ export function analyseSheet(sheet, { skipAnims = LINT_SKIP_ANIMS } = {}) {
     peakChroma: area.length ? Math.max(...area.map((t) => t.chroma)) : 0,
     meanChroma: tones.reduce((s, t) => s + t.chroma * t.coverage, 0),
     keyLight: (litN ? litSum / litN : 0) - (awayN ? awaySum / awayN : 0),
-    figurePx: measureFigure(sheet),
+    interiorInk, figurePx: measureFigure(sheet),
   };
 }
 
@@ -617,6 +786,18 @@ export function lint(sheet, meta = {}) {
     v.push({ rule: 'chroma-mean', severity: 'error', value: +a.meanChroma.toFixed(3), limit: meanCeil,
       detail: `${who}: body averages chroma ${a.meanChroma.toFixed(2)} — the whole creature is a hot accent (ceiling ${meanCeil})` });
   }
+  // THE RULE THAT MEASURES WHERE THE LIGHT WAS PUT, not which tones were used. `keyLight` below
+  // only ever asked the SILHOUETTE which way it faces; this asks every form inside it (see
+  // `analyseForms`) whether it is lit from the top-left or lit down its own middle.
+  const f = analyseForms(sheet, { skipAnims: meta.skipAnims || LINT_SKIP_ANIMS });
+  const where = f.worst ? ` (worst: ${f.worst.n} px across ${f.worst.anim}/${f.worst.facing} row ${f.worst.y})` : '';
+  if (f.pillow > FORM_PILLOW_MAX) {
+    v.push({ rule: 'form-pillow', severity: 'error', value: +f.pillow.toFixed(3), limit: FORM_PILLOW_MAX,
+      detail: `${who}: ${(f.pillow * 100).toFixed(0)}% of its form area is lit down the CENTRE with shadow on both edges — pillow shading, not a key light${where} (ceiling ${FORM_PILLOW_MAX})` });
+  } else if (f.pillow > FORM_PILLOW_TARGET) {
+    v.push({ rule: 'form-pillow', severity: 'warning', value: +f.pillow.toFixed(3), limit: FORM_PILLOW_TARGET,
+      detail: `${who}: ${(f.pillow * 100).toFixed(0)}% of its form area is still centre-lit rather than key-directional${where} (house target ${FORM_PILLOW_TARGET})` });
+  }
   if (a.keyLight < KEY_LIGHT_MIN) {
     v.push({ rule: 'key-light', severity: 'error', value: +a.keyLight.toFixed(3), limit: KEY_LIGHT_MIN,
       detail: `${who}: rim delta ${a.keyLight.toFixed(3)} — the key light does not agree with LIT (top-left)` });
@@ -635,6 +816,10 @@ export function lint(sheet, meta = {}) {
   if (a.unaidedMedian < LIT_VALUE_FLOOR) {
     v.push({ rule: 'value-lit-unaided', severity: 'warning', value: +a.unaidedMedian.toFixed(3), limit: LIT_VALUE_FLOOR,
       detail: `${who}: as painted it reads at ${a.unaidedMedian.toFixed(3)} on screen (median ${a.median.toFixed(2)}) and only the renderer's read-lift x^${a.readLift.toFixed(2)} keeps it out of the floor — repaint it lighter` });
+  }
+  if (a.interiorInk > INTERIOR_INK_TARGET) {
+    v.push({ rule: 'interior-ink', severity: 'warning', value: +a.interiorInk.toFixed(3), limit: INTERIOR_INK_TARGET,
+      detail: `${who}: ${(a.interiorInk * 100).toFixed(0)}% of its ink is INSIDE the silhouette — INK is the outer contour, and a seam drawn in it is a hole punched through a lit garment; draw it a step down that material's own ramp (pixelPainter.seamInk) (house target ${INTERIOR_INK_TARGET})` });
   }
   if (a.readThrough < READ_THROUGH_TARGET) {
     v.push({ rule: 'read-through', severity: 'warning', value: +a.readThrough.toFixed(3), limit: READ_THROUGH_TARGET,
