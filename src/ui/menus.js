@@ -73,19 +73,31 @@ export class Menus {
    * Open a modal. `items` are menu entries {label, sub, onSelect, danger, disabled}; extra keys go to `onKey`.
    * @returns {object} the stack entry
    */
-  openModal({ name, cls = '', html = '', items = null, onKey = null, onClose = null, backdrop = true, sel = 0, wide = false, bdCls = '', before = '' }) {
+  /**
+   * @param o.dismissible Whether the screen can be left without choosing one of its own buttons.
+   *   Every modal used to rely on Esc alone, which soft-locks a phone: there is no Esc key, so
+   *   Settings, Help and the Hall of Fame could be opened and never closed. Dismissible screens now
+   *   carry a tappable ✕ and close when the backdrop outside the panel is tapped. Screens that own
+   *   their exits (death, victory, confirm, the title) opt out so a stray tap cannot skip them.
+   */
+  openModal({ name, cls = '', html = '', items = null, onKey = null, onClose = null, backdrop = true, sel = 0, wide = false, bdCls = '', before = '', dismissible = true }) {
     const entry = { name, items: items || [], sel, onKey, onClose };
     const bd = document.createElement('div');
     bd.className = 'modal-backdrop mxbd ' + bdCls + (backdrop ? '' : ' clear');
     if (before) bd.insertAdjacentHTML('beforeend', before);
     const panel = document.createElement('div');
     panel.className = `panel modal mx ${wide ? 'wide' : ''} ${cls}`;
-    panel.innerHTML = corners + html;
+    panel.innerHTML = corners + (dismissible ? '<button class="modal-close" type="button" aria-label="Close">\u2715</button>' : '') + html;
     bd.appendChild(panel);
     entry.el = bd; entry.panel = panel;
     if (items) {
       const list = panel.querySelector('.menu-list') || panel.appendChild(Object.assign(document.createElement('div'), { className: 'menu-list' }));
       this.buildItems(entry, list);
+    }
+    if (dismissible) {
+      panel.querySelector('.modal-close').addEventListener('click', (e) => { e.stopPropagation(); this.close(name); });
+      // Tapping the darkened area outside the panel leaves the screen, the way a phone user expects.
+      bd.addEventListener('click', (e) => { if (e.target === bd) this.close(name); });
     }
     this.ctx.root.appendChild(bd);
     this.stack.push(entry);
@@ -264,7 +276,7 @@ export class Menus {
   }
 
   confirm(title, text, onYes) {
-    this.openModal({ name: 'confirm', html: heading({ eyebrow: 'Are you certain?', title, sub: text }), items: [
+    this.openModal({ name: 'confirm', dismissible: false, html: heading({ eyebrow: 'Are you certain?', title, sub: text }), items: [
       { label: 'No, keep going', onSelect: () => this.close() },
       { label: 'Yes', danger: true, onSelect: () => { this.close(); onYes(); } },
     ] });
@@ -284,7 +296,7 @@ export class Menus {
           <p>Every level is generated fresh when you enter it. Pits drop you 2–5 levels. Wait too long on a level and monsters begin climbing in from above and below.</p>
         </div></div>
       </div></div>
-      <div class="hint-bar"><kbd>Esc</kbd> close</div>`;
+      <div class="hint-bar"><kbd>Esc</kbd> or <span class="tapx">✕</span> close</div>`;
     this.openModal({ name: 'help', cls: 'help', html, wide: true });
   }
 
@@ -297,6 +309,7 @@ export class Menus {
       { id: 'musicVolume', name: 'Ambient music', desc: 'the drone darkens with depth and rises in combat', type: 'range', min: 0, max: 1, step: 0.05 },
       { id: 'sfxVolume', name: 'Sound effects', type: 'range', min: 0, max: 1, step: 0.05 },
       { group: 'Display' },
+      { id: 'cameraTilt', name: 'Camera tilt', desc: 'degrees off straight down — 0 is a flat plan view', type: 'range', min: 0, max: 45, step: 0.5 },
       { id: 'screenShake', name: 'Screen shake', type: 'toggle' },
       { id: 'reduceFlash', name: 'Reduce flashes', desc: 'softer explosion and trap flashes', type: 'toggle' },
       { id: 'fontScale', name: 'Interface scale', type: 'range', min: 0.8, max: 2, step: 0.1 },
@@ -311,10 +324,10 @@ export class Menus {
     ];
     const opts = rows.map((r, i) => (r.group ? -1 : i)).filter((i) => i >= 0);
     let sel = 0; // index into opts
-    const html = heading({ eyebrow: 'Applied immediately · saved in this browser', title: 'Settings' }) + `<div class="scroll" id="settings-rows"></div><div class="hint-bar"><kbd>↑↓</kbd> choose &nbsp; <kbd>←→</kbd> adjust &nbsp; <kbd>Enter</kbd> toggle &nbsp; <kbd>Esc</kbd> close</div>`;
+    const html = heading({ eyebrow: 'Applied immediately · saved in this browser', title: 'Settings' }) + `<div class="scroll" id="settings-rows"></div><div class="hint-bar"><kbd>↑↓</kbd> choose &nbsp; <kbd>←→</kbd> adjust &nbsp; <kbd>Enter</kbd> toggle &nbsp; <kbd>Esc</kbd> or <span class="tapx">✕</span> close</div>`;
     const apply = () => { saveSettings(S); this.app.applySettings(S); };
     const pct = (r) => Math.round(((S[r.id] - r.min) / (r.max - r.min)) * 100) + '%';
-    const num = (r) => (r.id === 'fontScale' ? Math.round(S[r.id] * 100) + '%' : String(Math.round(S[r.id] * 100)));
+    const num = (r) => (r.id === 'fontScale' ? Math.round(S[r.id] * 100) + '%' : r.id === 'cameraTilt' ? `${S[r.id]}\u00b0` : String(Math.round(S[r.id] * 100)));
     const render = () => {
       const box = entry.panel.querySelector('#settings-rows');
       box.innerHTML = rows.map((r, i) => {
@@ -407,7 +420,7 @@ export class Menus {
       : `Here lies <b>${name}</b>, whose wounds were too many ${where}.<br>No potion was left.`;
     const html = heading({ eyebrow: cause === 'abandoned' ? 'The quest ends' : 'Here ends the quest', title, orn: 'blood' }) +
       `<div class="epitaph">${epitaph}</div>${this.statsHtml(stats, false)}${rank ? `<div class="ribbon">Hall of Fame · No. ${rank}</div>` : ''}${this.timelineHtml()}`;
-    const entry = this.openModal({ name: 'death', cls: 'death', html, items: this.endButtons(stats), backdrop: true, wide: true, bdCls: 'grave', before: '<div class="death-veil"></div>' });
+    const entry = this.openModal({ name: 'death', cls: 'death', html, items: this.endButtons(stats), backdrop: true, wide: true, dismissible: false, bdCls: 'grave', before: '<div class="death-veil"></div>' });
     entry.noEscape = true; entry.grid = true;
     this.addFx(entry, entry.el, { mode: 'ash', count: 70, seed: 'death-ash' });
     entry.el.querySelector('.fx-layer').style.zIndex = '0';
@@ -424,7 +437,7 @@ export class Menus {
       <div class="escape"><div class="big"><div class="l">Escaped in</div><div class="v">${formatTime(stats.elapsed)}</div></div><div class="big"><div class="l">Time to spare</div><div class="v magic">${formatTime(stats.timerRemaining)}</div></div></div>
       <div class="clock"><div class="bar"><i style="width:${(frac * 100).toFixed(1)}%"></i></div><div class="cl"><span>Umla's clock</span><span>${Math.round(frac * 100)}% remained of ${formatTime(total)}</span></div></div>
       ${this.statsHtml(stats, true)}${rank ? `<div class="ribbon">Hall of Fame · No. ${rank}</div>` : ''}`;
-    const entry = this.openModal({ name: 'victory', cls: 'victory', html, items: this.endButtons(stats), wide: true, bdCls: 'dawn', before: '<div class="victory-rays"></div>' });
+    const entry = this.openModal({ name: 'victory', cls: 'victory', html, items: this.endButtons(stats), wide: true, dismissible: false, bdCls: 'dawn', before: '<div class="victory-rays"></div>' });
     entry.noEscape = true; entry.grid = true;
     this.addFx(entry, entry.el, { mode: 'gold', count: 90, seed: 'victory-gold' });
     entry.el.querySelector('.fx-layer').style.zIndex = '0';
@@ -436,7 +449,7 @@ export class Menus {
     const filters = ['all', 'classic', 'standard', 'story', 'nightmare', 'daily'];
     let f = 0;
     const g = this.ctx.getGame();
-    const html = heading({ eyebrow: 'Remembered by this browser', title: 'Hall of Fame', sub: 'The twenty greatest quests' }) + `<div class="filters" id="hall-filters"></div><div class="scroll" id="hall-body"></div><div class="hint-bar"><kbd>←→</kbd> filter &nbsp; <kbd>Esc</kbd> close</div>`;
+    const html = heading({ eyebrow: 'Remembered by this browser', title: 'Hall of Fame', sub: 'The twenty greatest quests' }) + `<div class="filters" id="hall-filters"></div><div class="scroll" id="hall-body"></div><div class="hint-bar"><kbd>←→</kbd> filter &nbsp; <kbd>Esc</kbd> or <span class="tapx">✕</span> close</div>`;
     const render = () => {
       const fl = entry.panel.querySelector('#hall-filters');
       fl.innerHTML = filters.map((x, i) => `<button class="btn${i === f ? ' selected' : ''}" data-i="${i}">${x}</button>`).join('');

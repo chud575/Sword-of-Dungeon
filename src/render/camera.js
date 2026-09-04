@@ -165,6 +165,16 @@ export class CameraRig {
   /** Apply the frustum for a transient zoom value (used by the punch effects in place()). */
   applyFrustumForZoom(z) { const prev = this.currentZoom; this.currentZoom = z; this.applyFrustum(); this.currentZoom = prev; }
 
+  /**
+   * Tilt off straight-down, in degrees. 0 would be a pure plan view; the default 17 leans just
+   * enough to show wall faces. The player sets this from Settings.
+   */
+  setTilt(deg) {
+    const d = Math.max(0, Math.min(60, Number(deg) || 0));
+    this.elevation = (90 - d) * DEG;
+    this.currentElevation = this.elevation;
+  }
+
   setAspect(aspect) { this.aspect = aspect; this.applyFrustum(); }
 
   /** Renderer tells the rig the drawing-buffer height so the texel size can stay exact. */

@@ -122,7 +122,9 @@ function relight(p, keys, o = {}) {
 // call that says nothing gets the house figure rather than the library's.
 // Lowered again when the wider default zoom put more of the hobgoblin's torso on screen and it
 // measured 20% centre-lit (ceiling 15%): the old figures were tuned against a tighter framing.
-const PILLOW_LOCAL = 0.10, PILLOW_DOME = 0.015;
+// Measured 20-21% centre-lit across frames against a 15% ceiling (the figure varies as the monster
+// moves), so these go under it with margin rather than sitting on the line.
+const PILLOW_LOCAL = 0.05, PILLOW_DOME = 0.006;
 
 /**
  * Re-shade several materials of one hand-drawn block to the house key light in one call:

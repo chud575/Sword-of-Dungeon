@@ -117,6 +117,7 @@ const app = {
     document.body.classList.toggle('cb', !!s.colorblind);
     document.body.classList.toggle('reduce-flash', !!s.reduceFlash);
     renderer.cameraRig.shakeEnabled = s.screenShake !== false;
+    renderer.cameraRig.setTilt(s.cameraTilt ?? 17);
     audio.setVolumes({ master: s.masterVolume, music: s.musicVolume, sfx: s.sfxVolume });
     if (minimap.visible !== (s.minimap !== false)) minimap.toggle(s.minimap !== false);
     hud.refreshStatic();
