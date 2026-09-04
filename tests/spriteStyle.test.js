@@ -103,19 +103,34 @@ test('ramp() builds a hue-shifted 5-7 step ramp inside the house gamut', () => {
 test('SCALE covers all 22 monsters and reads as one size hierarchy', () => {
   for (const t of MONSTER_TYPES) assert.equal(typeof SCALE[t], 'number', `SCALE is missing ${t}`);
   assert.equal(Object.keys(SCALE).length, MONSTER_TYPES.length, 'SCALE holds a type that cannot spawn');
-  const small = ['dire-wolf', 'dimension-spider', 'rogue', 'dwarven-guard'];
-  const humans = ['hobgoblin', 'monk', 'assassin', 'mercenary', 'elvin-ranger', 'swordsman', 'mage'];
-  const heavies = ['barbarian', 'dark-warrior', 'gargoyle', 'wyvern'];
+  // The bands of style.js SCALE, which are keyed off MONSTER_TABLE `size` (build) and `depthMin`.
+  const small = ['dire-wolf', 'rogue', 'dwarven-guard'];
+  const people = ['hobgoblin', 'elvin-ranger', 'mercenary', 'monk', 'assassin', 'mage', 'swordsman', 'barbarian', 'dark-warrior', 'war-lord'];
+  const ordinary = people.filter((t) => !['barbarian', 'dark-warrior', 'war-lord'].includes(t));
   const loomers = ['werebear', 'ogre', 'troll'];
-  const apex = ['war-lord', 'demon', 'shadow-dragon'];
+  const apex = ['demon', 'wyvern', 'fyre-drake', 'shadow-dragon'];
   const max = (g) => Math.max(...g.map((t) => SCALE[t]));
   const min = (g) => Math.min(...g.map((t) => SCALE[t]));
-  assert.ok(max(small) < min(humans.filter((t) => t !== 'hobgoblin')), 'small things must be smaller than people');
-  assert.ok(max(humans) < HERO_SCALE, 'the hero is the tallest ordinary person on screen');
-  assert.ok(min(heavies) > HERO_SCALE, 'heavies must be bigger than the hero');
-  assert.ok(min(loomers) > max(heavies), 'the ogre/troll/werebear must loom over the heavies');
-  assert.ok(min(apex) > max(loomers), 'dragon/demon/war lord are the apex');
-  assert.ok(SCALE.ogre > 1.5 && SCALE.demon > 1.8, 'the old bug: ogre 1.35x, demon hero-height');
+  assert.ok(max(small) < min(ordinary), 'small things must be smaller than people');
+  assert.ok(min(people) >= 0.85 && max(people) <= 1.25, 'the human band is 0.85 - 1.25');
+  assert.equal(max(people), SCALE['war-lord'], 'the War Lord tops the human band');
+  assert.ok(max(ordinary) < HERO_SCALE, 'an ordinary soldier does not out-loom the hero');
+  assert.ok(min(loomers) >= 1.45 && max(loomers) <= 1.75, 'ogre/werebear/troll are the 1.45 - 1.75 loomers');
+  assert.ok(min(loomers) > max(people), 'the loomers loom over every human, the War Lord included');
+  assert.ok(min(apex) > max(loomers), 'the drakes, the dragon and the demon are the apex');
+  const drakes = ['wyvern', 'fyre-drake', 'shadow-dragon'];
+  assert.ok(min(drakes) >= 1.9 && max(drakes) <= 2.4, 'the drakes and the dragon live in 1.9 - 2.4');
+  // the two inversions this table was re-keyed to kill
+  assert.ok(SCALE['war-lord'] < SCALE.ogre && SCALE['war-lord'] < SCALE['fyre-drake'],
+    'a human commander must not out-loom an ogre or a drake');
+  assert.ok(SCALE['dimension-spider'] > SCALE.hobgoblin,
+    'a depth-8 horror must not be smaller than a depth-1 mook');
+  // the odd builds sit between the people and the loomers
+  for (const t of ['dimension-spider', 'gargoyle']) {
+    assert.ok(SCALE[t] > max(ordinary) && SCALE[t] < min(loomers), `${t} belongs between the people and the loomers`);
+  }
+  // and the frame it must not eat: at the play camera 1.0 is ~138px of a 900px frame
+  assert.ok(max(MONSTER_TYPES) * 138 < 450, 'nothing may span half the frame at the playing camera');
 });
 
 test('sizeFor turns a SCALE into a billboard multiplier, clamped to a sane texel density', () => {

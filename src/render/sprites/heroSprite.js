@@ -14,38 +14,62 @@
 //  hung from a gold clasp on a visible steel back plate, is NARROWER than the shoulders, and the
 //  pauldrons, upper arms and gauntlets are composited ON TOP of it, with the boots below its hem.
 //
-//  Palette (6 ramps + outline, hue shifted: shadows toward violet, lights toward amber):
-//    steel 1234 (+5 specular)  · crimson eabcd (plume, mantle, buckler, hose)  · leather hijkl
+//  Palette (7 ramps + outline). THE HOUSE STYLE OWNS ALL OF IT: the outline is style.js `INK`, the
+//  softened lit edge is `INK_LIT`, the key light is `LIT`, and every ramp is built by the house
+//  `ramp()` — the hero used to be the one figure in the game off the law, hard-coding '#1b1426' and
+//  its own ramp maths while all 22 monsters were migrated onto style.js.
+//    steel 12345 (5 = specular)  · crimson eabcd (plume, mantle, buckler, hose)  · leather hijkl
 //    skin mno  · gold uvw (comb, guard, buckle, boss)  · tan pqr (cloth trim)  · magic xyz
-//    # outline (near-black violet)  @ lit-edge / inner line
-//  Ramp discipline: hue/sat shifts stay small on the warm ramps — a big shift turns dark gold into
-//  burnt red and skin shadow into clown blush at this size.
-//  Light: top-left. One dark outline, selectively softened to '@' on the lit (top-left) edge.
+//    # INK outline  @ INK_LIT lit-edge / inner line
+//  Ramp discipline: the house ramp takes `step`/`range` so a material can be narrow — hue and sat
+//  shifts stay small on the warm ramps, because a big shift turns dark gold into burnt red and skin
+//  shadow into clown blush at this size. A material that only needs three tones is drawn from the
+//  MIDDLE THREE of a full house ramp (never a private 3-step gradient), so its shadow and highlight
+//  are the same drift the rest of the cast uses.
+//  Light: style.js LIT (top-left). One INK outline, selectively softened to INK_LIT on the lit edge.
 //  Facings: south (front), east (side; west = mirrored east), north (back). Every facing is drawn
 //  deliberately; nothing is a rotation of anything else.
 import { Palette, paint, compose, mirrorLit, outline, line, setPx, solid, recolor, smearArc, makePix, shift, rotate90 } from './pixelPainter.js';
+import { INK, INK_LIT, LIT, ramp } from './style.js';
 
 export const HERO_W = 48, HERO_H = 48, HERO_PIVOT_X = 24, HERO_PIVOT_Y = 46;
 
+// The hero's materials, every one of them a house ramp (style.js `ramp()`: shadows drift toward
+// violet and gain saturation, highlights drift toward amber and lose a little, and every step is
+// clamped into the dungeon gamut). `mid` says which step the base colour sits on; `step`/`range`
+// say how wide the material's band is, because a face and a breastplate are not the same width of
+// ramp. The three-tone materials take the MIDDLE THREE steps of a real five-step ramp.
+const mid3 = (r) => r.slice(1, 4);
+/** plate: near-neutral so it still reads as steel under the dungeon's very blue ambient. '5' is the specular. */
+const STEEL = ramp('#8f97a6', 5, { step: 0.10, range: 0.46, mid: 1, hueShift: 0.05, satShift: 0.08 });
+/** crimson cloth (plume, mantle, buckler, hose): narrow, so the shadows stay red and never go magenta. */
+const CRIMSON = ramp('#b02f3a', 5, { step: 0.082, range: 0.30, mid: 2, hueShift: 0.016, satShift: 0.04 });
+/** leather (belt, straps, boots): lifted off the old #300814 crease, which had sunk into the ink. */
+const LEATHER = ramp('#7a4a2c', 5, { step: 0.09, range: 0.34, mid: 2, hueShift: 0.03, satShift: 0.06 });
+/** cloak lining / cloth trim (warm tan). */
+const TAN = mid3(ramp('#b8925e', 5, { step: 0.07, range: 0.20, hueShift: 0.02, satShift: 0.05 }));
+/** skin: the gentlest band in the palette — a face 8 px across must not blotch. */
+const SKIN = mid3(ramp('#e2ab84', 5, { step: 0.045, range: 0.12, hueShift: 0.012, satShift: 0.0 }));
+/** gold (comb, guard, buckle, boss): a big hue shift would turn the dark tone burnt red, not gold. */
+const GOLD = mid3(ramp('#d6a23a', 5, { step: 0.075, range: 0.22, hueShift: 0.012, satShift: 0.04 }));
+/** magic glow (emissive, so it is exempt from the value ceiling — it is light, not paint). */
+const MAGIC = mid3(ramp('#7fd4ff', 5, { step: 0.095, range: 0.32, hueShift: 0.03 }));
+
 export const HERO_PALETTE = new Palette()
-  .set('#', '#1b1426')          // outline: near-black violet (never pure black)
-  .set('@', '#544a63')          // lit-edge / inner line (kept off-blue: a violet edge reads as a lilac glow under torchlight)
-  // steel: a near-neutral grey base so the plate still reads as steel under the dungeon's very blue
-  // ambient; the ramp does the hue work (shadows to violet, highlights to amber). Seated low enough
-  // that the armour keeps interior structure instead of blowing out to white near a torch.
-  .ramp('1234', '#848c9a', { step: 0.138, satShift: 0.14 })
-  .set('5', '#eaf0ff')          // steel specular (1-px edges only)
+  .set('#', INK)                // THE house outline: near-black violet, never pure black
+  .set('@', INK_LIT)            // the lit-edge / inner line the outline softens to (style.js)
   .set('G', '#ffffff')          // sword glint (emissive)
-  .ramp('eabcd', '#b02f3a', { step: 0.082, mid: 2, hueShift: 0.016, satShift: 0.04 })  // crimson cloth (+ 'e' deep crease; shadows stay red, never magenta)
-  .ramp('pqr', '#b8925e', { step: 0.1 })    // cloak lining / cloth trim (warm tan)
-  .ramp('hijkl', '#6d4026', { step: 0.09, mid: 2 })   // leather (+ 'h' deep)
-  .ramp('mno', '#e2ab84', { step: 0.058, satShift: 0.0, hueShift: 0.015 })  // skin (gentle: a face this small must not blotch)
-  .ramp('uvw', '#d6a23a', { step: 0.105, hueShift: 0.012, satShift: 0.04 })  // gold (a big hue shift turns the dark tone burnt red, not gold)
-  .set('E', '#221a2e')          // eye
-  .set('W', '#fff7ea')          // eye catch-light
-  .set('F', '#fff4f0')          // hurt flash
-  .ramp('xyz', '#7fd4ff', { step: 0.13 })   // magic glow
-  .set('S', '#221a30');         // shadow-blob key (unused in sprites)
+  .set('E', INK)                // eye: a hollow, so it is ink like every other hole in a body
+  .set('W', '#fff7ea')          // eye catch-light (a sparkle, well under the area threshold)
+  .set('F', '#fff4f0')          // hurt flash (the 'hurt' clip is not colour-graded art)
+  .set('S', INK);               // shadow-blob key (unused in sprites)
+[...'12345'].forEach((k, i) => HERO_PALETTE.set(k, STEEL[i]));
+[...'eabcd'].forEach((k, i) => HERO_PALETTE.set(k, CRIMSON[i]));
+[...'hijkl'].forEach((k, i) => HERO_PALETTE.set(k, LEATHER[i]));
+[...'pqr'].forEach((k, i) => HERO_PALETTE.set(k, TAN[i]));
+[...'mno'].forEach((k, i) => HERO_PALETTE.set(k, SKIN[i]));
+[...'uvw'].forEach((k, i) => HERO_PALETTE.set(k, GOLD[i]));
+[...'xyz'].forEach((k, i) => HERO_PALETTE.set(k, MAGIC[i]));
 
 // ------------------------------------------------------------------------------------------ SOUTH
 // Head: helm + face + plume. 18 wide. Placed at (15, 0).
@@ -564,7 +588,7 @@ function armPix(sx, sy, hx, hy, { key = '3', key2 = '2', gauntlet = true } = {})
   line(p, sx, sy, hx, hy, key);
   line(p, sx + 1, sy, hx + 1, hy, key2);
   if (gauntlet) { for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) setPx(p, hx + x, hy + y, (x < 0 || y < 0) ? '3' : '2'); }
-  return outline(p, '#', { lit: { x: -1, y: -1 }, litKey: '@' });
+  return outline(p, '#', { lit: LIT, litKey: '@' });
 }
 
 /**
@@ -599,7 +623,7 @@ function swordPix(gx, gy, angle, { len = 16, glint = 0 } = {}) {
   // grip + pommel
   setPx(p, r(gx), r(gy), 'j'); setPx(p, r(gx - dx), r(gy - dy), 'i');
   setPx(p, r(gx - dx * 2), r(gy - dy * 2), 'v');
-  return outline(p, '#', { lit: { x: -1, y: -1 }, litKey: '@' });
+  return outline(p, '#', { lit: LIT, litKey: '@' });
 }
 
 /** Pale magic orb for the cast frames, radius r around (cx,cy). */

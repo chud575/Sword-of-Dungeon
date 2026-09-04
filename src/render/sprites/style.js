@@ -212,45 +212,79 @@ export const HERO_FIGURE_PX = 46;
  * hierarchy of the whole game, in one table: a player must be able to read danger from silhouette
  * size alone, across a lit room, before any name or health bar.
  *
- *   0.7 - 0.9   vermin and small things       dire wolf, dimension spider, rogue, dwarven guard
- *   0.9 - 1.0   ordinary humans               monk, mercenary, swordsman, ranger, assassin, mage
- *   1.0         THE HERO
- *   1.1 - 1.35  heavies                       barbarian, dark warrior, gargoyle, wyvern
- *   1.45 - 1.7  the loomers                   werebear, ogre, troll
- *   1.6 - 2.2   the apex                      fyre drake, war lord, demon, shadow dragon
+ * HOW THE NUMBERS ARE DERIVED — the ladder is KEYED OFF `MONSTER_TABLE` (game/monsters.js), not off
+ * whichever canvas an art file happened to be drawn on. Two columns of that table do the work:
+ *   `size`      the creature's BUILD — 0.8 dire wolf, 1.0 a man, 1.4 troll, 1.6 dragon. This is the
+ *               spine of the ladder; a monster never outranks a monster the table builds bigger
+ *               unless its species is a different shape of thing entirely (a wyvern flies).
+ *   `depthMin`  its STATION in the dungeon, worth a few points of presence at the top end: of two
+ *               1.0-build humans the depth-12 War Lord is the one who has to stop a player dead.
+ * The bands below fall straight out of those two columns, and nothing may cross a band without a
+ * reason a player can see from across a room.
  *
- * The Ogre used to be 1.35x the hero and the Demon was hero-height; a monster whose whole identity
- * is "it is enormous" has to actually be enormous. The Fyre Drake is the one deliberate exception to
- * "bigger number = scarier": it is a low, sprawling salamander whose mass is length, not height.
+ *   0.70 - 0.90   vermin and small things       dire wolf, rogue, dwarven guard
+ *   0.90 - 1.25   PEOPLE, hero = 1.0 among them ordinary humans below him, elite humans above,
+ *                                               the War Lord topping the band at 1.25
+ *   1.15 - 1.25   odd builds                    dimension spider (wide, but a depth-8 horror),
+ *                                               gargoyle (squat stone brute)
+ *   1.45 - 1.75   the loomers                   werebear, ogre, troll
+ *   1.78 - 2.30   the apex                      demon, wyvern, fyre drake, shadow dragon
+ *
+ * TWO BUGS THIS TABLE EXISTS TO KILL, both of which had the ladder upside down:
+ *  1. THE LADDER WAS INVERTED AT THE TOP. War Lord 1.70 > troll 1.66 > fyre drake 1.60 > ogre 1.58
+ *     put a human commander (build 1.2) over a drake (build 1.6) and over an ogre (build 1.3), and
+ *     dimension spider 0.86 < hobgoblin 0.90 made a depth-8 horror smaller than a depth-1 mook.
+ *     The table's own `size` column says otherwise in every one of those cases.
+ *  2. THE TOP OF THE LADDER ATE THE FRAME. At the real playing camera the cast's shared grid is 3
+ *     device px per texel at 1600x900, so 1.0 is 138 px of a 900 px frame: the old Demon at 1.95 and
+ *     War Lord at 1.70 asked for art 235-270 px tall that reached into the HUD and left the hero the
+ *     smallest readable figure on screen. The Demon is a lean depth-14 horror (build 1.0), not a
+ *     dragon: it comes down to 1.78. The War Lord is a MAN, however big his pauldrons: 1.25, the top of the
+ *     human band. Only the true monsters — the drakes and the Shadow Dragon — pass 1.9, and the
+ *     tallest thing in the game now lands at 2.30 (~310 px), a third of the frame, not half of it.
+ *
+ * The Fyre Drake keeps its one deliberate note: it is a low, sprawling salamander whose bulk runs
+ * ALONG the floor, so it is the widest thing in the bestiary while sitting below the Shadow Dragon
+ * in height. Its redraw must therefore buy the extra height by RAISING THE HEAD on a taller canvas,
+ * not by scaling up the 86x65 sprawl it has now: at the play camera that sprawl times its 2.10 audit
+ * is 540 px of screen width, and a creature three tiles wide reaches the HUD from the middle of a
+ * room. Height is what the ladder asks of it; footprint is not.
+ *
+ * CHECKED AT THE PLAYING CAMERA ('deep-level' and 'combat'), not just in the bestiary line-up, by
+ * rendering the whole cast at the sizes this table asks for. The Shadow Dragon lands at 317 px (a
+ * third of the frame), the Demon at 246 and the War Lord at 172 — where the old table put the War
+ * Lord at 235 and the Demon at 269 and left the hero, at 138, the least of them. The hero is now a
+ * head shorter than the loomers and a head taller than the mooks, which is what a reader needs from
+ * a size hierarchy.
  */
 export const SCALE = {
-  // vermin and small things
-  'dire-wolf': 0.72,          // low quadruped: shoulder-height on a man
-  'dimension-spider': 0.86,   // crouched wide, never tall
-  'rogue': 0.86,              // small and hunched, the smallest human
-  'dwarven-guard': 0.84,      // short and broad
-  // ordinary humans — all below the hero, who is the one the camera follows
-  'hobgoblin': 0.90,
-  'monk': 0.92,
-  'assassin': 0.94,
-  'mercenary': 0.95,
-  'elvin-ranger': 0.96,
-  'swordsman': 0.97,
-  'mage': 0.98,
-  // heavies
-  'barbarian': 1.12,
-  'dark-warrior': 1.18,
-  'gargoyle': 1.22,
-  'wyvern': 1.32,
-  // the loomers
-  'werebear': 1.48,
-  'ogre': 1.58,
-  'troll': 1.66,
-  // the apex
-  'war-lord': 1.70,
-  'fyre-drake': 1.60,         // long, not tall — its bulk runs along the floor
-  'demon': 1.95,
-  'shadow-dragon': 2.20,
+  // ---- vermin and small things (build <= 0.9, depth 1)
+  'dire-wolf': 0.70,          // build 0.8, low quadruped: shoulder-height on a man
+  'rogue': 0.86,              // build 0.9, small and hunched, the smallest human
+  'dwarven-guard': 0.88,      // build 0.9, short and broad — height is not where his mass went
+  // ---- people: the hero stands at 1.0 IN this band, not above it
+  'hobgoblin': 0.92,          // build 0.9, the depth-1 mook
+  'elvin-ranger': 0.95,       // build 1.0
+  'mercenary': 0.96,          // build 1.0
+  'monk': 0.97,               // build 1.0
+  'assassin': 0.98,           // build 1.0, depth 10 — lean, and mostly not visible anyway
+  'mage': 0.98,               // build 1.0, depth 14, but a caster is not a big man
+  'swordsman': 0.99,          // build 1.0
+  'barbarian': 1.10,          // build 1.1
+  'dark-warrior': 1.14,       // build 1.1, depth 8: the biggest ordinary soldier
+  'war-lord': 1.25,           // build 1.2, depth 12: tops the human band and stops there
+  // ---- odd builds that read big without being loomers
+  'dimension-spider': 1.15,   // build 1.1, depth 8: crouched and WIDE, never tall — but never a mook
+  'gargoyle': 1.20,           // build 1.0, depth 2, but carved out of a block of stone
+  // ---- the loomers
+  'werebear': 1.48,           // build 1.2
+  'ogre': 1.58,               // build 1.3
+  'troll': 1.72,              // build 1.4
+  // ---- the apex
+  'demon': 1.78,              // build 1.0 but depth 14: tall and lean, the deepest thing that walks
+  'wyvern': 1.90,             // build 1.3, depth 6, and it has wings on top of that
+  'fyre-drake': 1.92,         // build 1.6, depth 12 — long, not tall: its bulk runs along the floor
+  'shadow-dragon': 2.30,      // build 1.6, depth 10: the tallest silhouette in the game
 };
 
 /** The hero's own entry, so `SCALE` can be read for any character view. */
@@ -261,6 +295,14 @@ export const HERO_SCALE = 1.0;
  * size for its `SCALE`. A sprite needing a multiplier outside this band is a request to REDRAW it on
  * a bigger (or smaller) canvas — blowing 16px of spider up to three times the hero's texel size is
  * a stopgap, not the house look. The clamp keeps the hierarchy readable in the meantime.
+ *
+ * When the ladder above was re-keyed, every shipping sheet measured inside the band, so NOTHING is
+ * being clamped. The War Lord is the only creature whose art is drawn too BIG (~67 texels where the
+ * ladder wants 58, audit ~0.86); the redraw queue, worst first, is the Fyre Drake (~2.05), the
+ * Demon (~1.65), the Troll / Shadow Dragon (~1.47), the Ogre / Werebear (~1.43) and the Dimension
+ * Spider (~1.39). Those are canvases to grow, not multipliers to apply: `sizeFor` no longer sizes a
+ * billboard (see sprites/spriteBillboard.js, "ONE TEXEL SIZE FOR THE WHOLE SCREEN") — the ART is the
+ * size law, and these numbers move a texel or two every time a sheet is repainted.
  */
 export const DENSITY_MIN = 0.6, DENSITY_MAX = 2.2;
 
