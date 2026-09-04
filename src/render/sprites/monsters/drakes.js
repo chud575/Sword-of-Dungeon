@@ -70,10 +70,25 @@ function drakePalette() {
   return p;
 }
 
-/** Three toes and a dew-claw under a foot, pointing `dir` (+1 = toward the screen right). */
-function talons(p, x, y, dir, key) {
-  for (let i = 0; i < 3; i++) { setPx(p, x + dir * (i - 1) * 2, y, key); setPx(p, x + dir * (i - 1) * 2, y + 1, key); }
-  setPx(p, x - dir * 3, y, key);
+/**
+ * A FOOT THAT GRIPS THE FLOOR. Three toes forward and a dew-claw behind, each toe TWO pixels wide
+ * and separated from its neighbour by a column the outline pass fills with ink — which is the whole
+ * difference between a foot and a mitten at this size. `y` is the contact row: the fills stop there
+ * and `houseOutline` lays the one-pixel weight shadow underneath.
+ * (Before this the three toes were single pixels two apart, drawn INSIDE an ankle blob that filled
+ * the gaps back in, so every drake in the file stood on rounded stumps.)
+ */
+function talons(p, x, y, dir, key, toe = null) {
+  const cx = Math.round(x), t = toe || key;
+  for (let i = -3; i <= 4; i++) setPx(p, cx + i * dir, y - 3, t);       // the arch the ankle sits on
+  for (const off of [-3, 0, 3]) {
+    const tx = cx + off * dir;
+    setPx(p, tx, y - 2, t); setPx(p, tx + dir, y - 2, t);
+    setPx(p, tx, y - 1, t); setPx(p, tx + dir, y - 1, t);
+    setPx(p, tx, y, key); setPx(p, tx + dir, y, key);                   // the claw, on the floor
+  }
+  setPx(p, cx - 5 * dir, y - 2, t);                                     // the dew-claw, behind
+  setPx(p, cx - 5 * dir, y - 1, t); setPx(p, cx - 5 * dir, y, key);
 }
 
 /** A row of small even fangs along a jaw. */
@@ -114,12 +129,22 @@ function wyvWing(p, cx, cy, k, dir, droop = 0) {
   setPx(p, tx, ty, 'x'); setPx(p, tx, ty - 1, 'y'); setPx(p, tx + dir, ty - 1, 'w');
 }
 
-/** A bird-of-prey hind leg: heavy thigh, reversed hock, splayed talons on the floor. */
+/**
+ * A BIRD-OF-PREY HIND LEG, in four pieces, because the wyvern's whole lower half is these two legs
+ * and it used to be one tapering curve finished with a rounded blob a pixel above the floor.
+ *
+ *   HAUNCH   a deep drumstick carrying the mass, wider than the body it hangs off
+ *   HOCK     the point of the reversed ankle, standing BEHIND the leg — the raptor read
+ *   SHANK    sweeping forward off the hock
+ *   FOOT     the metatarsus dropping onto three splayed toes and a dew-claw (`talons`)
+ */
 function wyvLeg(p, hx, hy, dir, lift, bias) {
-  const foot = 64 - lift;
-  C(p, [[hx, hy], [hx + dir * 4, hy + 8], [hx + dir * 1.5, hy + 15], [hx + dir * 2.5, foot - 1]], 5.2, 2.4, WY_HIDE, bias - 0.12);
-  M(p, hx + dir * 2.5, foot - 1, 4.2, 2.0, WY_HIDE, { n: 2.6, bias: bias - 0.08 });
-  talons(p, hx + dir * 2.5, foot, dir, 'x');
+  const foot = 64 - lift;                                       // the contact row
+  M(p, hx + dir * 0.5, hy + 4, 6.6, 8.2, WY_HIDE, { n: 2.4, bias: bias + 0.03 });
+  M(p, hx - dir * 3.2, hy + 12, 3.0, 3.6, WY_HIDE, { n: 2.2, bias: bias - 0.22 });
+  C(p, [[hx + dir * 2, hy + 8], [hx - dir, hy + 13], [hx + dir * 2.5, foot - 6]], 3.6, 2.0, WY_HIDE, bias - 0.10);
+  LB(p, hx + dir * 2.5, foot - 7, hx + dir * 2.5, foot - 3, 2.4, 2.6, WY_HIDE, bias - 0.04);
+  talons(p, hx + dir * 2.5, foot, dir, 'x', '3');
 }
 
 /** The barbed spade at the end of the tail — the wyvern's other weapon. */
@@ -325,7 +350,7 @@ function sdFrame(f, o = {}) {
     C(p, [[46, 46 + b + c], [51, 54 + b + c], [48 + Math.max(0, -s) * 2, ground]], 6.2, 3.6, SD_SCL, -0.06);
     for (const fx of [28 - Math.max(0, s) * 2, 48 + Math.max(0, -s) * 2]) {
       M(p, fx, ground, 5.0, 2.0, SD_SCL, { n: 2.6, bias: -0.12 });
-      talons(p, fx, ground + 1, 1, 'w');
+      talons(p, fx, ground + 1, 1, 'w', '2');
     }
     M(p, 38, 44 + b, 12.6, 9.6, SD_SCL, { n: 2.5 });
     M(p, 38, 34 + b, 11.0, 8.4, SD_SCL, { n: 2.4 });
@@ -337,7 +362,7 @@ function sdFrame(f, o = {}) {
     if (o.breath) for (let i = 0; i < o.breath; i++) { const r = 1 + i * 0.6; for (let j = -r; j <= r; j++) setPx(p, Math.round(38 + lunge + j), 21 + b - neck + i, Math.abs(j) < r * 0.5 ? 'H' : 'G'); }
     C(p, [[28, 38 + b], [22, 46 + b], [26, 55 + b]], 3.8, 2.4, SD_SCL, -0.02);
     C(p, [[48, 38 + b], [54, 46 + b], [50, 55 + b]], 3.8, 2.4, SD_SCL, -0.08);
-    for (const fx of [26, 50]) talons(p, fx, 57 + b, 1, 'w');
+    for (const fx of [26, 50]) talons(p, fx, 57 + b, 1, 'w', '2');
     crest(p, [[38, 26 + b], [38, 34 + b], [38, 44 + b], [38, 52 + b]], 3, SD_SCL, { tip: 'y' });
     return sdDone(p);
   }
@@ -357,8 +382,8 @@ function sdFrame(f, o = {}) {
     if (o.breath) for (let i = 0; i < o.breath; i++) { const r = 1 + i * 0.6; for (let j = -r; j <= r; j++) setPx(p, 58 + lunge + 6 + i, Math.round(20 + b - neck + j), Math.abs(j) < r * 0.5 ? 'H' : 'G'); }
     C(p, [[40, 46 + b + c], [35, 55 + b + c], [39 + Math.max(0, s) * 3, ground]], 6.0, 3.6, SD_SCL, -0.02);
     C(p, [[44, 38 + b], [50, 48 + b], [46, 57 + b]], 3.6, 2.3, SD_SCL, 0.02);
-    for (const fx of [26 + Math.max(0, -s) * 3, 39 + Math.max(0, s) * 3]) { M(p, fx, ground, 5.0, 2.0, SD_SCL, { n: 2.6, bias: -0.12 }); talons(p, fx, ground + 1, 1, 'w'); }
-    talons(p, 46, 59 + b, 1, 'w'); talons(p, 32 + Math.max(0, s) * 2, ground + 1, 1, 'w');
+    for (const fx of [26 + Math.max(0, -s) * 3, 39 + Math.max(0, s) * 3]) { M(p, fx, ground, 5.0, 2.0, SD_SCL, { n: 2.6, bias: -0.12 }); talons(p, fx, ground + 1, 1, 'w', '2'); }
+    talons(p, 46, 59 + b, 1, 'w', '2'); talons(p, 32 + Math.max(0, s) * 2, ground + 1, 1, 'w', '2');
     sdWing(p, 36, 29 + b, k, 1, droop);
     return sdDone(p);
   }
@@ -369,7 +394,7 @@ function sdFrame(f, o = {}) {
   C(p, [[38, 48 + b], [37, 56 + b], [35, 64 + b]], 5.2, 1.5, SD_SCL, 0.02);
   C(p, [[30, 46 + b + c], [24, 54 + b + c], [27 - Math.max(0, s) * 2, ground]], 6.2, 3.6, SD_SCL, -0.12);
   C(p, [[46, 46 + b + c], [52, 54 + b + c], [49 + Math.max(0, -s) * 2, ground]], 6.2, 3.6, SD_SCL, -0.12);
-  for (const fx of [27 - Math.max(0, s) * 2, 49 + Math.max(0, -s) * 2]) { M(p, fx, ground, 5.0, 2.0, SD_SCL, { n: 2.6, bias: -0.16 }); talons(p, fx, ground + 1, 1, 'w'); }
+  for (const fx of [27 - Math.max(0, s) * 2, 49 + Math.max(0, -s) * 2]) { M(p, fx, ground, 5.0, 2.0, SD_SCL, { n: 2.6, bias: -0.16 }); talons(p, fx, ground + 1, 1, 'w', '2'); }
   M(p, 38, 43 + b, 12.8, 10.0, SD_SCL, { n: 2.5, bias: -0.06 });
   M(p, 38, 33 + b, 11.4, 8.4, SD_SCL, { n: 2.4, bias: -0.04 });
   crest(p, [[38, 24 + b], [38, 34 + b], [38, 44 + b], [38, 54 + b]], 3.4, SD_SCL, { tip: 'y' });
@@ -471,7 +496,7 @@ function gout(p, x, y, dx, dy, len) {
 function fdLeg(p, hx, hy, dir, spread, lift, bias) {
   C(p, [[hx, hy], [hx + dir * spread, hy - 3], [hx + dir * (spread + 1), hy + 8 - lift]], 3.6, 2.6, FD_HIDE, bias);
   M(p, hx + dir * (spread + 1), hy + 9 - lift, 4.0, 2.0, FD_HIDE, { n: 2.6, bias: bias - 0.06 });
-  talons(p, hx + dir * (spread + 1), hy + 10 - lift, dir, 'x');
+  talons(p, hx + dir * (spread + 1), hy + 10 - lift, dir, 'x', '2');
 }
 
 /**

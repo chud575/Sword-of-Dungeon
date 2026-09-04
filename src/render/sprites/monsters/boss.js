@@ -30,7 +30,7 @@
 //  demon       broad-shouldered and still: a crown of curling ram horns, wings folded down the
 //              back into two hanging blades, cloven hooves, char cracks over an ember heart, and
 //              the signature — the ring of stolen soul-light hanging above its open palm.
-import { Palette, paint, outline, makePix, setPx, getPx, shift, smearArc, mirrorLit, blit } from '../pixelPainter.js';
+import { Palette, paint, outline, houseOutline, keyShade, makePix, setPx, getPx, shift, smearArc, mirrorLit, blit } from '../pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
@@ -125,28 +125,43 @@ function tilt(p, a, cx, cy) {
 /** Standard clip set assembled from per-facing frame makers; west is the mirrored east. */
 function clips(make) {
   const anims = {};
-  const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a }; };
+  // THE INK, LAST AND ONCE. Frames reach here already outlined, but the death clips run `tilt()`
+  // and `squashTo()` AFTERWARDS — resampling a 1-px ring into gaps and doubles — and the west
+  // facing is a mirror, which puts the lit-edge softening on the wrong side of the creature.
+  // `houseOutline` peels every second coat, re-lays exactly one pixel of INK round anything bare
+  // and re-keys the coat against the frame as it finally stands.
+  const inked = (a) => ({ ...a, frames: a.frames.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT })) });
+  const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...inked(a) }; };
   for (const f of ['S', 'E', 'N']) for (const [name, a] of Object.entries(make(f))) put(name, f, a);
   for (const name of Object.keys(anims)) {
     const e = anims[name].E;
-    if (e) anims[name].W = { ...e, facing: 'W', frames: e.frames.map((p) => mirrorLit(p, '')) };
+    if (e) anims[name].W = { ...e, facing: 'W', frames: inked({ frames: e.frames.map((p) => mirrorLit(p, '')) }).frames };
   }
   return anims;
 }
 
 // ------------------------------------------------------------------------------- form shading
 // The one key light, as a unit vector in sprite space (x right, y down, z out of the screen).
-const LX = -0.60, LY = -0.64, LZ = 0.48;
+// LZ WAS 0.48, AND THAT IS THE PILLOW. With that much light coming straight out of the screen the
+// lambert on a limb peaks a pixel INSIDE the silhouette and falls back at the rim, which quantises
+// into a dark line down the LIT side of every arm, haunch and gut — a form with shadow on both
+// edges and light between them, which style.js bans by name. Pulling the light almost into the
+// sprite plane makes the term MONOTONIC across a form: brightest at the top-left rim, darkest at
+// the bottom-right rim, one clean terminator between them and no bright core.
+const LX = -0.66, LY = -0.70, LZ = 0.18;
 
 /**
  * The ramp key for a surface whose normal is (nx, ny, nz=sqrt(1-nx²-ny²)) — a real directional
  * terminator quantised onto `keys` (darkest first). `bias` pushes a whole form up or down the ramp
- * (far limbs sit a tone back; a lit belly sits a tone forward).
+ * (far limbs sit a tone back; a lit belly sits a tone forward). The constants are solved to land
+ * the two RIMS of a vertical limb where the old ones did, so every hand-tuned `bias` in this file
+ * and in monsters/drakes.js still means what it meant; what changes is the middle, which now falls
+ * to the terminator instead of sitting up near the highlight.
  */
 function tone(nx, ny, keys, bias = 0) {
   const r2 = Math.min(1, nx * nx + ny * ny);
   const lam = nx * LX + ny * LY + Math.sqrt(1 - r2) * LZ;
-  let t = lam * 0.78 + 0.34 + bias;
+  let t = lam * 0.66 + 0.46 + bias;
   t = t < 0 ? 0 : t > 0.999 ? 0.999 : t;
   return keys[(t * keys.length) | 0];
 }
@@ -349,6 +364,30 @@ function ogreFold(p, cx, cy, rx, ry) {
  * @param {'S'|'E'|'N'} f
  * @param {{bob?:number, stride?:number, club?:number, headDy?:number, lean?:number, smear?:boolean, crouch?:number}} o
  */
+/**
+ * A BROAD BARE FOOT, PLANTED. The ogre's was an ellipse two pixels tall: flat-bottomed, toeless,
+ * the same shape as the shadow under it, which is why he read as standing in a puddle. Now the
+ * ankle pinches into an INSTEP that spreads forward and takes the key light down its top-left, and
+ * FOUR toes hang off it on the contact row, each two pixels wide and separated by a column the
+ * outline pass fills with ink, each finished with a horn nail. `y` is the contact row: the weight
+ * shadow goes under it.
+ * @param {Pix} p @param {number} cx @param {number} y @param {string} keys the hide ramp, darkest
+ *   first @param {string} nail the horn key @param {number} [bias]
+ */
+function foot(p, cx, y, keys, nail, bias = 0) {
+  const K = [...keys];
+  const hi = K[K.length - 1], mid = K[K.length - 2], dk = K[Math.max(0, K.length - 3)];
+  mass(p, cx, y - 5, 4.0, 3.2, keys, { n: 2.4, bias: bias - 0.02 });        // the ankle
+  for (let r = 0; r < 3; r++) {                                             // the instep, spreading
+    const w = 4 + r;
+    for (let x = -w; x <= w; x++) setPx(p, cx + x, y - 4 + r, x < 2 - w ? hi : x < 1 ? mid : dk);
+  }
+  for (const [off, deep] of [[-5, 1], [-2, 1], [1, 1], [4, 0]]) {           // four toes, ink between
+    if (deep) { setPx(p, cx + off, y - 1, mid); setPx(p, cx + off + 1, y - 1, dk); }
+    setPx(p, cx + off, y, nail); setPx(p, cx + off + 1, y, dk);
+  }
+}
+
 function ogreFrame(f, o = {}) {
   const p = makePix(OG_W, OG_H);
   const done = (q) => ink(shift(q, OG_PAD, 0));
@@ -358,10 +397,10 @@ function ogreFrame(f, o = {}) {
 
   if (f === 'S') {
     // legs: short, bowed, planted wide
-    limb(p, 18, 38 + b + c, 17 - Math.max(0, s) * 1.5, 51 - lLift, 5.6, 4.6, HIDE, -0.05);
-    limb(p, 30, 38 + b + c, 32 + Math.max(0, -s) * 1.5, 51 - rLift, 5.6, 4.6, HIDE, -0.05);
-    mass(p, 16, 51 - lLift, 5, 2.2, HIDE, { n: 2.6, bias: -0.12 });
-    mass(p, 33, 51 - rLift, 5, 2.2, HIDE, { n: 2.6, bias: -0.12 });
+    limb(p, 18, 38 + b + c, 17 - Math.max(0, s) * 1.5, 46 - lLift, 5.6, 3.6, HIDE, -0.05);
+    limb(p, 30, 38 + b + c, 32 + Math.max(0, -s) * 1.5, 46 - rLift, 5.6, 3.6, HIDE, -0.05);
+    foot(p, 16, 52 - lLift, HIDE, '9', -0.10);
+    foot(p, 33, 52 - rLift, HIDE, '9', -0.16);
     // hide kilt over the hips
     mass(p, 24, 40 + b + c, 13.5, 6.4, LEATHER, { n: 2.8 });
     for (let i = 0; i < 5; i++) setPx(p, 13 + i * 6, 45 + b + c, 'a');
@@ -400,8 +439,8 @@ function ogreFrame(f, o = {}) {
 
   if (f === 'E') {
     // far leg first, a tone back
-    limb(p, 20, 38 + b + c, 18 + Math.max(0, -s) * 4, 51 - rLift, 5.2, 4.2, HIDE, -0.16);
-    mass(p, 18 + Math.max(0, -s) * 4, 51 - rLift, 5, 2.2, HIDE, { n: 2.6, bias: -0.2 });
+    limb(p, 20, 38 + b + c, 18 + Math.max(0, -s) * 4, 46 - rLift, 5.2, 3.4, HIDE, -0.16);
+    foot(p, 18 + Math.max(0, -s) * 4, 52 - rLift, HIDE, '9', -0.20);
     // a shouldered or raised club rides BEHIND him, so it never crosses the face
     if (club === 1) { curve(p, [[30 + lean, 23 + b], [30, 17 + b], [25, 13 + b]], 4.4, 3, HIDE, -0.08); ogreClub(p, 24, 12 + b, 15, 6 + b, { far: true }); }
     else if (club === 0) { curve(p, [[30 + lean, 23 + b], [26, 28 + b], [24, 33 + b]], 4.4, 3, HIDE, -0.08); ogreClub(p, 24, 32 + b, 15, 10 + b, { far: true }); }
@@ -418,8 +457,8 @@ function ogreFrame(f, o = {}) {
     mass(p, 34 + lean, hy + 3, 4.4, 3.2, HIDE, { n: 2.4, bias: -0.02 });
     stamp(p, OG_FACE_E, 28 + lean, hy - 3);
     // near leg
-    limb(p, 27, 38 + b + c, 29 + Math.max(0, s) * 4, 51 - lLift, 5.4, 4.4, HIDE, 0);
-    mass(p, 30 + Math.max(0, s) * 4, 51 - lLift, 5, 2.2, HIDE, { n: 2.6, bias: -0.1 });
+    limb(p, 27, 38 + b + c, 29 + Math.max(0, s) * 4, 46 - lLift, 5.4, 3.6, HIDE, 0);
+    foot(p, 30 + Math.max(0, s) * 4, 52 - lLift, HIDE, '9', -0.08);
     // the near arm: only the smashing club comes round the front
     if (club === 2) {
       if (o.smear) smearArc(p, 34, 24 + b, 14, 22, -1.7, 0.35, ['@', '8', '9', '9']);
@@ -434,10 +473,10 @@ function ogreFrame(f, o = {}) {
   }
 
   // NORTH — the back: two shoulder humps, a bald skull between them, the club head over one of them
-  limb(p, 18, 38 + b + c, 17 - Math.max(0, s) * 1.5, 51 - lLift, 5.6, 4.6, HIDE, -0.08);
-  limb(p, 30, 38 + b + c, 32 + Math.max(0, -s) * 1.5, 51 - rLift, 5.6, 4.6, HIDE, -0.08);
-  mass(p, 16, 51 - lLift, 5, 2.2, HIDE, { n: 2.6, bias: -0.14 });
-  mass(p, 33, 51 - rLift, 5, 2.2, HIDE, { n: 2.6, bias: -0.14 });
+  limb(p, 18, 38 + b + c, 17 - Math.max(0, s) * 1.5, 46 - lLift, 5.6, 3.6, HIDE, -0.08);
+  limb(p, 30, 38 + b + c, 32 + Math.max(0, -s) * 1.5, 46 - rLift, 5.6, 3.6, HIDE, -0.08);
+  foot(p, 16, 52 - lLift, HIDE, '9', -0.14);
+  foot(p, 33, 52 - rLift, HIDE, '9', -0.18);
   mass(p, 24, 40 + b + c, 13.5, 6.4, LEATHER, { n: 2.8 });
   mass(p, 24, 31 + b, 13.2, 10.4, HIDE, { n: 2.5, bias: -0.04 });
   mass(p, 24, 21 + b, 15.2, 8, HIDE, { n: 2.8, bias: -0.02 });
@@ -884,6 +923,27 @@ function demonWing(p, cx, cy, k, dir) {
 }
 
 /**
+ * A CLOVEN HOOF, PLANTED. The demon's legs used to end on a keratin ellipse with one ink pixel
+ * scratched into it: flat-bottomed, no pastern, no sole, no toe — the biggest figure in the game
+ * standing on two erasers. Now the leg pinches into a PASTERN, the hoof WALL flares out under it
+ * (lit down its top-left, as everything here is), an ink CLEFT splits it into two toes all the way
+ * to the floor, the last row is the SOLE a step down the keratin ramp, and a dew-claw spur hooks
+ * off the back — so nothing about this foot is a straight horizontal line.
+ * @param {Pix} p @param {number} cx @param {number} y THE CONTACT ROW (the sole; the outline pass
+ *   lays the weight shadow on `y + 1`) @param {number} [bias] where the foot sits on its ramp
+ */
+function hoof(p, cx, y, bias = 0) {
+  const [d, m, l] = [...KERA];                                   // G dark · H mid · I light
+  mass(p, cx, y - 5, 2.4, 2.8, SKIN, { n: 2.4, bias: bias - 0.12 });      // the pastern, pinched in
+  [[-2, 3], [-3, 3], [-3, 4]].forEach(([x0, x1], r) => {                  // the wall, flaring down
+    for (let x = x0; x <= x1; x++) setPx(p, cx + x, y - 3 + r, x <= x0 + 1 ? l : x <= 0 ? m : d);
+  });
+  for (let r = 0; r < 3; r++) setPx(p, cx + 1, y - 3 + r, '#');           // THE CLEFT, floor to pastern
+  for (let x = -4; x <= 4; x++) if (x !== 1) setPx(p, cx + x, y, d);      // the sole
+  setPx(p, cx - 5, y - 2, m); setPx(p, cx - 5, y - 1, d);                 // the dew-claw, behind
+}
+
+/**
  * One demon frame.
  * @param {'S'|'E'|'N'} f
  * @param {{bob?:number, wing?:number, stride?:number, arm?:number, ring?:number, glow?:number, crouch?:number, reach?:number}} o
@@ -899,11 +959,10 @@ function demonFrame(f, o = {}) {
     demonWing(p, 15, 24 + b, k, -1);
     demonWing(p, 33, 24 + b, k, 1);
     // digitigrade legs ending in cloven hooves
-    curve(p, [[19, 36 + b + c], [17, 43 + b + c], [20, 48 + b - lLift]], 5, 3, SKIN, -0.04);
-    curve(p, [[29, 36 + b + c], [31, 43 + b + c], [28, 48 + b - rLift]], 5, 3, SKIN, -0.04);
-    mass(p, 20, 51 - lLift, 3.6, 2.4, KERA, { n: 2.6, bias: -0.14 });
-    mass(p, 28, 51 - rLift, 3.6, 2.4, KERA, { n: 2.6, bias: -0.14 });
-    setPx(p, 20, 52 - lLift, '#'); setPx(p, 28, 52 - rLift, '#');   // the cleft in each hoof
+    curve(p, [[19, 36 + b + c], [17, 43 + b + c], [20, 46 + b - lLift]], 5, 2.6, SKIN, -0.04);
+    curve(p, [[29, 36 + b + c], [31, 43 + b + c], [28, 46 + b - rLift]], 5, 2.6, SKIN, -0.04);
+    hoof(p, 20, 52 - lLift, -0.10);
+    hoof(p, 28, 52 - rLift, -0.16);
     // a hanging loin drape of the same membrane as the wings
     mass(p, 24, 38 + b + c, 7.4, 6.4, WING, { n: 2.8, bias: -0.04 });
     // torso: a broad chest tapering hard into the waist
@@ -934,8 +993,8 @@ function demonFrame(f, o = {}) {
 
   if (f === 'E') {
     demonWing(p, 21, 23 + b, k * 0.8, -1);
-    curve(p, [[19, 36 + b + c], [16, 43 + b + c], [19, 48 + b - rLift]], 4.6, 2.8, SKIN, -0.18);
-    mass(p, 19, 51 - rLift, 3.6, 2.4, KERA, { n: 2.6, bias: -0.22 });
+    curve(p, [[19, 36 + b + c], [16, 43 + b + c], [19, 46 + b - rLift]], 4.6, 2.4, SKIN, -0.18);
+    hoof(p, 19, 52 - rLift, -0.20);
     mass(p, 23, 38 + b + c, 6.4, 6.4, WING, { n: 2.8, bias: -0.06 });
     mass(p, 24, 33 + b, 6, 6.4, SKIN, { n: 2.4 });
     mass(p, 24, 25 + b, 8.4, 8, SKIN, { n: 2.6 });
@@ -948,8 +1007,8 @@ function demonFrame(f, o = {}) {
     for (let i = 0; i < 4; i++) setPx(p, 28 + i * 0.6 | 0, hy + 4, 'G');
     curve(p, [[22, hy - 3], [16, hy - 5], [12, hy - 1], [14, hy + 4]], 2.5, 1.1, KERA);
     curve(p, [[27, hy - 4], [31, hy - 7], [35, hy - 3]], 2.2, 0.9, KERA, -0.08);
-    curve(p, [[26, 36 + b + c], [29, 43 + b + c], [27 + Math.max(0, s) * 3, 48 + b - lLift]], 4.8, 3, SKIN, -0.02);
-    mass(p, 28 + Math.max(0, s) * 3, 51 - lLift, 3.6, 2.4, KERA, { n: 2.6, bias: -0.14 });
+    curve(p, [[26, 36 + b + c], [29, 43 + b + c], [27 + Math.max(0, s) * 3, 46 + b - lLift]], 4.8, 2.6, SKIN, -0.02);
+    hoof(p, 28 + Math.max(0, s) * 3, 52 - lLift, -0.10);
     curve(p, [[27, 25 + b], [32, 31 + b - reach], [29, 36 + b - reach]], 3.8, 2.3, SKIN, 0.02);
     if (glow > 0.15) soulRing(p, 33, 31 + b - reach, 4.4 + glow * 1.6, o.ring || 0);
     demonWing(p, 25, 22 + b, k, 1);
@@ -957,10 +1016,10 @@ function demonFrame(f, o = {}) {
   }
 
   // NORTH — the back: the two folded wings hang like a cloak, the horns curl out past the skull
-  curve(p, [[19, 36 + b + c], [17, 43 + b + c], [20, 48 + b - lLift]], 5, 3, SKIN, -0.1);
-  curve(p, [[29, 36 + b + c], [31, 43 + b + c], [28, 48 + b - rLift]], 5, 3, SKIN, -0.1);
-  mass(p, 20, 51 - lLift, 3.6, 2.4, KERA, { n: 2.6, bias: -0.18 });
-  mass(p, 28, 51 - rLift, 3.6, 2.4, KERA, { n: 2.6, bias: -0.18 });
+  curve(p, [[19, 36 + b + c], [17, 43 + b + c], [20, 46 + b - lLift]], 5, 2.6, SKIN, -0.1);
+  curve(p, [[29, 36 + b + c], [31, 43 + b + c], [28, 46 + b - rLift]], 5, 2.6, SKIN, -0.1);
+  hoof(p, 20, 52 - lLift, -0.16);
+  hoof(p, 28, 52 - rLift, -0.20);
   mass(p, 24, 38 + b + c, 7.4, 6.4, WING, { n: 2.8, bias: -0.08 });
   mass(p, 24, 32 + b, 7.4, 6.4, SKIN, { n: 2.4, bias: -0.06 });
   mass(p, 24, 25 + b, 12.4, 8, SKIN, { n: 2.6, bias: -0.04 });

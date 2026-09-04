@@ -41,7 +41,7 @@
 //             narrow ribcage, and the ARMS HANGING PAST THE KNEES with the knuckles nearly
 //             grazing the floor. The signature is the raw wound on its shoulder knitting shut with
 //             pale new flesh while it stands there.
-import { Palette, outline, makePix, setPx, getPx, mirrorLit, smearArc } from '../pixelPainter.js';
+import { Palette, outline, houseOutline, makePix, setPx, getPx, mirrorLit, smearArc } from '../pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
@@ -120,22 +120,36 @@ function tilt(p, a, cx, cy) {
 /** Standard clip set assembled from per-facing frame makers; west is the mirrored east. */
 function clips(make) {
   const anims = {};
-  const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a }; };
+  // THE INK, LAST AND ONCE (see pixelPainter.houseOutline): frames arrive outlined part-by-part or
+  // resampled by the death poses, so the coat can be doubled on a join and missing where one form
+  // covered another's ring; the west facing is a mirror, which puts the lit-edge softening on the
+  // wrong side. This peels every second coat, lays exactly one pixel of INK round anything bare and
+  // re-keys the whole silhouette against the frame as it finally stands.
+  const inked = (fr) => fr.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT }));
+  const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a, frames: inked(a.frames) }; };
   for (const f of ['S', 'E', 'N']) for (const [name, a] of Object.entries(make(f))) put(name, f, a);
   for (const name of Object.keys(anims)) {
     const e = anims[name].E;
-    if (e) anims[name].W = { ...e, facing: 'W', frames: e.frames.map((p) => mirrorLit(p, '')) };
+    if (e) anims[name].W = { ...e, facing: 'W', frames: inked(e.frames.map((p) => mirrorLit(p, ''))) };
   }
   return anims;
 }
 
 // The one key light as a unit vector in sprite space (x right, y down, z out of the screen).
-const LX = -0.60, LY = -0.64, LZ = 0.48;
+// LZ USED TO BE 0.48 AND THAT IS WHAT PILLOWED THE TROLL. With that much light coming straight out
+// of the screen, the lambert on a limb peaks about a pixel INSIDE the silhouette and then falls
+// back at the very rim — which quantises into a dark line down the LIT side of every arm and
+// haunch. A dark line on both sides of a form with the light between them is shadow ringing the
+// outside: pillow shading, banned by style.js, and it was on every arm in this file. Pulling the
+// light almost into the sprite plane makes the term MONOTONIC across a form, so the brightest
+// pixel is the top-left rim itself and the darkest is the bottom-right rim, with one clean
+// terminator in between and no bright core.
+const LX = -0.66, LY = -0.70, LZ = 0.18;
 
 /**
  * The ramp key for a surface whose normal is (nx, ny, nz = sqrt(1 - nx² - ny²)) — a directional
  * terminator quantised onto `keys` (darkest first). The two constants are solved from two
- * anchors: a surface facing the CAMERA lands exactly on the ramp's middle step, and a surface
+ * anchors: a surface facing the CAMERA lands just under the ramp's middle step, and a surface
  * facing the LIGHT lands on its top step. Get that wrong in either direction and the whole
  * creature paints itself in two adjacent tones — washed out at one end, a hole at the other.
  * `bias` pushes a form up or down the ramp (a far limb sits a tone back, a lit belly a tone
@@ -144,7 +158,7 @@ const LX = -0.60, LY = -0.64, LZ = 0.48;
 function tone(nx, ny, keys, bias = 0) {
   const r2 = Math.min(1, nx * nx + ny * ny);
   const lam = nx * LX + ny * LY + Math.sqrt(1 - r2) * LZ;
-  let t = lam * 0.769 + 0.131 + bias;
+  let t = lam * 0.639 + 0.325 + bias;
   t = t < 0 ? 0 : t > 0.999 ? 0.999 : t;
   return keys[(t * keys.length) | 0];
 }

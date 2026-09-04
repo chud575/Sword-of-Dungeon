@@ -45,7 +45,7 @@
 // FACINGS south / east / north are each drawn deliberately; west is the mirrored east (the
 // billboard flips it). CLIPS idle(4) walk(6) attack(4) hurt(2) death(5).
 import {
-  Palette, paint, compose, outline, makePix, setPx, getPx, line, solid,
+  Palette, paint, compose, outline, houseOutline, makePix, setPx, getPx, line, solid,
 } from '../pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
@@ -115,13 +115,15 @@ const RAG = [0, -2, -1, -3, 0, -1, -2, -1];
 
 /**
  * @param {{top?:number, bot?:number, topW?:number, botW?:number, sway?:number, lean?:number,
- *   ragged?:boolean, split?:number, folds?:number[], cx?:number, keys?:string, flare?:number}} o
+ *   ragged?:boolean, split?:number, folds?:number[], cx?:number, keys?:string, flare?:number,
+ *   feet?:string}} o `feet` is a two-key string (dark, lit) for the shoe toes under the hem
  * @returns {Pix} full-canvas layer
  */
 function robePix(o = {}) {
   const {
     top = 25, bot = 40, topW = 13, botW = 19, sway = 0, lean = 0,
     ragged = false, split = 0, folds = [-0.36, 0.24], cx = PIVOT_X, keys = '4567', flare = 0,
+    feet = null,
   } = o;
   const p = makePix(MON_W, MON_H);
   const [k0, k1, k2, k3] = keys;
@@ -131,15 +133,29 @@ function robePix(o = {}) {
     const hw = topW / 2 + ((botW + flare) - topW) / 2 * Math.pow(t, 1.28);
     const ox = cx + lean * (1 - t) + sway * t * t;
     for (let x = Math.ceil(ox - hw); x <= Math.floor(ox + hw); x++) {
-      if (ragged && y > bot + RAG[(x + 24) % RAG.length]) continue;
       const u = (x - ox) / hw;
+      if (ragged && y > bot + RAG[(x + 24) % RAG.length]) continue;
+      // A HEM IS NOT A RULED LINE. An unragged robe stopped dead on one flat row the full width of
+      // the sprite — twenty-one pixels of straight cut across the bottom of the mage, the widest
+      // flat edge in the cast. Heavy cloth on a cone hangs LOWEST where a fold runs into the floor
+      // and lifts a pixel or two between them, so the hem scallops with the folds it is made of.
+      if (!ragged && y > bot - Math.round(1.2 + 1.1 * Math.cos(u * 7.6 + 1.3))) continue;
       // the front slit of a split robe: a deep crease, not a hole
       const inSlit = split > 0 && t > 0.34 && Math.abs(u) < split;
       let key = u <= -0.70 ? k3 : u <= -0.12 ? k2 : u <= 0.50 ? k1 : k0;
       for (const fu of folds) if (Math.abs(u - fu) < 0.075) key = key === k3 ? k2 : key === k2 ? k1 : k0;
       if (inSlit) key = k0;
-      if (y === bot && !ragged) key = key === k3 ? k2 : k0;      // the hem reads as a dark edge
+      if (y >= bot - 1 && !ragged) key = key === k3 ? k2 : k0;    // the hem reads as a dark edge
       setPx(p, x, y, key);
+    }
+  }
+  // TWO SHOE TOES under the front of the hem: something the figure is actually standing on, and the
+  // last thing the outline pass sees, so the weight shadow lands under the shoe and not under cloth.
+  if (feet) {
+    const fx = Math.round(cx + sway);
+    for (const dx of [-4, 1]) for (let i = 0; i < 3; i++) {
+      setPx(p, fx + dx + i, bot - 1, i === 0 ? feet[1] : feet[0]);
+      setPx(p, fx + dx + i, bot, feet[0]);
     }
   }
   return p;
@@ -658,7 +674,12 @@ function deathClip(S) {
 /** Build every clip of one robed species: name -> facing -> clip. West is mirrored by the billboard. */
 function buildCaster(S) {
   const anims = {};
-  const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a }; };
+  // THE INK, LAST AND ONCE (pixelPainter.houseOutline): a robe, a hood, a staff and two sleeves each
+  // arrive carrying their own ring, so before this the coat was two pixels thick down every join and
+  // gone wherever a sleeve covered the robe's. This peels the second coats, lays one pixel of INK
+  // round whatever is bare and re-keys the silhouette against the finished figure.
+  const inked = (a) => ({ ...a, frames: a.frames.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT })) });
+  const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...inked(a) }; };
   for (const f of ['S', 'E', 'N']) {
     put('idle', f, idleClip(S, f));
     put('walk', f, walkClip(S, f));
@@ -691,7 +712,7 @@ const MAGE = {
     E: { top: 17, prof: [3.5, 5, 5.5, 5.5, 5.5, 5, 5, 5, 5, 5.5, 6], belt: 25 },
     N: { top: 17, prof: [4, 6, 7, 7, 7, 6, 6, 6, 6, 6.5, 7], belt: 25 },
   },
-  robe: { top: 26, bot: 40, topW: 14, botW: 20, folds: [-0.38, 0.26] },
+  robe: { top: 26, bot: 40, topW: 14, botW: 20, folds: [-0.38, 0.26], feet: '89' },
   sleeveW: 2.0,
   hand: '2', handLit: '3',
   /** The staff stands beside him; the free hand does the casting. */
@@ -935,7 +956,8 @@ function spriteWake(n, phase, spread = 5, cx = 13, cy = 20) {
 function buildSprite() {
   const clip = (frames, durations, loop) => ({ frames, durations, loop });
   const anims = {};
-  const put = (name, f, c) => { (anims[name] ||= {})[f] = { name, facing: f, ...c }; };
+  const inked = (c) => ({ ...c, frames: c.frames.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT })) });
+  const put = (name, f, c) => { (anims[name] ||= {})[f] = { name, facing: f, ...inked(c) }; };
   for (const f of ['S', 'E', 'N']) {
     put('idle', f, clip(
       [0, 1, 2, 3].map((i) => spriteFrame({ flap: [0.15, 0.8, 0.45, 0.95][i], bob: [0, -1, 0, -1][i], facing: f, motes: spriteWake(3, i, 6) })),

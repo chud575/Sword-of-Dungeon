@@ -28,7 +28,7 @@
 //            ruff over a barrel chest, reverse-jointed (digitigrade) legs and a bushy tail.
 //
 // CLIPS idle(4) walk(6) attack(4) hurt(2) death(5) on every facing.
-import { Palette, paint, compose, mirrorLit, outline, recolor, makePix, setPx } from '../pixelPainter.js';
+import { Palette, paint, compose, mirrorLit, outline, houseOutline, recolor, makePix, setPx } from '../pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
@@ -131,11 +131,17 @@ function dissolve(p, t, key) {
 /** Standard clip set assembled from per-facing frame makers; west is the mirrored east. */
 function clips(make) {
   const anims = {};
-  const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a }; };
+  // THE INK, LAST AND ONCE (see pixelPainter.houseOutline): frames arrive outlined part-by-part or
+  // resampled by the death poses, so the coat can be doubled on a join and missing where one form
+  // covered another's ring; the west facing is a mirror, which puts the lit-edge softening on the
+  // wrong side. This peels every second coat, lays exactly one pixel of INK round anything bare and
+  // re-keys the whole silhouette against the frame as it finally stands.
+  const inked = (fr) => fr.map((p) => houseOutline(p, { key: '#', litKey: '@', lit: LIT }));
+  const put = (name, f, a) => { (anims[name] ||= {})[f] = { name, facing: f, ...a, frames: inked(a.frames) }; };
   for (const f of ['S', 'E', 'N']) for (const [name, a] of Object.entries(make(f))) put(name, f, a);
   for (const name of Object.keys(anims)) {
     const e = anims[name].E;
-    if (e) anims[name].W = { ...e, facing: 'W', frames: e.frames.map((p) => mirrorLit(p, '')) };
+    if (e) anims[name].W = { ...e, facing: 'W', frames: inked(e.frames.map((p) => mirrorLit(p, ''))) };
   }
   return anims;
 }
