@@ -16,9 +16,10 @@
 //   shadow-dragon     FOUR legs planted under a wing span twice its own width, a long S-neck and a
 //                     lyre of horns. Violet-black scale with an inner glow: the light lives INSIDE
 //                     it and leaks out along the throat, the chest seams and the wing veins.
-//   fyre-drake        squat: a wide slab of a body a hand off the floor on four short thick legs,
-//                     a head almost as wide as its shoulders, no wings at all. Molten veins run its
-//                     flanks and the fire under it throws light UP onto the jaw and the belly.
+//   fyre-drake        squat and four-square: a barrel of a body slung low between four thick legs,
+//                     a heavy wedge skull carried UP on a short thick neck, and small wings furled
+//                     tight along the spine — the wing LINE, never a span. Molten veins split its
+//                     basalt hide and the fire in them throws light UP onto the jaw and the belly.
 //   dimension-spider  EIGHT jointed legs, each one three tapering segments — knees above the body,
 //                     feet planted wide — and a violet echo of itself standing a pixel out of
 //                     register, because half of it is somewhere else.
@@ -437,35 +438,92 @@ export function buildShadowDragon() {
 // ==========================================================================================
 //                                       FYRE DRAKE
 // ==========================================================================================
-// Read: SQUAT. Its mass runs along the floor, not up: a slab of a body a hand off the ground on
-// four short thick legs, a head almost as wide as its shoulders, and no wings at all. Molten veins
-// split the hide down both flanks and the fire in them throws light UP onto the jaw, the dewlap and
-// the underside of the belly — the only creature in the game lit from below as well as above.
-const FD_SW = 76, FD_SH = 60;
-const FD_DX = 5, FD_DY = 2, FD_W = FD_SW + 10, FD_H = FD_SH + 5;
-const FD_PIV = { x: 38 + FD_DX, y: 58 + FD_DY };
-const fdDone = pad(FD_W, FD_H, FD_DX, FD_DY);
+// Read: a SQUAT DRAKE — a barrel of a body slung low between four thick legs, a heavy wedge skull
+// carried on a short thick neck, small wings furled tight along the spine, and a club of a tail.
+// Molten veins split the basalt hide down both flanks and the fire in them throws light UP onto the
+// jaw, the dewlap and the underside of the belly.
+//
+// WHAT IT USED TO BE, and what each fix is. The old drake had NO DISCERNIBLE HEAD, NECK OR LEGS: it
+// was three overlapping ellipses on a 76x60 canvas — one slab of body, one lump at the front that
+// was supposed to be a skull, and four capsules that started and finished inside the slab. With an
+// orange dotted seam across the middle it read as a lumpy pastry.
+//   HEAD  a real skull now: a long wedge with a brow ridge, a jaw hung UNDER it (with the ink of
+//         the mouth line between the two), swept horns, a nostril and an ember eye — and it is
+//         `gapBlit` inked away from the neck behind it so it never fuses back into the body.
+//   NECK  the head is carried on a short thick neck that RISES out of the shoulders. That is also
+//         where the extra height in style.js SCALE comes from: the ladder wants a 1.92 creature and
+//         the old sprite bought it with a 2.05 density multiplier — a stopgap the file's own
+//         comment calls out. Raising the head puts the figure at 66 texels and the multiplier at
+//         1.34, in line with the rest of the cast.
+//   LEGS  four of them, each with a shoulder/haunch mass, a shank angled out to the elbow or hock,
+//         a vertical cannon and `talons` planted on the floor — and the near pair is gap-bitten off
+//         the body so the join is an ink line rather than a merge.
+//   WING  a furled wing lying along the spine with its wrist spur standing above the shoulder: the
+//         wing LINE a drake needs to stop reading as a lizard, without the span that would make it
+//         another wyvern.
+const FD_SW = 78, FD_SH = 74;
+const FD_DX = 5, FD_DY = 3, FD_W = FD_SW + 10, FD_H = FD_SH + 5;
+const FD_PIV = { x: 40 + FD_DX, y: 74 + FD_DY };
+const FD_SOLE = 72;                                  // the contact row: fills stop here
+/** Seat the pose, plus a cell-space layer for the breath (which reaches past the body's scratch). */
+function fdSeat(body, front) {
+  const cell = makePix(FD_W, FD_H);
+  blit(cell, body, FD_DX, FD_DY);
+  if (front) blit(cell, front, 0, 0);
+  return ink(cell);
+}
 const FD = drakePalette()
-  .band('123456', '#5e3128', HUE)   // charred red-brown hide
-  .band('qrstu', '#a8763f', HUE)    // hot ochre belly plate
-  .band('vwxyz', '#bdb298', BONE)   // tooth, claw, horn
+  // basalt, not brick: the old '#5e3128' hide was the colour of the floor the drake stands on, so
+  // at gameplay distance a three-tile creature vanished into the flagstones. This is cooler and
+  // darker, and it makes the veins in it the only warm thing on the animal.
+  .band('123456', '#4a332f', HUE)   // cooled basalt hide
+  .band('qrstu', '#8a6440', HUE)    // hot ochre belly and jaw plate
+  .band('vwxyz', '#9b9082', BONE)   // tooth, claw, horn
   .set('k', '#b8401a').set('l', '#ff8f30').set('m', '#ffe6a4')  // vein core / vein / white-hot
   .set('E', '#1c1420');
-const FD_HIDE = '123456', FD_PLATE = 'qrstu';
-/** Charred hide: dark enough that the molten veins in it are the brightest thing on the creature. */
-const FD_TB = -0.13;
+const FD_HIDE = '123456', FD_PLATE = 'qrstu', FD_HORN = 'vwxy';
+/** Cooled basalt: dark enough that the molten veins in it are the brightest thing on the creature. */
+const FD_TB = -0.34;
+
+/**
+ * THE LIGHT PLANE for the drake, the same device the demon uses (monsters/boss.js): `tone()` lights
+ * every mass about its own centre, which models a form and leaves the ANIMAL unlit. This is how far
+ * up its ramp a form sitting at (x, y) starts — brighter toward the top-left of the figure.
+ */
+const fgl = (x, y) => FD_TB + 0.08 * ((40 - x) / 38) + 0.15 * ((44 - y) / 36);
+const FM = (p, cx, cy, rx, ry, keys, o = {}) => mass(p, cx, cy, rx, ry, keys, { ...o, bias: (o.bias || 0) + fgl(cx, cy) - TB });
+const FC = (p, pts, r0, r1, keys, bias = 0) => {
+  let sx = 0, sy = 0;
+  for (const q of pts) { sx += q[0]; sy += q[1]; }
+  return C(p, pts, r0, r1, keys, bias + fgl(sx / pts.length, sy / pts.length) - TB);
+};
+const FL = (p, x0, y0, x1, y1, r0, r1, keys, bias = 0) =>
+  LB(p, x0, y0, x1, y1, r0, r1, keys, bias + fgl((x0 + x1) / 2, (y0 + y1) / 2) - TB);
+
+/** Lay `q` over `p` with a one-pixel gap bitten out of it, so the ink pass separates the two. */
+function fdGap(p, q, r = 1) {
+  for (let y = 0; y < q.h; y++) for (let x = 0; x < q.w; x++) {
+    if (!q.d[y * q.w + x]) continue;
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) setPx(p, x + dx, y + dy, 0);
+  }
+  return blit(p, q, 0, 0);
+}
 
 /** A molten vein: a broken seam that brightens where the hide has split widest. */
 function veins(p, pts, heat) {
+  let n0 = 0;
   for (let i = 0; i + 1 < pts.length; i++) {
     const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
     const n = Math.max(2, Math.round(Math.hypot(bx - ax, by - ay)));
-    for (let s = 0; s <= n; s++) {
+    for (let s = 0; s <= n; s++, n0++) {
       const t = s / n, x = Math.round(lerp(ax, bx, t)), y = Math.round(lerp(ay, by, t));
       if (!getPx(p, x, y)) continue;
-      const hot = (i + s) % 4 === 0 && heat > 0.5;
-      setPx(p, x, y, hot ? 'm' : (i + s) % 2 ? 'l' : 'k');
-      if (hot && getPx(p, x, y - 1)) setPx(p, x, y - 1, 'l');
+      // CONTINUOUS, and lipped: the seam itself never breaks, a char lip runs under it and the
+      // hide above it is pulled back to its darkest step. A vein drawn as alternating hot and dark
+      // pixels (which is what this used to be) reads at gameplay distance as a dotted line.
+      setPx(p, x, y, n0 % 5 === 0 && heat > 0.45 ? 'm' : 'l');
+      if (getPx(p, x, y + 1)) setPx(p, x, y + 1, 'k');
+      if (getPx(p, x, y - 1)) setPx(p, x, y - 1, 'q');
     }
   }
 }
@@ -492,11 +550,63 @@ function gout(p, x, y, dx, dy, len) {
   }
 }
 
-/** A short, thick, sprawling leg: the knee sits level with the spine and the foot is planted wide. */
-function fdLeg(p, hx, hy, dir, spread, lift, bias) {
-  C(p, [[hx, hy], [hx + dir * spread, hy - 3], [hx + dir * (spread + 1), hy + 8 - lift]], 3.6, 2.6, FD_HIDE, bias);
-  M(p, hx + dir * (spread + 1), hy + 9 - lift, 4.0, 2.0, FD_HIDE, { n: 2.6, bias: bias - 0.06 });
-  talons(p, hx + dir * (spread + 1), hy + 10 - lift, dir, 'x', '2');
+/**
+ * ONE LEG, in four pieces and drawn into its own scratch so the caller can bite an ink gap between
+ * it and the barrel it hangs off. `dir` points the knee/hock away from the body; `sweep` is how far
+ * forward or back the foot is planted.
+ */
+function fdLeg(p, hx, hy, dir, sweep, lift, bias, gap = true) {
+  const q = gap ? makePix(p.w, p.h) : p;
+  const sole = FD_SOLE - lift;
+  FM(q, hx, hy, 5.2, 6.4, FD_HIDE, { n: 2.5, bias: bias - 0.16 });                    // shoulder / haunch
+  FC(q, [[hx, hy + 3], [hx + dir * 3.4, hy + 8], [hx + dir * 2 + sweep, hy + 13]], 4.0, 3.0, FD_HIDE, bias - 0.06);
+  FL(q, hx + dir * 2 + sweep, hy + 12, hx + dir * 1.4 + sweep, sole - 4, 3.0, 2.5, FD_HIDE, bias - 0.12);
+  talons(q, hx + dir * 1.4 + sweep, sole, dir >= 0 ? 1 : -1, 'x', '2');
+  return gap ? fdGap(p, q) : p;
+}
+
+/**
+ * THE SKULL. A long wedge with a brow ridge over the eye, a slab jaw slung under it with the ink of
+ * the mouth line between, two horns swept back off the crown, a nostril and one ember eye.
+ * @param {number} dir +1 = facing right @param {boolean} both draw the far horn as well
+ */
+function fdHead(p, hx, hy, dir, heat, both = false) {
+  const q = makePix(p.w, p.h);
+  FM(q, hx, hy, 7.4, 5.0, FD_HIDE, { n: 2.7 });                                       // the cranium
+  FL(q, hx + dir * 3, hy + 1, hx + dir * 10, hy + 2, 4.4, 2.8, FD_HIDE, -0.02);       // the muzzle
+  FM(q, hx - dir * 1, hy - 4, 6.2, 1.8, FD_HIDE, { n: 3.2, bias: 0.0 });              // the brow ridge
+  FL(q, hx + dir * 2, hy + 5, hx + dir * 9, hy + 5, 3.2, 2.0, FD_PLATE, -0.08);       // the jaw, slung under
+  for (let x = 0; x <= 11; x++) {                                                     // THE MOUTH LINE
+    const mx = hx + dir * x, my = hy + 3;
+    if (getPx(q, mx, my)) setPx(q, mx, my, '#');
+  }
+  fangs(q, Math.min(hx + dir * 2, hx + dir * 9), Math.max(hx + dir * 2, hx + dir * 9), hy + 2, 'y');
+  fangs(q, Math.min(hx + dir * 3, hx + dir * 8), Math.max(hx + dir * 3, hx + dir * 8), hy + 4, 'x');
+  C(q, [[hx - dir * 4, hy - 3], [hx - dir * 9, hy - 7], [hx - dir * 14, hy - 9]], 2.2, 0.5, FD_HORN, TB - 0.10);
+  if (both) C(q, [[hx + dir * 4, hy - 3], [hx + dir * 9, hy - 7], [hx + dir * 14, hy - 9]], 2.2, 0.5, FD_HORN, TB - 0.22);
+  setPx(q, hx + dir * 9, hy + 1, 'E');                                                // the nostril
+  setPx(q, hx + dir * 2, hy - 1, 'E'); setPx(q, hx + dir * 3, hy - 1, 'E');            // the eye socket
+  setPx(q, hx + dir * 2, hy, heat > 0.4 ? 'm' : 'l'); setPx(q, hx + dir * 3, hy, 'l');
+  underLight(q, Math.min(hx, hx + dir * 10), Math.max(hx, hx + dir * 10), hy + 6, heat > 0.6 ? 'l' : 'k');
+  return fdGap(p, q);
+}
+
+/**
+ * A FURLED WING lying along the spine — the wing LINE that stops a drake reading as a lizard,
+ * without the span that would make it a second wyvern. `dir` points along the animal's back.
+ */
+function fdWing(p, cx, cy, dir, k = 0.12) {
+  const fingers = [
+    { a: lerp(-0.10, -1.30, k), r: lerp(14, 27, k) },
+    { a: lerp(0.14, -0.80, k), r: lerp(13, 29, k) },
+    { a: lerp(0.40, -0.24, k), r: lerp(11, 25, k) },
+    { a: lerp(0.68, 0.32, k), r: lerp(8, 18, k) },
+    { a: lerp(0.96, 0.84, k), r: lerp(5, 11, k) },
+  ];
+  wingFan(p, cx, cy, fingers, dir, 'qrs' + '2', { scallop: 2.4, tatter: 1.6 });
+  const sx = cx + (3 + 2 * (1 - k)) * dir, sy = cy - (3 + 2 * (1 - k));
+  LB(p, cx, cy, sx, sy, 2.0, 1.0, FD_PLATE, -0.06);
+  setPx(p, Math.round(sx), Math.round(sy), 'x'); setPx(p, Math.round(sx + dir), Math.round(sy - 1), 'w');
 }
 
 /**
@@ -506,71 +616,89 @@ function fdLeg(p, hx, hy, dir, spread, lift, bias) {
  */
 function fdFrame(f, o = {}) {
   const p = makePix(FD_SW, FD_SH);
+  const fx = o.breath ? makePix(FD_W, FD_H) : null;
   TB = FD_TB;
   const b = (o.bob || 0) + (o.crouch || 0), g = o.gait || 0, heat = o.heat ?? 0.5;
-  const rear = o.rear || 0, sw = [0, -5, 5][(o.tail || 0) % 3];
+  const rear = o.rear || 0, sw = [0, -4, 4][(o.tail || 0) % 3];
 
   if (f === 'E') {
-    // the tail: heavy at the root, a thick club of muscle rather than a whip
-    C(p, [[26, 36 + b], [16, 39 + b + sw * 0.3], [7, 36 + b + sw * 0.7], [2, 28 + b + sw]], 6.4, 1.4, FD_HIDE, -0.06);
-    fdLeg(p, 28, 40 + b, -1, 5, g * 2, -0.22);
-    fdLeg(p, 48, 40 + b, 1, 5, -g * 2, -0.22);
-    // the slab: wide, low, and deeper than it is tall
-    M(p, 38, 34 + b - rear, 18.5, 8.4, FD_HIDE, { n: 2.7 });
-    M(p, 38, 39 + b - rear * 0.4, 15.0, 4.0, FD_PLATE, { n: 2.8, bias: 0.04 });
-    for (let x = 25; x < 52; x += 3) setPx(p, x, 41 + b, 'r');
-    crest(p, [[22, 27 + b - rear * 0.3], [31, 25 + b - rear * 0.6], [42, 25 + b - rear], [52, 27 + b - rear]], 4, FD_HIDE, { tip: 'l' });
-    // neck: short and thick, the head carried barely above the shoulder
-    C(p, [[52, 33 + b - rear], [59, 31 + b - rear * 1.3]], 6.6, 5.6, FD_HIDE);
-    // the head: as wide as the shoulders, a slab of jaw under a heavy brow
-    M(p, 63, 30 + b - rear * 1.4, 8.6, 5.4, FD_HIDE, { n: 2.6 });
-    M(p, 65, 34 + b - rear * 1.4, 7.4, 2.6, FD_PLATE, { n: 2.8, bias: 0.02 });
-    fangs(p, 59, 71, 32 + b - rear * 1.4, 'y');
-    setPx(p, 63, 28 + b - rear * 1.4, 'E'); setPx(p, 64, 28 + b - rear * 1.4, 'l');
-    veins(p, [[24, 30 + b], [34, 28 + b], [45, 29 + b], [52, 31 + b]], heat);
-    veins(p, [[30, 36 + b], [40, 37 + b], [48, 36 + b]], heat * 0.8);
-    underLight(p, 24, 52, 41 + b, heat > 0.6 ? 'l' : 'k');
-    underLight(p, 58, 70, 35 + b - rear * 1.4, heat > 0.6 ? 'l' : 'k');
-    if (o.breath) gout(p, 72, 33 + b - rear * 1.4, 1, 0, o.breath);
-    return fdDone(p);
+    // PROFILE, facing right. Tail, far pair of legs, barrel, wing, neck, skull, near pair of legs.
+    const bodyY = 44 + b - rear;
+    FC(p, [[24, bodyY + 2], [14, bodyY + 6 + sw * 0.3], [6, bodyY + 2 + sw * 0.7], [2, bodyY - 6 + sw]], 6.6, 1.6, FD_HIDE, -0.10);
+    fdLeg(p, 30, 50 + b, -1, -2, Math.max(0, g) * 2, -0.24, false);                    // far hind
+    fdLeg(p, 52, 50 + b, 1, 1, Math.max(0, -g) * 2, -0.22, false);                     // far fore
+    // the barrel: deep, slung low, deeper at the chest than at the hip
+    FM(p, 40, bodyY, 20.0, 10.4, FD_HIDE, { n: 2.7 });
+    FM(p, 50, bodyY + 1, 12.0, 9.4, FD_HIDE, { n: 2.6, bias: -0.02 });                 // the chest
+    FM(p, 42, bodyY + 8, 15.0, 4.4, FD_PLATE, { n: 2.9, bias: -0.08 });                // the belly plates
+    for (let x = 28; x < 58; x += 3) setPx(p, x, bodyY + 11, 'r');
+    fdWing(p, 40, bodyY - 7, -1, o.rear ? 0.5 : 0.12);
+    crest(p, [[22, bodyY - 6], [32, bodyY - 9], [44, bodyY - 10], [54, bodyY - 8]], 4, FD_HIDE, { tip: 'l' });
+    // THE NECK: short, thick, and it RISES — this is where the drake's height comes from
+    FC(p, [[53, bodyY - 6], [60, 32 + b - rear], [64, 27 + b - rear * 1.4]], 8.4, 6.2, FD_HIDE, -0.04);
+    fdHead(p, 66, 21 + b - rear * 1.6, 1, heat);
+    // THE VEINS GO ON THE BODY, BEFORE THE NEAR LEGS. Painted afterwards they run straight across
+    // the leg in front of it, and a molten seam crossing a limb reads as a harness strap.
+    veins(p, [[24, bodyY - 4], [34, bodyY - 6], [46, bodyY - 5], [54, bodyY - 2]], heat);
+    veins(p, [[30, bodyY + 3], [38, bodyY + 4], [46, bodyY + 2]], heat * 0.8);
+    veins(p, [[58, 32 + b - rear], [63, 26 + b - rear * 1.3]], heat);
+    fdLeg(p, 34, 50 + b, -1, 2, Math.max(0, -g) * 2, -0.04);                           // near hind
+    fdLeg(p, 55, 51 + b, 1, -1, Math.max(0, g) * 2, 0.0);                              // near fore
+    underLight(p, 26, 58, bodyY + 11, heat > 0.6 ? 'l' : 'k');
+    if (fx) gout(fx, 76 + FD_DX, 22 + b - rear * 1.6 + FD_DY, 1, 0, o.breath);
+    return fdSeat(p, fx);
   }
 
   if (f === 'S') {
-    // head-on: the wide skull fills the front, the slab recedes behind it, the tail lashes out left
-    C(p, [[38, 28 + b], [28 + sw * 0.5, 23 + b], [17 + sw, 21 + b], [8 + sw * 1.4, 24 + b]], 5.4, 1.2, FD_HIDE, -0.16);
-    M(p, 38, 28 + b - rear, 17.0, 8.6, FD_HIDE, { n: 2.7, bias: -0.05 });
-    crest(p, [[28, 22 + b - rear], [34, 20 + b - rear], [43, 20 + b - rear], [49, 22 + b - rear]], 3, FD_HIDE, { tip: 'l' });
-    fdLeg(p, 26, 30 + b, -1, 8, g * 2, -0.14);
-    fdLeg(p, 50, 30 + b, 1, 8, -g * 2, -0.14);
-    fdLeg(p, 29, 38 + b, -1, 8, -g * 2, -0.02);
-    fdLeg(p, 47, 38 + b, 1, 8, g * 2, -0.02);
-    M(p, 38, 38 + b, 13.0, 6.0, FD_HIDE, { n: 2.6 });
-    // the head sits in FRONT of the body, filling the bottom of the frame
-    M(p, 38, 42 + b + rear, 12.0, 6.4, FD_HIDE, { n: 2.5 });
-    M(p, 38, 46 + b + rear, 9.6, 3.0, FD_PLATE, { n: 2.8, bias: 0.04 });
-    fangs(p, 30, 46, 45 + b + rear, 'y');
-    for (const ex of [33, 43]) { setPx(p, ex, 40 + b + rear, 'E'); setPx(p, ex, 41 + b + rear, 'l'); }
-    veins(p, [[27, 30 + b], [38, 26 + b], [49, 30 + b]], heat);
-    veins(p, [[31, 36 + b], [38, 34 + b], [45, 36 + b]], heat * 0.7);
-    underLight(p, 28, 48, 48 + b + rear, heat > 0.6 ? 'l' : 'k');
-    if (o.breath) gout(p, 38, 50 + b, 0, 1, o.breath);
-    return fdDone(p);
+    // HEAD-ON: the skull is raised over a deep chest, the barrel recedes behind it, the four legs
+    // splay wide and the tail lashes out to the screen left.
+    const bodyY = 48 + b - rear;
+    FC(p, [[34, bodyY], [24 + sw * 0.4, bodyY - 5], [13 + sw, bodyY - 8], [5 + sw * 1.4, bodyY - 3]], 5.6, 1.4, FD_HIDE, -0.18);
+    fdLeg(p, 22, 48 + b, -1, -1, Math.max(0, g) * 2, -0.20, false);                    // far hind
+    fdLeg(p, 58, 48 + b, 1, 1, Math.max(0, -g) * 2, -0.24, false);                     // far hind
+    FM(p, 40, bodyY, 19.0, 9.6, FD_HIDE, { n: 2.7, bias: -0.04 });                     // the barrel behind
+    crest(p, [[28, bodyY - 7], [40, bodyY - 9], [52, bodyY - 7]], 3, FD_HIDE, { tip: 'l' });
+    fdWing(p, 26, bodyY - 6, -1, 0.12);
+    fdWing(p, 54, bodyY - 6, 1, 0.12);
+    FM(p, 40, 40 + b, 13.4, 8.6, FD_HIDE, { n: 2.6 });                                 // the chest
+    FM(p, 40, 45 + b, 10.0, 4.4, FD_PLATE, { n: 2.9, bias: -0.08 });                   // the breast plates
+    // head-on the veins run DOWN the chest, not across it: three parallel bars stacked on a
+    // barrel read as a radiator grille, which is how the old drake got its "orange seam" — and
+    // they go on before the near legs, so no seam ever crosses a limb like a harness strap
+    veins(p, [[37, 34 + b], [35, 40 + b], [37, 46 + b]], heat);
+    veins(p, [[44, 34 + b], [46, 40 + b], [44, 46 + b]], heat * 0.85);
+    veins(p, [[40, 33 + b], [40, 43 + b]], heat * 0.7);
+    fdLeg(p, 28, 44 + b, -1, -2, Math.max(0, -g) * 2, -0.02);                          // near fore
+    fdLeg(p, 52, 44 + b, 1, 2, Math.max(0, g) * 2, -0.10);                             // near fore
+    FC(p, [[40, 38 + b], [40, 33 + b - rear], [40, 29 + b - rear]], 7.6, 6.2, FD_HIDE, -0.02);
+    fdHead(p, 40, 23 + b - rear, 1, heat, true);
+    setPx(p, 36, 22 + b - rear, 'E'); setPx(p, 36, 23 + b - rear, heat > 0.4 ? 'm' : 'l');
+    underLight(p, 30, 50, 49 + b, heat > 0.6 ? 'l' : 'k');
+    if (fx) gout(fx, 40 + FD_DX, 30 + b - rear + FD_DY, 0, 1, o.breath);
+    return fdSeat(p, fx);
   }
 
-  // NORTH — walking away: the crest runs up the spine to the back of a very wide skull
-  C(p, [[38, 34 + b], [37 + sw * 0.4, 42 + b], [35 + sw, 50 + b]], 5.6, 1.4, FD_HIDE, 0.02);
-  fdLeg(p, 26, 30 + b, -1, 8, g * 2, -0.18);
-  fdLeg(p, 50, 30 + b, 1, 8, -g * 2, -0.18);
-  fdLeg(p, 29, 38 + b, -1, 8, -g * 2, -0.06);
-  fdLeg(p, 47, 38 + b, 1, 8, g * 2, -0.06);
-  M(p, 38, 33 + b, 17.4, 9.4, FD_HIDE, { n: 2.7, bias: -0.07 });
-  M(p, 38, 24 + b, 11.6, 5.0, FD_HIDE, { n: 2.5, bias: -0.03 });
-  M(p, 38, 20 + b, 9.0, 4.2, FD_HIDE, { n: 2.4, bias: -0.02 });
-  setPx(p, 32, 19 + b, '@'); setPx(p, 44, 19 + b, '#');
-  crest(p, [[38, 22 + b], [38, 30 + b], [38, 38 + b]], 3.4, FD_HIDE, { tip: 'l' });
-  veins(p, [[28, 30 + b], [32, 38 + b]], heat);
-  veins(p, [[48, 30 + b], [44, 38 + b]], heat);
-  return fdDone(p);
+  // NORTH — walking away: the tail runs at the camera, the crest runs up the spine and the back of
+  // the skull sits over the shoulders with the two horns standing out past it.
+  const bodyY = 44 + b;
+  FC(p, [[40, bodyY + 4], [39 + sw * 0.4, 56 + b], [37 + sw, 66 + b]], 6.0, 1.6, FD_HIDE, 0.04);
+  fdLeg(p, 22, 46 + b, -1, -1, Math.max(0, g) * 2, -0.18, false);
+  fdLeg(p, 58, 46 + b, 1, 1, Math.max(0, -g) * 2, -0.22, false);
+  fdLeg(p, 26, 42 + b, -1, -2, Math.max(0, -g) * 2, -0.06);
+  fdLeg(p, 54, 42 + b, 1, 2, Math.max(0, g) * 2, -0.12);
+  FM(p, 40, bodyY, 19.0, 10.0, FD_HIDE, { n: 2.7, bias: -0.06 });
+  fdWing(p, 27, bodyY - 6, -1, 0.12);
+  fdWing(p, 53, bodyY - 6, 1, 0.12);
+  crest(p, [[40, bodyY - 9], [40, bodyY - 1], [40, bodyY + 6]], 3.4, FD_HIDE, { tip: 'l' });
+  FC(p, [[40, 36 + b], [40, 31 + b], [40, 28 + b]], 7.6, 6.2, FD_HIDE, -0.06);
+  { const q = makePix(FD_SW, FD_SH);
+    FM(q, 40, 23 + b, 7.4, 5.2, FD_HIDE, { n: 2.7, bias: -0.04 });
+    C(q, [[37, 21 + b], [32, 18 + b], [28, 15 + b]], 2.4, 0.6, FD_HORN, TB - 0.10);
+    C(q, [[43, 21 + b], [48, 18 + b], [52, 15 + b]], 2.4, 0.6, FD_HORN, TB - 0.20);
+    fdGap(p, q); }
+  veins(p, [[28, bodyY - 4], [32, bodyY + 6]], heat);
+  veins(p, [[52, bodyY - 4], [48, bodyY + 6]], heat);
+  return fdSeat(p, fx);
 }
 
 function fdAnims(f) {
@@ -579,13 +707,13 @@ function fdAnims(f) {
     frames: [mk({ heat: 0.3, tail: 0 }), mk({ bob: -1, heat: 0.75, tail: 1 }), mk({ heat: 1, tail: 2 }), mk({ bob: -1, heat: 0.5, tail: 1 })],
     durations: [330, 270, 310, 280], loop: true,
   };
-  // a heavy sprawling waddle: the whole slab rocks, it never leaves the floor
+  // a heavy sprawling waddle: the whole barrel rocks, it never leaves the floor
   const walk = {
     frames: [mk({ gait: 1, tail: 1, heat: 0.6 }), mk({ gait: 0.3, bob: -1, tail: 2, heat: 0.45 }), mk({ gait: -1, tail: 1, heat: 0.7 }), mk({ gait: -0.3, bob: -1, tail: 0, heat: 0.5 })],
     durations: [130, 130, 130, 130], loop: true,
   };
   const attack = {
-    frames: [mk({ rear: 3, tail: 2, heat: 1, bob: -1 }), mk({ rear: 2, tail: 2, heat: 1, breath: 4 }), mk({ rear: 0, tail: 0, heat: 1, breath: 10 }), mk({ rear: 0, tail: 1, heat: 0.6 })],
+    frames: [mk({ rear: 3, tail: 2, heat: 1, bob: -1 }), mk({ rear: 2, tail: 2, heat: 1, breath: 3 }), mk({ rear: 0, tail: 0, heat: 1, breath: 6 }), mk({ rear: 0, tail: 1, heat: 0.6 })],
     durations: [170, 90, 140, 180], loop: false,
   };
   const recoil = mk({ bob: 2, tail: 2, heat: 0.15 });
@@ -597,7 +725,7 @@ function fdAnims(f) {
   return { idle, walk, attack, hurt, death };
 }
 
-/** Fyre drake: an 86x65 cell around a 76x60 pose — a squat slab with molten veins, lit from under. */
+/** Fyre drake: an 88x79 cell around a 78x74 pose — a squat molten drake with its head up. */
 export function buildFyreDrake() {
   return { anims: clips(fdAnims), palette: FD, w: FD_W, h: FD_H, pivot: FD_PIV, emissive: 'lm', scale: 1 };
 }
