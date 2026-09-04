@@ -10,6 +10,12 @@
 //   3. FORM_RUN_MIN=8 meant the pillow rule's denominator was the part of the sheet it had chosen
 //      to look at — 15-46% of the human sheets' body pixels — so a fraction of it meant nothing.
 //
+// THE CAMERA IS ORTHOGRAPHIC: a fixed plan view tilted 17 degrees off vertical, with the frustum
+// derived from a whole texel size, so one world unit is the same number of device pixels everywhere
+// in the frame and the pixel grid is exact by construction. tools/audit.mjs reads the scale off
+// `camera.top/bottom/zoom` (there is no `fov`) and reports it as `pxPerWorld`, which is what makes
+// `tilePx` an exact number rather than a rounded `PX_PER_TILE * texel`.
+//
 // So: four scenarios are rendered at the camera each is played on, every character on screen is
 // isolated by its own texel grid and re-rendered to find what the room draws in front of it, and
 // these gates read the resulting numbers. They are expected to FAIL on art that looks wrong,
@@ -95,6 +101,19 @@ const CONTACT_MIN_PX = 64, CONTACT_MIN_PEAK = 0.08;
  * on its own fractional grid collapses edgeAlign toward 1/S.
  */
 const GRID_RUN_MIN = 0.75, GRID_EDGE_ALIGN_MIN = 0.75;
+/**
+ * BOTH ARE MEASURED ON THE PIXELS THE FIGURE OWNS, and that qualifier is load-bearing. A sprite's
+ * footprint is not all its own: the room can be drawn in front of it, another sprite can overlap
+ * it, and a spell burst, a spray of blood or a damage number can be BLENDED over it in the
+ * transparent pass. Those pixels carry the overlay's colour at the overlay's own sub-pixel phase,
+ * and counting them measures the SPELL's grid, not the art's. Before audit.mjs dropped them, the
+ * Werebear standing inside a magic burst in 'combat' scored 0.61 of its edges on the grid and the
+ * props in that same frame scored 0.44 — both were failures of the instrument, and both read 0.99
+ * and 1.00 once the overlays were excluded (`ownSet` / `fxAt` in tools/audit.mjs). This exclusion
+ * applies to the GRID numbers only. The tone, contact and ambient samples keep every pixel: they
+ * are what the player is looking at, and a creature that cannot be told from the floor must stay in
+ * that median. The sabotage run below proves the gate still bites through the exclusion.
+ */
 /** The floor's grid is measured in WORLD space on a plane at an angle, so only its run length is
  * comparable to the cast's; its screen phase legitimately slides with depth. Props are 3D objects
  * standing on that same world grid, so they are held to the run length and not to the phase. */

@@ -11,6 +11,12 @@
 // So this tool never looks at a sheet to decide anything. It loads the game headless, renders a
 // scenario at the camera that scenario plays on, and READS PIXELS BACK OFF THE CANVAS.
 //
+// THE CAMERA IS ORTHOGRAPHIC. A fixed plan view tilted 17 degrees off vertical: apparent size does
+// not vary with depth, the frustum is derived from a whole texel size, and so one world unit is the
+// same number of device pixels everywhere in the frame. There is no `fov` to read — the scale comes
+// off `camera.top/bottom` and `camera.zoom`, and is reported as `pxPerWorld`, which makes `tilePx`
+// exact instead of a rounded `PX_PER_TILE * texel`.
+//
 // HOW A CHARACTER IS ISOLATED
 // A billboard is three meshes: `sprite.mesh` (the body), `sprite.blob` (the contact shadow) and
 // `sprite.cast` (the stretched torch shadow). Render the frame; hide one character's body; render
@@ -46,6 +52,9 @@
 //                          by re-drawing it with the depth test off, so an occluded figure is
 //                          reported as hidden instead of being judged on a boulder's brightness
 //   coverage               how much of it changed the frame at all: 1.0 minus what it is invisible against
+//   ownPixels / fxFraction how many pixels inside its footprint are actually ITS (nothing drawn over
+//                          them), and how much of it an effect was painting. The grid numbers above
+//                          are measured on `ownPixels` alone — see `ownSet` and `fxAt`.
 // plus the FLOOR's and the PROPS' run length and edge alignment, so a grid mismatch between the
 // hand-pixelled cast and the world they stand in is visible in the same table.
 //
@@ -140,7 +149,14 @@ function inPageAudit(K) {
     views.push({ id, v });
   }
   const S = views.length ? views[0].v.sprite.texelPx : 4;      // the frame's one texel size
-  const tilePx = 32 * S;
+  // How many device pixels one world tile covers. Under the ORTHOGRAPHIC camera this is one exact
+  // constant for the whole frame (no depth falloff), read straight off the frustum, so the patch of
+  // floor a shadow may occupy is sized from the camera rather than from `PX_PER_TILE * S` — S is a
+  // rounded texel size and would drift from the true tile by up to half a texel per tile.
+  const pxPerTile = views.length ? views[0].v.sprite.px : 32;
+  const tilePx = R.camera.isOrthographicCamera
+    ? H / Math.max(1e-6, (R.camera.top - R.camera.bottom) / (R.camera.zoom || 1))
+    : pxPerTile * S;
 
   if (sabotage === 'no-shadows') for (const { v } of views) v.sprite.blob.visible = false;
   if (sabotage === 'dark-cast') for (const { v } of views) v.sprite.material.uniforms.uTint.value.multiplyScalar(0.16);
@@ -253,6 +269,29 @@ function inPageAudit(K) {
   const noProps = propMeshes.length ? shoot() : null;
   for (const o of propMeshes) o.visible = true;
 
+  // ------------------------------------------------------------------ what the EFFECTS painted
+  // Sparks, blood, spell bursts, rings, runes, decals and damage numbers are drawn in the
+  // transparent pass, ON TOP of the cast and BLENDED with it, so hiding a creature underneath one
+  // still changes the pixel and `ownSet` above cannot drop them. Their colour and their edges are
+  // the PARTICLES', at the particles' own sub-pixel phase: in 'combat' the Werebear stands inside a
+  // spell burst and measured 0.61 of its edges on the grid, which is a fact about the spell. So
+  // every effect the renderer owns is hidden for one frame and each character records how much of
+  // it the effects were painting (`fxFraction`, reported) — those pixels are then left out of the
+  // GRID statistics only. They stay in the tone and contact samples, which are what the player is
+  // actually looking at.
+  const fxRoots = [];
+  for (const k of Object.keys(R.effects || {})) {
+    const v = R.effects[k];
+    if (!v || typeof v !== 'object' || v.isScene) continue;
+    if (v.isObject3D) { fxRoots.push(v); continue; }
+    for (const k2 of Object.keys(v)) { const w = v[k2]; if (w && w.isObject3D && !w.isScene) fxRoots.push(w); }
+  }
+  const fxWas = fxRoots.map((o) => o.visible);
+  for (const o of fxRoots) o.visible = false;
+  const noFx = fxRoots.length ? shoot() : null;
+  fxRoots.forEach((o, i) => { o.visible = fxWas[i]; });
+  const fxAt = (x, y) => !!noFx && maxd(px(base, x, y), px(noFx, x, y)) > 6;
+
   /** Pixels inside `rect` where two frames differ by more than `tol` on any channel. */
   const diffMask = (a, b, rect, tol) => {
     const m = [];
@@ -282,6 +321,20 @@ function inPageAudit(K) {
       }
       c.ambient = median(amb);
       c.coverage = c.texels.length ? changed / c.texels.length : 0;
+      // THE PIXELS THIS FIGURE ACTUALLY OWNS. Not every pixel inside its footprint is its own: in
+      // 'combat' the Werebear is under a spell burst, a spray of blood motes and half the hero, all
+      // drawn in the TRANSPARENT pass where no depth trick can be got in front of them. Those
+      // pixels are the PARTICLES' colour, at the particles' own sub-pixel phase, and measuring the
+      // Werebear's texel grid through them scored it 0.64 aligned when its own art is exact — a
+      // gate failing a creature for a spell somebody cast on it. A pixel is this figure's only if
+      // hiding the figure CHANGES it; that is the definition, and it drops overlays, overlapping
+      // cast and occluders in one step. Used for the grid statistics only: the TONE sample keeps
+      // every texel, because a creature invisible against the floor must stay in that median.
+      c.ownSet = new Set();
+      for (const k of c.maskSet) {
+        const x = k % W, y = (k / W) | 0;
+        if (maxd(px(base, x, y), px(frame, x, y)) > 2) c.ownSet.add(k);
+      }
       // ARE THE FEET IN THE PICTURE AT ALL? The bottom sixth of the figure, and how much of it the
       // frame loses when the figure is hidden. The hero in 'combat' stands behind a boulder that is
       // drawn in the TRANSPARENT pass, which no depth trick can put him in front of, so `occlusion`
@@ -482,14 +535,19 @@ function inPageAudit(K) {
     lums.sort((a, b) => a - b);
     all.sort((a, b) => a - b);
     const rect = { x0: bx0, x1: bx1, y0: by0, y1: by1 };
-    // the grid is measured on the pixels this figure actually owns: a texel a boulder is drawn over
-    // contributes the BOULDER's edges, which is not a fact about the sprite's pixel grid
+    // the grid is measured on the pixels this figure actually owns (`ownSet`, above): a pixel a
+    // boulder is drawn over, or a spell burst, or another sprite, contributes THAT thing's edges at
+    // THAT thing's phase, which is not a fact about this sprite's pixel grid
     const visSet = new Set();
+    let fxPixels = 0;
     for (const t of c.texels) {
       if (t.occluded) continue;
       for (let dy = 0; dy < t.h; dy++) for (let dx = 0; dx < t.w; dx++) {
         const x = t.x + dx, y = t.y + dy;
-        if (x >= 0 && y >= 0 && x < W && y < H) visSet.add(y * W + x);
+        if (x < 0 || y < 0 || x >= W || y >= H) continue;
+        if (c.ownSet && !c.ownSet.has(y * W + x)) continue;
+        if (fxAt(x, y)) { fxPixels++; continue; }             // that pixel is a spell, not the art
+        visSet.add(y * W + x);
       }
     }
     const rs = runStats(base, (x, y) => visSet.has(y * W + x), rect);
@@ -497,7 +555,9 @@ function inPageAudit(K) {
     const figurePx = by1 - by0 + 1;
     characters.push({
       id: c.id, type: c.type, name: (c.v.entity && c.v.entity.kind === 'player') ? 'player' : c.type,
-      pixels: c.maskSet.size, texels: c.texels.length, offScreenTexels: c.offScreen,
+      pixels: c.maskSet.size, ownPixels: visSet.size, fxPixels,
+      fxFraction: +(c.maskSet.size ? fxPixels / c.maskSet.size : 0).toFixed(3),
+      texels: c.texels.length, offScreenTexels: c.offScreen,
       coverage: +c.coverage.toFixed(3), squashed: !c.grid.snapped,
       occlusion: +c.occlusion.toFixed(3), feetOccluded: +c.feetOccluded.toFixed(3),
       feetCoverage: +c.feetCoverage.toFixed(3),
@@ -524,8 +584,13 @@ function inPageAudit(K) {
   const anchor = pv ? anchorOf(pv) : { x: W / 2, y: H * 0.6 };
   const charPixels = new Set();
   for (const c of cast) if (c.maskSet) for (const k of c.maskSet) charPixels.add(k);
-  const propMask = noProps ? new Set(diffMask(base, noProps, { x0: 0, x1: W - 1, y0: 0, y1: H - 1 }, 10)) : new Set();
-  const floorOk = (x, y) => !charPixels.has(y * W + x) && !propMask.has(y * W + x) && lum(base, x, y) > 0.03;
+  // the props' own pixels, with anything an effect was painting over dropped for the same reason
+  // the cast's grid sample drops it (see `fxAt`)
+  const propMask = new Set();
+  if (noProps) for (const k of diffMask(base, noProps, { x0: 0, x1: W - 1, y0: 0, y1: H - 1 }, 10)) {
+    if (!fxAt(k % W, (k / W) | 0)) propMask.add(k);
+  }
+  const floorOk = (x, y) => !charPixels.has(y * W + x) && !propMask.has(y * W + x) && !fxAt(x, y) && lum(base, x, y) > 0.03;
   let floorRect = {
     x0: clampX(anchor.x - 2.5 * tilePx), x1: clampX(anchor.x + 2.5 * tilePx),
     y0: clampY(anchor.y + 0.25 * tilePx), y1: clampY(anchor.y + 1.6 * tilePx),
@@ -551,9 +616,23 @@ function inPageAudit(K) {
   grainU.value = grain0;
   R.draw();
   return {
-    width: W, height: H, texelPx: S, tilePx, sabotage,
-    camera: { fov: R.camera.fov, overview: !!R.cameraRig.overview, pos: [+R.camera.position.x.toFixed(2), +R.camera.position.y.toFixed(2), +R.camera.position.z.toFixed(2)] },
-    renders: 2 + batches.length * 3, batches: batches.length,
+    width: W, height: H, texelPx: S, tilePx: +tilePx.toFixed(2), sabotage,
+    // THE CAMERA IS ORTHOGRAPHIC: a fixed plan view with no field of view, so `fov` is undefined and
+    // the frustum height / zoom are what set the scale (and, through `frameTexelSize`, the texel
+    // size the whole frame is drawn on). Both projections are described so a report says which one
+    // it was measured under, and `pxPerWorld` is the number the grid numbers above derive from.
+    camera: {
+      projection: R.camera.isOrthographicCamera ? 'orthographic' : 'perspective',
+      fov: R.camera.isPerspectiveCamera ? R.camera.fov : null,
+      top: R.camera.isOrthographicCamera ? +R.camera.top.toFixed(4) : null,
+      bottom: R.camera.isOrthographicCamera ? +R.camera.bottom.toFixed(4) : null,
+      zoom: +(R.camera.zoom || 1).toFixed(4),
+      pxPerWorld: R.camera.isOrthographicCamera
+        ? +(H / Math.max(1e-6, (R.camera.top - R.camera.bottom) / (R.camera.zoom || 1))).toFixed(3) : null,
+      overview: !!R.cameraRig.overview,
+      pos: [+R.camera.position.x.toFixed(2), +R.camera.position.y.toFixed(2), +R.camera.position.z.toFixed(2)],
+    },
+    renders: 1 + (noProps ? 1 : 0) + (noFx ? 1 : 0) + batches.length * 3, batches: batches.length,
     characters, floor, props,
   };
 }
@@ -601,7 +680,8 @@ export async function auditScenario(name, opts = {}) {
 /** A readable table of one report. @param {object} r @returns {string} */
 export function formatReport(r) {
   const L = [];
-  L.push(`SCENARIO ${r.scenario}${r.sabotage && r.sabotage !== 'none' ? ' [SABOTAGE: ' + r.sabotage + ']' : ''}  seed=${r.seed}  ${r.width}x${r.height}  texel=${r.texelPx}px  tile=${r.tilePx}px  camera=${r.camera.overview ? 'overview' : 'play'}  (${r.renders} renders, ${r.batches} batches)`);
+  L.push(`SCENARIO ${r.scenario}${r.sabotage && r.sabotage !== 'none' ? ' [SABOTAGE: ' + r.sabotage + ']' : ''}  seed=${r.seed}  ${r.width}x${r.height}  texel=${r.texelPx}px  tile=${r.tilePx}px  camera=${r.camera.overview ? 'overview' : 'play'}/${r.camera.projection || 'perspective'}`
+    + `${r.camera.pxPerWorld ? ' ' + r.camera.pxPerWorld + 'px/world' : ''}  (${r.renders} renders, ${r.batches} batches)`);
   const head = ['character', 'litMed', 'P10', 'P90', 'amb', 'cntr', 'shPx', 'shStr', 'runPx', 'runTx', 'same', 'edgeAl', 'figTx', 'figPx', 'pillow', 'bodyTx', 'cover', 'occl', 'px'];
   const w = [18, 7, 7, 7, 7, 7, 6, 7, 6, 6, 6, 7, 7, 6, 7, 7, 7, 6, 7];
   const row = (cells) => cells.map((c, i) => String(c).padEnd(w[i])).join('');
