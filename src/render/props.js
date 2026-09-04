@@ -13,6 +13,11 @@ import { glowTexture, glintTexture, sigilTexture, runeCircleTexture, billboard, 
 import { paint, outline, toRGBA, Palette, makePix, blit, setPx, keyShade, bounds } from './sprites/pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from './sprites/style.js';
 import { PX_PER_TILE, frameTexelSize, texelGrid } from './sprites/spriteBillboard.js';
+// The furniture is painted with the toolkit exported at the bottom of this file, so the import is
+// a cycle by construction. It is safe because neither module touches the other's bindings while it
+// is being evaluated: furniture.js only declares painters and a registry at module scope, and this
+// file only calls `buildFurniture` from a method.
+import { buildFurniture, isFurniture, FURNITURE_TYPES } from './props/furniture.js';
 
 const geoCache = new Map();
 function geo(key, make) { let g = geoCache.get(key); if (!g) { g = make(); geoCache.set(key, g); } return g; }
@@ -261,11 +266,19 @@ const ITEM_PIVOT_Y = 0.01;
  * light onto the FLAGSTONES AROUND the object (which is what a glowing thing does to a floor) while
  * the tile it actually stands on is a warm neutral bite of dark, the same one the cast stands in.
  */
-let _shadowMat = null;
-function contactShadowMaterial() {
+const _shadowMats = new Map();
+/**
+ * `strength` scales the whole shadow. It exists for the FURNITURE (render/props/furniture.js): a
+ * potion's shadow is a nine-texel bite of dark and reads as contact, but the same shadow under a
+ * table's one-tile footprint is a navy pool the size of the flagstone, and a piece of furniture
+ * standing in a puddle is worse than one with no shadow at all. One material per strength, cached,
+ * so the pickups keep the exact material (and the exact numbers) they had.
+ */
+function contactShadowMaterial(strength = 1) {
+  let _shadowMat = _shadowMats.get(strength);
   if (_shadowMat) return _shadowMat;
   const fog = getFog();
-  const uniforms = { uCore: { value: 0.62 }, uEdge: { value: 0.1 }, uStrength: { value: 1 } };
+  const uniforms = { uCore: { value: 0.62 }, uEdge: { value: 0.1 }, uStrength: { value: strength } };
   if (fog) Object.assign(uniforms, { fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint });
   _shadowMat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false,
@@ -283,6 +296,7 @@ function contactShadowMaterial() {
         gl_FragColor = vec4(0.014, 0.011, 0.018, a);
       }`,
   });
+  _shadowMats.set(strength, _shadowMat);
   return _shadowMat;
 }
 
@@ -299,10 +313,12 @@ function contactShadowMaterial() {
  * core fills most of it, and its rim is a couple of device pixels rather than eight. What the eye
  * gets is a dark bite out of the flagstone under the object, which is what contact looks like.
  * @param {number} footW
+ * @param {{strength?:number, spread?:number}} [o] `strength` dims the whole shadow (the furniture
+ *   runs at about half a pickup's), `spread` scales the quad against the footprint.
  */
-function contactShadow(footW) {
-  const w = Math.max(0.1, footW) * 1.25;
-  const m = new THREE.Mesh(geo('itemShadowQuad', () => new THREE.PlaneGeometry(1, 1)), contactShadowMaterial());
+function contactShadow(footW, o = {}) {
+  const w = Math.max(0.1, footW) * (o.spread ?? 1.25);
+  const m = new THREE.Mesh(geo('itemShadowQuad', () => new THREE.PlaneGeometry(1, 1)), contactShadowMaterial(o.strength ?? 1));
   m.rotation.x = -Math.PI / 2;
   m.position.set(0, 0.013, w * 0.06);   // a hair back, so the object's own base covers its near rim
   m.scale.set(w, w * 0.5, 1);
@@ -690,6 +706,20 @@ const bookPal = (() => {
   };
 })();
 
+// ------------------------------------------------------------------ the pixel-art toolkit, shared
+//
+// `render/props/furniture.js` paints the dungeon's furniture — the bookcases, thrones, sarcophagi
+// and racks that say what a room is FOR (docs/AMBIENCE.md) — and it paints them with THESE routines
+// and no others. That is the whole point of exporting them: a bookcase drawn in its own projection,
+// on its own ramp, at its own texel size is a sticker from a different game standing next to the
+// chest, which is exactly the fault the pickups above were rebuilt to fix. One projection, one
+// grid, one key light, for the loot and for the furniture it is standing on.
+export {
+  itemPalette, pixelSprite, floorDecal, contactShadow, onArt,
+  span, box, ell, topFace, frontFace, shift, model, step,
+  SQUASH, ITEM_PIVOT_Y,
+};
+
 // ------------------------------------------------------------------ animator registry
 const LIVE = new Set();
 /** Register a per-frame tick for a prop (pruned automatically once it leaves the scene graph). */
@@ -1016,6 +1046,25 @@ export class PropFactory {
     g.add(contactShadow(0.3));
     return g;
   }
+
+  // ------------------------------------------------------------------ decor (docs/AMBIENCE.md)
+  /**
+   * Build a prop for one `level.decor` entry — the renderer's single entry point for furniture.
+   *
+   * An unknown `type` returns null rather than throwing: the contract (AMBIENCE §4.1) is that the
+   * renderer DROPS ids it cannot draw, with one warning per level, and keeps the level playable.
+   * Half the catalogue (the floor decals and the wall-mounted pieces) is deliberately not here yet;
+   * a room dressed with a bookcase and a candelabra still reads as a study without them.
+   * @param {{type:string, variant?:number, facing?:'n'|'e'|'s'|'w', blocking?:boolean}} d
+   * @returns {THREE.Group|null}
+   */
+  decor(d) {
+    if (!d || !isFurniture(d.type)) return null;
+    return buildFurniture(d.type, { variant: d.variant | 0, facing: d.facing || 's', blocking: !!d.blocking });
+  }
+
+  /** Every decor id `decor()` can currently build. */
+  decorTypes() { return FURNITURE_TYPES.slice(); }
 
   // ------------------------------------------------------------------ dungeon dressing
   /** Placed beacon marker. */

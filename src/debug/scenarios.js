@@ -6,6 +6,7 @@ import { MONSTER_TYPES } from '../game/monsters.js';
 import { addHallOfFameEntry, getHallOfFame } from '../core/save.js';
 import { drawSheet, packSheet } from '../render/sprites/spriteSheet.js';
 import { MONSTER_SPRITES } from '../render/sprites/monsters/index.js';
+import { FURNITURE_TYPES, furnitureVariants } from '../render/props/furniture.js';
 
 /** Walkable tiles adjacent to (x,y) (8-way), nearest-first order as given by DIRS8. */
 function neighbours(level, x, y, { empty = true } = {}) {
@@ -303,6 +304,17 @@ function ringSpots(game, max = 12) {
     spots.push(...ring);
   }
   return spots;
+}
+
+/**
+ * Light a PLATE like a display case, not like a dungeon. The furniture plates lay 37 pieces out over
+ * a hall far bigger than the hero's lantern, so the far rows came back too dark to judge. The two
+ * base intensities are rewritten by `Lighting.setLevel()` on the next level entry, so this cannot
+ * leak into the scenario that runs after it — every scenario starts with a reset.
+ */
+function platelight(ctx, k = 3.4) {
+  const L = ctx.renderer.lighting;
+  L.baseHemi *= k; L.baseMoon *= k * 0.8;
 }
 
 export const scenarios = {
@@ -1198,6 +1210,137 @@ export const scenarios = {
     ctx.renderer.cameraRig.snap();
     ctx.step(600);
     nameplates(ctx, placed);
+  },
+
+  /**
+   * THE FURNITURE PLATE: every piece `props.decor()` can build, standing on its own tile, named.
+   *
+   * It is a plate and not a room on purpose — the room scenarios below judge whether the furniture
+   * makes a PLACE, and this one judges whether each silhouette is identifiable on its own. If two
+   * plates here need their labels read to be told apart, the art has failed, whatever the room shot
+   * looks like.
+   */
+  async 'furniture'(ctx) {
+    const g = ctx.reset();
+    const types = FURNITURE_TYPES;
+    const cols = 8, gap = 3, rows = Math.ceil(types.length / cols);
+    const W = cols * gap + 3, H = rows * gap + 5, depth = 3;
+    bestiaryHall(g, W, H, depth, { dress: false });
+    g.enterLevel(depth, 'teleport', { arrival: { x: 1, y: H - 2 } });
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    platelight(ctx);
+    const placed = [];
+    types.forEach((t, i) => {
+      const x = 2 + (i % cols) * gap, y = 2 + Math.floor(i / cols) * gap;
+      const o = ctx.renderer.props.decor({ type: t, x, y, facing: 's', variant: 0, blocking: false });
+      if (o) { ctx.renderer.dungeon.addAt(o, x, y); placed.push({ label: t, x, y }); }
+    });
+    ctx.renderer.cameraRig.setOverview((W - 1) / 2, (H - 1) / 2, W + 1, H + 1, { elevation: 62 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed, { font: 12, dy: 16 });
+  },
+
+  /**
+   * THE SAME PIECES AGED: variant 0 to variant N-1, left to right, for the types that carry the
+   * most wear. AMBIENCE §2.1 keys `room.decay` straight into `variant`, so a piece whose variants
+   * run the wrong way makes the deepest crypt the tidiest room on the level. This is the shot that
+   * catches it: every row must get visibly more ruined toward the right.
+   */
+  async 'furniture-decay'(ctx) {
+    const g = ctx.reset();
+    const rows = ['bookcase', 'sarcophagus', 'brazier', 'table', 'cupboard', 'cage', 'barrel', 'strongbox'];
+    const gap = 3, W = 4 * gap + 4, H = rows.length * gap + 4, depth = 3;
+    bestiaryHall(g, W, H, depth, { dress: false });
+    g.enterLevel(depth, 'teleport', { arrival: { x: 1, y: H - 2 } });
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    platelight(ctx);
+    const placed = [];
+    rows.forEach((t, r) => {
+      for (let v = 0; v < furnitureVariants(t); v++) {
+        const x = 3 + v * gap, y = 2 + r * gap;
+        const o = ctx.renderer.props.decor({ type: t, x, y, facing: 's', variant: v, blocking: false });
+        if (o) { ctx.renderer.dungeon.addAt(o, x, y); placed.push({ label: `${t} v${v}`, x, y }); }
+      }
+    });
+    ctx.renderer.cameraRig.setOverview((W - 1) / 2, (H - 1) / 2, W + 1, H + 1, { elevation: 62 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed, { font: 12, dy: 16 });
+  },
+
+  /**
+   * FOUR ROOMS AT THE PLAY CAMERA — a guardroom, an armoury, a scriptorium and a crypt, dressed by
+   * AMBIENCE §6.1's furniture sets and §8.1's grammar (against the wall facing in, tables central,
+   * the throne and hearth centred on a wall). The gate this scenario exists for is one glance: can
+   * you name each room without reading a label? The plate above cannot answer that and this can.
+   */
+  async 'furnished-rooms'(ctx) {
+    const g = ctx.reset();
+    const W = 25, H = 21, depth = 4;
+    const lv = bestiaryHall(g, W, H, depth, { dress: false });
+    for (let x = 1; x < W - 1; x++) lv.set(x, 10, TILE.WALL);          // split the hall into four rooms
+    for (let y = 1; y < H - 1; y++) lv.set(12, y, TILE.WALL);
+    lv.set(12, 5, TILE.FLOOR); lv.set(12, 15, TILE.FLOOR); lv.set(6, 10, TILE.FLOOR); lv.set(18, 10, TILE.FLOOR);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 6, y: 8 } });
+    g.player.facing = { dx: 0, dy: -1 };
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    // guardroom (NW) · armoury (NE) · scriptorium (SW) · crypt (SE)
+    const set = [
+      ['table', 6, 5, 0], ['bench', 4, 7, 0], ['bench', 8, 7, 0], ['stool', 6, 3, 1],
+      ['brazier', 2, 2, 0], ['brazier', 10, 2, 0], ['weaponRack', 8, 1, 1], ['barrel', 1, 8, 0], ['crate', 2, 8, 1],
+      ['forge', 17, 1, 0], ['anvil', 20, 4, 0], ['weaponRack', 14, 1, 0], ['shieldStand', 22, 2, 0],
+      ['armourStand', 14, 8, 1], ['crate', 22, 8, 0], ['strongbox', 20, 8, 1],
+      ['bookcase', 2, 12, 0], ['bookcase', 5, 12, 1], ['lectern', 8, 13, 0], ['table', 4, 16, 1],
+      ['stool', 7, 17, 0], ['candelabra', 1, 18, 0], ['cupboard', 10, 12, 0], ['alchemyBench', 9, 18, 0],
+      ['sarcophagus', 17, 13, 0], ['sarcophagus', 21, 13, 2], ['tombSlab', 15, 17, 1], ['tombSlab', 19, 17, 1],
+      ['urn', 14, 11, 0], ['urn', 23, 11, 2], ['candelabra', 13, 18, 1], ['bonePile', 22, 18, 0],
+      ['pillarBroken', 23, 15, 1], ['rubbleMound', 16, 11, 2],
+    ];
+    for (const [t, x, y, v] of set) {
+      const o = ctx.renderer.props.decor({ type: t, x, y, facing: 's', variant: v, blocking: false });
+      if (o) ctx.renderer.dungeon.addAt(o, x, y);
+    }
+    platelight(ctx, 2.4);
+    ctx.renderer.cameraRig.setOverview((W - 1) / 2, (H - 1) / 2, W + 1, H + 2, { elevation: 62 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+  },
+
+  /**
+   * ONE furnished room at the ORDINARY GAMEPLAY CAMERA, with the hero standing in it. The plate and
+   * the four-room shot are both flown cameras; this is the only one that answers the question the
+   * player actually asks, which is whether the room he is standing in looks like somewhere.
+   */
+  async 'furnished-guardroom'(ctx) {
+    const g = ctx.reset();
+    const W = 13, H = 11, depth = 3;
+    bestiaryHall(g, W, H, depth, { dress: false });
+    g.enterLevel(depth, 'teleport', { arrival: { x: 6, y: 6 } });
+    g.player.facing = { dx: 0, dy: -1 };
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    // AMBIENCE §8.1: the table is central with its seating round it, the hearth is centred on the
+    // long wall, the rack and the presses hug the walls, and the braziers are placed as a pair.
+    const set = [
+      ['table', 6, 3, 0], ['bench', 4, 3, 0], ['bench', 8, 3, 0], ['stool', 6, 1, 0],
+      ['hearth', 3, 1, 0], ['weaponRack', 8, 1, 0], ['cupboard', 11, 1, 0],
+      ['brazier', 1, 3, 0], ['brazier', 11, 3, 0],
+      ['bunk', 1, 6, 0], ['footlocker', 3, 7, 0], ['crate', 1, 8, 1],
+      ['barrel', 11, 8, 0], ['strongbox', 9, 8, 1],
+    ];
+    for (const [t, x, y, v] of set) {
+      const o = ctx.renderer.props.decor({ type: t, x, y, facing: 's', variant: v, blocking: false });
+      if (o) ctx.renderer.dungeon.addAt(o, x, y);
+    }
+    ctx.step(600);
   },
 };
 
