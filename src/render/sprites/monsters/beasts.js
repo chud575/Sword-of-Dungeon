@@ -41,7 +41,7 @@
 //             narrow ribcage, and the ARMS HANGING PAST THE KNEES with the knuckles nearly
 //             grazing the floor. The signature is the raw wound on its shoulder knitting shut with
 //             pale new flesh while it stands there.
-import { Palette, outline, houseOutline, makePix, setPx, getPx, mirrorLit, smearArc } from '../pixelPainter.js';
+import { Palette, outline, houseOutline, makePix, setPx as putPx, getPx, mirrorLit, smearArc as rawSmear } from '../pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
@@ -88,6 +88,50 @@ BEAST_PALETTE
 const ink = (p) => outline(p, '#', { lit: LIT, litKey: '@' });
 const lerp = (a, b, t) => a + (b - a) * t;
 
+// ------------------------------------------------------------------- THE DRAW SCALE (the size law)
+/**
+ * WHY THIS EXISTS. style.js `SCALE` is the game's size hierarchy, and for a long time it never
+ * reached the screen: `spriteBillboard` sizes a creature purely by HOW MANY TEXELS ITS ART OCCUPIES
+ * times one shared texel size, so a troll asking for 1.72x the hero while its sheet was 54 texels
+ * tall (the hero is 46) walked on screen at 1.17x — smaller than a war lord. The ladder was dead
+ * code and the art was carrying a different, flatter hierarchy of its own.
+ *
+ * THE FIX IS NOT A MULTIPLIER. Blowing a 54-texel troll up to 79 breaks the shared texel grid: the
+ * creature's pixels stop being the hero's pixels and it reads as a zoomed sprite standing next to
+ * hand-pixelled ones. Instead every creature in this file is AUTHORED in its own comfortable
+ * coordinate space and RASTERISED at `DS` times that space. `mass`, `limb`, `curve`, `crest`,
+ * `shag`, `seam`, `panel` and `claws` are analytic: at DS = 1.46 a haunch is not four pixels
+ * stretched to six, it is the same solid re-solved on a grid half again as fine, with its own
+ * terminator, its own rim and half again as many steps of the ramp showing across it. The room that
+ * buys is then spent on detail the small canvas could not hold (see `ribs`, `knuckles`, `scaleRows`
+ * below and the per-creature notes).
+ *
+ * Every hand-placed pixel in a creature body is likewise written in authored space: the local
+ * `setPx` below dabs a `ceil(DS)`-sized mark at the scaled position, so a three-pixel brow ridge
+ * stays a continuous brow ridge instead of falling apart into three dots with gaps between them.
+ */
+let DS = 1;
+/** Authored length -> texels on the real canvas. */
+const S = (v) => v * DS;
+/** Round an authored canvas measurement (width, pivot, floor row) to the real grid. */
+const R = (v, s) => Math.round(v * s);
+
+/**
+ * Set one AUTHORED-space pixel: it covers EXACTLY the texels that authored pixel owns on the real
+ * grid (`round(x·DS) .. round((x+1)·DS) - 1`), so at DS = 1 this is `setPx`, and above it a mark is
+ * one or two texels wide with no gaps and no overdraw — a hand-drawn brow, fang, seam or eye stays
+ * a line at the new resolution instead of falling apart into dots.
+ */
+function setPx(p, x, y, key) {
+  const x0 = Math.round(x * DS), x1 = Math.max(x0, Math.round((x + 1) * DS) - 1);
+  const y0 = Math.round(y * DS), y1 = Math.max(y0, Math.round((y + 1) * DS) - 1);
+  for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) putPx(p, xx, yy, key);
+}
+/** Read one authored-space pixel (the mark's top-left texel). */
+const atPx = (p, x, y) => getPx(p, Math.round(x * DS), Math.round(y * DS));
+/** `smearArc` in authored space. */
+const smearArc = (p, cx, cy, r0, r1, a0, a1, keys) => rawSmear(p, S(cx), S(cy), S(r0), S(r1), a0, a1, keys);
+
 /** Solid-key copy for the hurt flash (the outline stays dark so the silhouette still reads). */
 function flash(p) {
   const o = { w: p.w, h: p.h, d: new Uint16Array(p.d) };
@@ -101,7 +145,7 @@ function squashTo(p, k, baseY) {
   const o = makePix(p.w, p.h);
   for (let y = 0; y < p.h; y++) {
     const ty = Math.round(baseY - (baseY - y) * k);
-    for (let x = 0; x < p.w; x++) { const c = p.d[y * p.w + x]; if (c) setPx(o, x, ty, c); }
+    for (let x = 0; x < p.w; x++) { const c = p.d[y * p.w + x]; if (c) putPx(o, x, ty, c); }
   }
   return o;
 }
@@ -112,7 +156,7 @@ function tilt(p, a, cx, cy) {
   for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
     const dx = x - cx, dy = y - cy;
     const c = getPx(p, Math.round(cx + dx * ca - dy * sa), Math.round(cy + dx * sa + dy * ca));
-    if (c) setPx(o, x, y, c);
+    if (c) putPx(o, x, y, c);
   }
   return o;
 }
@@ -165,18 +209,20 @@ function tone(nx, ny, keys, bias = 0) {
 
 /** A shaded mass: |nx|^n + |ny|^n <= 1 around (cx,cy). n=2 is an ellipse, 2.6 a barrel, 3.4 a slab. */
 function mass(p, cx, cy, rx, ry, keys, { n = 2, bias = 0 } = {}) {
+  cx = S(cx); cy = S(cy); rx = S(rx); ry = S(ry);
   const x0 = Math.max(0, Math.floor(cx - rx) - 1), x1 = Math.min(p.w - 1, Math.ceil(cx + rx) + 1);
   const y0 = Math.max(0, Math.floor(cy - ry) - 1), y1 = Math.min(p.h - 1, Math.ceil(cy + ry) + 1);
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
     const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
     if (Math.pow(Math.abs(nx), n) + Math.pow(Math.abs(ny), n) > 1) continue;
-    setPx(p, x, y, tone(nx, ny, keys, bias));
+    putPx(p, x, y, tone(nx, ny, keys, bias));
   }
   return p;
 }
 
 /** A shaded capsule from (x0,y0) to (x1,y1), radius r0 -> r1: arms, legs, necks, tails, horns. */
 function limb(p, x0, y0, x1, y1, r0, r1, keys, bias = 0) {
+  x0 = S(x0); y0 = S(y0); x1 = S(x1); y1 = S(y1); r0 = S(r0); r1 = S(r1);
   const dx = x1 - x0, dy = y1 - y0, len2 = dx * dx + dy * dy || 1e-6, rmax = Math.max(r0, r1);
   const bx0 = Math.max(0, Math.floor(Math.min(x0, x1) - rmax) - 1), bx1 = Math.min(p.w - 1, Math.ceil(Math.max(x0, x1) + rmax) + 1);
   const by0 = Math.max(0, Math.floor(Math.min(y0, y1) - rmax) - 1), by1 = Math.min(p.h - 1, Math.ceil(Math.max(y0, y1) + rmax) + 1);
@@ -186,7 +232,7 @@ function limb(p, x0, y0, x1, y1, r0, r1, keys, bias = 0) {
     t = t < 0 ? 0 : t > 1 ? 1 : t;
     const ox = px - dx * t, oy = py - dy * t, r = r0 + (r1 - r0) * t;
     if (ox * ox + oy * oy > r * r) continue;
-    setPx(p, x, y, tone(ox / r, oy / r, keys, bias));
+    putPx(p, x, y, tone(ox / r, oy / r, keys, bias));
   }
   return p;
 }
@@ -227,6 +273,7 @@ function part(p, keys, draw) {
  * knuckled spine, the gargoyle's ridge.
  */
 function crest(p, pts, height, keys, { flip = false, tip = null } = {}) {
+  pts = pts.map(([x, y]) => [S(x), S(y)]); height = S(height);
   const n = pts.length - 1;
   for (let i = 0; i < n; i++) {
     const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
@@ -238,7 +285,7 @@ function crest(p, pts, height, keys, { flip = false, tip = null } = {}) {
       const t = k / Math.max(1, h), half = (1 - t) * (L / 2);
       const cx = mx + nx * k, cy = my + ny * k;
       for (let j = -Math.ceil(half); j <= Math.ceil(half); j++) {
-        setPx(p, Math.round(cx + (dx / L) * j), Math.round(cy + (dy / L) * j),
+        putPx(p, Math.round(cx + (dx / L) * j), Math.round(cy + (dy / L) * j),
           tip && t > 0.7 ? tip : keys[Math.min(keys.length - 1, 1 + ((t * (keys.length - 1)) | 0))]);
       }
     }
@@ -256,6 +303,7 @@ const TUFT = [2, 3, 1, 3, 2, 1, 2, 3, 1, 2, 3, 2];
  * @param {Pix} p @param {number[][]} pts @param {string} keys @param {{flip?:boolean, seed?:number, lit?:boolean, gain?:number}} [o]
  */
 function shag(p, pts, keys, { flip = false, seed = 0, lit = true, gain = 1 } = {}) {
+  pts = pts.map(([x, y]) => [S(x), S(y)]); gain *= DS;   // longer tufts on a bigger pelt, not finer ones
   const hi = keys.length - 1;
   const tip = lit ? keys[hi] : keys[Math.max(0, hi - 3)];
   const root = lit ? keys[Math.max(0, hi - 1)] : keys[Math.max(0, hi - 2)];
@@ -267,7 +315,7 @@ function shag(p, pts, keys, { flip = false, seed = 0, lit = true, gain = 1 } = {
     for (let s = 0; s < steps; s++, n++) {
       const t = s / steps, x = ax + dx * t, y = ay + dy * t;
       const h = Math.max(1, Math.round(TUFT[n % TUFT.length] * gain));
-      for (let k = 0; k < h; k++) setPx(p, Math.round(x + nx * k), Math.round(y + ny * k), k === h - 1 ? tip : root);
+      for (let k = 0; k < h; k++) putPx(p, Math.round(x + nx * k), Math.round(y + ny * k), k === h - 1 ? tip : root);
     }
   }
   return p;
@@ -275,13 +323,14 @@ function shag(p, pts, keys, { flip = false, seed = 0, lit = true, gain = 1 } = {
 
 /** A hairline crack / scar / seam that only marks where there is already body under it. */
 function seam(p, pts, key, { every = 1 } = {}) {
+  pts = pts.map(([x, y]) => [S(x), S(y)]); every = Math.round((every + 1) * DS) - 1;
   let n = 0;
   for (let i = 0; i + 1 < pts.length; i++) {
     const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
     const steps = Math.max(1, Math.round(Math.hypot(bx - ax, by - ay)));
     for (let s = 0; s <= steps; s++, n++) {
       const x = Math.round(lerp(ax, bx, s / steps)), y = Math.round(lerp(ay, by, s / steps));
-      if (n % (every + 1) === 0 && getPx(p, x, y)) setPx(p, x, y, key);
+      if (n % (every + 1) === 0 && getPx(p, x, y)) putPx(p, x, y, key);
     }
   }
   return p;
@@ -292,6 +341,7 @@ function seam(p, pts, key, { every = 1 } = {}) {
  * with the same key light as everything else. The gargoyle's folded wings.
  */
 function panel(p, pts, keys, bias = 0) {
+  pts = pts.map(([x, y]) => [S(x), S(y)]);
   const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
   const cx = xs.reduce((a, b) => a + b, 0) / pts.length, cy = ys.reduce((a, b) => a + b, 0) / pts.length;
   const rx = Math.max(...xs.map((x) => Math.abs(x - cx))) || 1, ry = Math.max(...ys.map((y) => Math.abs(y - cy))) || 1;
@@ -309,7 +359,7 @@ function panel(p, pts, keys, bias = 0) {
   for (let y = Math.max(0, Math.floor(Math.min(...ys))); y <= Math.min(p.h - 1, Math.ceil(Math.max(...ys))); y++) {
     for (let x = Math.max(0, Math.floor(Math.min(...xs))); x <= Math.min(p.w - 1, Math.ceil(Math.max(...xs))); x++) {
       if (!inside(x + 0.5, y + 0.5)) continue;
-      setPx(p, x, y, tone((x + 0.5 - cx) / rx * 0.9, (y + 0.5 - cy) / ry * 0.9, keys, bias));
+      putPx(p, x, y, tone((x + 0.5 - cx) / rx * 0.9, (y + 0.5 - cy) / ry * 0.9, keys, bias));
     }
   }
   return p;
@@ -321,14 +371,16 @@ function panel(p, pts, keys, bias = 0) {
  * row of piano keys under every foot in the game, which is exactly what they did in the first pass.
  */
 function claws(p, x, y, dx, dy, n = 3, len = 4, spread = 2) {
-  const L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L;
+  x = S(x); y = S(y); len = Math.round(S(len)); spread = S(spread);
+  const L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, th = Math.ceil(DS - 1e-6);
   for (let i = 0; i < n; i++) {
     const off = (i - (n - 1) / 2) * spread, side = off < 0 ? -1 : 1;
     const ox = x + -uy * off, oy = y + ux * off;
     for (let k = 0; k < len; k++) {
-      const t = k / Math.max(1, len - 1), curl = t * t * 1.5 * side;
-      setPx(p, Math.round(ox + ux * k * (1 - 0.2 * t) - uy * curl), Math.round(oy + uy * k * (1 - 0.2 * t) + ux * curl),
-        k === len - 1 ? BONE[1] : k === len - 2 ? BONE[0] : 'K');
+      const t = k / Math.max(1, len - 1), curl = t * t * S(1.5) * side;
+      const key = k >= len - 1 ? BONE[1] : k >= len - 2 ? BONE[0] : 'K';
+      const px = ox + ux * k * (1 - 0.2 * t) - uy * curl, py = oy + uy * k * (1 - 0.2 * t) + ux * curl;
+      for (let w = 0; w < th; w++) putPx(p, Math.round(px - uy * w), Math.round(py + ux * w), key);
     }
   }
   return p;
@@ -340,7 +392,15 @@ function claws(p, x, y, dx, dy, n = 3, len = 4, spread = 2) {
 // Read: the only low quadruped in the cast. Long and lean on tall thin legs, back line broken by
 // a standing ridge of hackles, head carried LEVEL with the spine on a neck as thick as the skull,
 // brush tail streaming behind, amber eyes catching the torch.
-const WF_W = 42, WF_H = 32, WF_PIV = { x: 21, y: 31 }, WF_FLOOR = 29;
+/**
+ * Authored 42x32 and painted at 1.20x it. The dire wolf wants 0.70 of the hero (32 texels) and its
+ * old sheet stood 27 — 0.59, a dog. The extra fifth is spent on the leg joints: at DS the pastern
+ * is three texels instead of two, so the hock reads as a real backward bend.
+ */
+const WF_S = 1.20;
+const WF_AW = 42, WF_AH = 32, WF_APIV = { x: 21, y: 31 }, WF_AFLOOR = 29;
+const WF_W = R(WF_AW, WF_S), WF_H = R(WF_AH, WF_S);
+const WF_PIV = { x: R(WF_APIV.x, WF_S), y: R(WF_APIV.y, WF_S) }, WF_FLOOR = R(WF_AFLOOR, WF_S);
 
 /** A wolf leg: shoulder, a real bend at the elbow/hock, a narrow pastern and a paw on the floor. */
 function wolfLeg(p, hx, hy, fx, fy, back, bias) {
@@ -358,6 +418,7 @@ function wolfLeg(p, hx, hy, fx, fy, back, bias) {
  * @param {{bob?:number, gait?:number, headDy?:number, headDx?:number, tail?:number, snarl?:boolean, crouch?:number}} o
  */
 function wolfFrame(f, o = {}) {
+  DS = WF_S;
   const p = makePix(WF_W, WF_H);
   const b = o.bob || 0, g = o.gait || 0, c = o.crouch || 0;
   const hd = (o.headDy || 0) + c, hx = o.headDx || 0, tl = o.tail || 0;
@@ -368,8 +429,8 @@ function wolfFrame(f, o = {}) {
     curve(p, [[12, 17 + b + c], [6, 15 + b + c - tl], [1, 9 + b + c - tl * 2]], 4.0, 1.1, FUR, -0.04);
     shag(p, [[11, 14 + b + c], [6, 12 + b + c - tl], [2, 7 + b + c - tl * 2]], FUR, { flip: true, seed: 3, gain: 0.7 });
     // far pair, a full two tones back
-    wolfLeg(p, 15, 19 + b + c, 12 - g, WF_FLOOR - lift(-g), true, -0.22);
-    wolfLeg(p, 27, 19 + b + c, 30 + g, WF_FLOOR - lift(g), false, -0.22);
+    wolfLeg(p, 15, 19 + b + c, 12 - g, WF_AFLOOR - lift(-g), true, -0.22);
+    wolfLeg(p, 27, 19 + b + c, 30 + g, WF_AFLOOR - lift(g), false, -0.22);
     // chassis: tucked loin behind, deep chest forward, one barrel linking them
     mass(p, 15, 16.5 + b + c, 6.4, 4.4, FUR, { n: 2.5 });
     mass(p, 20, 16 + b + c, 6.6, 5.0, FUR, { n: 2.6 });
@@ -396,8 +457,8 @@ function wolfFrame(f, o = {}) {
     setPx(p, fx + 8, fy + 2, '6'); setPx(p, fx + 7, fy + 2, '6');
     if (o.snarl) { setPx(p, fx + 5, fy + 4, 'D'); setPx(p, fx + 3, fy + 4, 'C'); setPx(p, fx + 4, fy + 3, '7'); }
     // near pair
-    wolfLeg(p, 17, 19 + b + c, 15 + g, WF_FLOOR - lift(g), true, 0.02);
-    wolfLeg(p, 25, 19 + b + c, 27 - g, WF_FLOOR - lift(-g), false, 0.04);
+    wolfLeg(p, 17, 19 + b + c, 15 + g, WF_AFLOOR - lift(g), true, 0.02);
+    wolfLeg(p, 25, 19 + b + c, 27 - g, WF_AFLOOR - lift(-g), false, 0.04);
     return ink(p);
   }
 
@@ -405,12 +466,12 @@ function wolfFrame(f, o = {}) {
     // tail hooking out past the near flank
     curve(p, [[27, 19 + b], [33, 17 + b - tl], [36, 12 + b - tl]], 2.6, 1.1, FUR, -0.08);
     // hind pair planted wide behind; the chest is NARROW seen end-on — a wolf is a blade, not a barrel
-    wolfLeg(p, 13, 19 + b + c, 11, WF_FLOOR, true, -0.14);
-    wolfLeg(p, 29, 19 + b + c, 31, WF_FLOOR, false, -0.18);
+    wolfLeg(p, 13, 19 + b + c, 11, WF_AFLOOR, true, -0.14);
+    wolfLeg(p, 29, 19 + b + c, 31, WF_AFLOOR, false, -0.18);
     mass(p, 21, 16.5 + b + c, 7.2, 5.6, FUR, { n: 2.5 });
     crest(p, [[15, 12 + b + c], [21, 11 + b + c], [27, 12 + b + c]], o.snarl ? 5 : 3.2, FUR, { flip: true });
-    wolfLeg(p, 18, 19 + b + c, 17 - g, WF_FLOOR, true, 0.02);
-    wolfLeg(p, 24, 19 + b + c, 25 + g, WF_FLOOR, false, 0);
+    wolfLeg(p, 18, 19 + b + c, 17 - g, WF_AFLOOR, true, 0.02);
+    wolfLeg(p, 24, 19 + b + c, 25 + g, WF_AFLOOR, false, 0);
     // head slung low between the shoulders, muzzle pointing straight at you
     part(p, FUR, (q) => {
       limb(q, 21 + hx, 15 + b + c, 21 + hx, 14 + b + hd, 4.4, 4.0, FUR, 0.04);
@@ -434,10 +495,10 @@ function wolfFrame(f, o = {}) {
 
   // NORTH — going away: the rump, the hackle ridge running down the spine, the tail up
   curve(p, [[21, 16 + b], [24, 11 + b - tl], [26, 5 + b - tl]], 2.6, 1.2, FUR, 0.02);
-  wolfLeg(p, 13, 19 + b + c, 11, WF_FLOOR, true, -0.12);
-  wolfLeg(p, 29, 19 + b + c, 31, WF_FLOOR, false, -0.18);
-  wolfLeg(p, 18, 19 + b + c, 17 - g, WF_FLOOR, true, -0.08);
-  wolfLeg(p, 24, 19 + b + c, 25 + g, WF_FLOOR, false, -0.10);
+  wolfLeg(p, 13, 19 + b + c, 11, WF_AFLOOR, true, -0.12);
+  wolfLeg(p, 29, 19 + b + c, 31, WF_AFLOOR, false, -0.18);
+  wolfLeg(p, 18, 19 + b + c, 17 - g, WF_AFLOOR, true, -0.08);
+  wolfLeg(p, 24, 19 + b + c, 25 + g, WF_AFLOOR, false, -0.10);
   mass(p, 21, 16.5 + b + c, 7.6, 5.8, FUR, { n: 2.5 });
   seam(p, [[21, 12 + b + c], [21, 21 + b + c]], FUR[1], { every: 1 });
   crest(p, [[15, 12 + b + c], [21, 11 + b + c], [27, 12 + b + c]], 3.4, FUR, { flip: true });
@@ -493,7 +554,16 @@ export function buildDireWolf() {
 // Read: a wall of fur, twice as wide at the shoulder as the troll is anywhere. The shoulder mass
 // is the highest point; the skull hangs BELOW and in front of it. Forearms as thick as the thighs
 // reach the knee and end in four hooked claws. The whole outline is ragged with shag.
-const WB_W = 48, WB_H = 56, WB_PIV = { x: 24, y: 54 }, WB_FLOOR = 51;
+/**
+ * Authored 48x56 and painted at 1.42x it (68x80). The werebear is a 1.48 loomer that stood 1.04 —
+ * level with a swordsman. Re-rasterised, the shoulder mass alone is now as wide as a man is tall,
+ * the shag gets tufts a third longer (see `shag`, which scales its gain with DS) and the forearm
+ * carries a second band of fur direction the small canvas had no room for.
+ */
+const WB_S = 1.42;
+const WB_AW = 48, WB_AH = 56, WB_APIV = { x: 24, y: 54 }, WB_AFLOOR = 51;
+const WB_W = R(WB_AW, WB_S), WB_H = R(WB_AH, WB_S);
+const WB_PIV = { x: R(WB_APIV.x, WB_S), y: R(WB_APIV.y, WB_S) }, WB_FLOOR = R(WB_AFLOOR, WB_S);
 
 /**
  * One werebear frame.
@@ -501,6 +571,7 @@ const WB_W = 48, WB_H = 56, WB_PIV = { x: 24, y: 54 }, WB_FLOOR = 51;
  * @param {{bob?:number, stride?:number, arm?:number, headDy?:number, crouch?:number, roar?:boolean, smear?:boolean, lean?:number}} o
  */
 function bearFrame(f, o = {}) {
+  DS = WB_S;
   const p = makePix(WB_W, WB_H);
   const b = o.bob || 0, s = o.stride || 0, c = o.crouch || 0, lean = o.lean || 0;
   const hd = (o.headDy || 0) + c, arm = o.arm ?? 0;    // 0 hanging · 1 reared back · 2 swiped down
@@ -530,10 +601,10 @@ function bearFrame(f, o = {}) {
     // short thick legs planted wide, the feet turned out
     for (const [d, lift] of [[-1, lLift], [1, rLift]]) {
       part(p, PELT, (q) => {
-        limb(q, 24 + d * 7, 38 + b + c, 24 + d * 10, WB_FLOOR - lift, 6.0, 4.8, PELT, d < 0 ? -0.04 : -0.10);
-        mass(q, 24 + d * 11, WB_FLOOR - lift, 5.6, 2.4, PELT, { n: 2.8, bias: d < 0 ? -0.10 : -0.16 });
+        limb(q, 24 + d * 7, 38 + b + c, 24 + d * 10, WB_AFLOOR - lift, 6.0, 4.8, PELT, d < 0 ? -0.04 : -0.10);
+        mass(q, 24 + d * 11, WB_AFLOOR - lift, 5.6, 2.4, PELT, { n: 2.8, bias: d < 0 ? -0.10 : -0.16 });
       });
-      claws(p, 24 + d * 14, WB_FLOOR - lift + 1, 0, 1, 3, 3, 2);
+      claws(p, 24 + d * 14, WB_AFLOOR - lift + 1, 0, 1, 3, 3, 2);
     }
     // gut, shoulder slab, and the HUMP over the top of it: a wedge, widest at the shoulder, so the
     // eye reads mass falling away toward the short legs instead of one egg
@@ -585,8 +656,8 @@ function bearFrame(f, o = {}) {
   if (f === 'E') {
     // far leg and far arm first, two tones back
     part(p, PELT, (q) => {
-      limb(q, 22, 40 + b + c, 19 + Math.max(0, -s) * 4, WB_FLOOR - rLift, 5.6, 4.6, PELT, -0.22);
-      mass(q, 18 + Math.max(0, -s) * 4, WB_FLOOR - rLift, 5.4, 2.4, PELT, { n: 2.8, bias: -0.26 });
+      limb(q, 22, 40 + b + c, 19 + Math.max(0, -s) * 4, WB_AFLOOR - rLift, 5.6, 4.6, PELT, -0.22);
+      mass(q, 18 + Math.max(0, -s) * 4, WB_AFLOOR - rLift, 5.4, 2.4, PELT, { n: 2.8, bias: -0.26 });
       curve(q, [[24, 25 + b], [20, 34 + b], [22, 43 + b]], 5.0, 3.6, PELT, -0.20);
       mass(q, 22, 45 + b, 3.8, 3.4, PELT, { n: 2.2, bias: -0.24 });
     });
@@ -609,10 +680,10 @@ function bearFrame(f, o = {}) {
     if (o.roar) { for (let i = 0; i < 5; i++) { setPx(p, 39 + lean + i, hy + 5, BONE[1]); setPx(p, 39 + lean + i, hy + 7, BONE[1]); setPx(p, 39 + lean + i, hy + 6, '7'); } }
     // near leg
     part(p, PELT, (q) => {
-      limb(q, 27, 40 + b + c, 29 + Math.max(0, s) * 4, WB_FLOOR - lLift, 5.8, 4.8, PELT, -0.02);
-      mass(q, 31 + Math.max(0, s) * 4, WB_FLOOR - lLift, 5.4, 2.4, PELT, { n: 2.8, bias: -0.10 });
+      limb(q, 27, 40 + b + c, 29 + Math.max(0, s) * 4, WB_AFLOOR - lLift, 5.8, 4.8, PELT, -0.02);
+      mass(q, 31 + Math.max(0, s) * 4, WB_AFLOOR - lLift, 5.4, 2.4, PELT, { n: 2.8, bias: -0.10 });
     });
-    claws(p, 34 + Math.max(0, s) * 4, WB_FLOOR - lLift + 1, 0, 1, 3, 3, 2);
+    claws(p, 34 + Math.max(0, s) * 4, WB_AFLOOR - lLift + 1, 0, 1, 3, 3, 2);
     // near arm
     if (arm === 2) {
       if (o.smear) smearArc(p, 32, 27 + b, 14, 24, -2.0, 0.2, ['@', 'c', 'd', 'e']);
@@ -640,8 +711,8 @@ function bearFrame(f, o = {}) {
   // NORTH — the back: the shoulder mass fills the frame, the skull barely shows over it
   for (const [d, lift] of [[-1, lLift], [1, rLift]]) {
     part(p, PELT, (q) => {
-      limb(q, 24 + d * 7, 40 + b + c, 24 + d * 10, WB_FLOOR - lift, 6.2, 5.0, PELT, d < 0 ? -0.12 : -0.18);
-      mass(q, 24 + d * 11, WB_FLOOR - lift, 5.6, 2.4, PELT, { n: 2.8, bias: d < 0 ? -0.18 : -0.22 });
+      limb(q, 24 + d * 7, 40 + b + c, 24 + d * 10, WB_AFLOOR - lift, 6.2, 5.0, PELT, d < 0 ? -0.12 : -0.18);
+      mass(q, 24 + d * 11, WB_AFLOOR - lift, 5.6, 2.4, PELT, { n: 2.8, bias: d < 0 ? -0.18 : -0.22 });
     });
   }
   mass(p, 24, 35 + b, 9.8, 8.4, PELT, { n: 2.5, bias: -0.05 });
@@ -708,7 +779,15 @@ export function buildWerebear() {
 // Read: perched, not standing. The haunches fold up beside the ribs with the knees ABOVE the
 // shoulders and clawed hands planted on the stone in front. The read is the pair of folded wings,
 // each peaking in a spur well above the horns. Cold slate against warm sandstone walls.
-const GG_W = 48, GG_H = 48, GG_PIV = { x: 24, y: 46 }, GG_FLOOR = 43;
+/**
+ * Authored 48x48 and painted at 1.20x it. The gargoyle is carved out of a block of stone (1.20) and
+ * was standing at 1.00, exactly the hero's height — which made the stone brute a man in a costume.
+ * The fifth it gains goes into the crack network across the wing membranes and the haunches.
+ */
+const GG_S = 1.20;
+const GG_AW = 48, GG_AH = 48, GG_APIV = { x: 24, y: 46 }, GG_AFLOOR = 43;
+const GG_W = R(GG_AW, GG_S), GG_H = R(GG_AH, GG_S);
+const GG_PIV = { x: R(GG_APIV.x, GG_S), y: R(GG_APIV.y, GG_S) }, GG_FLOOR = R(GG_AFLOOR, GG_S);
 
 /**
  * One folded wing: a quad of membrane hanging between the shoulder, an elbow spur that stands
@@ -752,6 +831,7 @@ function gargHorns(p, cx, cy, spread = 1) {
  * @param {{bob?:number, wing?:number, headDy?:number, rear?:number, claw?:number, smear?:boolean, lean?:number}} o
  */
 function gargFrame(f, o = {}) {
+  DS = GG_S;
   const p = makePix(GG_W, GG_H);
   const b = o.bob || 0, wing = o.wing || 0, lean = o.lean || 0;
   const rear = o.rear || 0, hd = o.headDy || 0, claw = o.claw || 0;
@@ -780,10 +860,10 @@ function gargFrame(f, o = {}) {
       const kx = 24 + d * 15;
       part(p, STONE, (q) => {
         limb(q, 24 + d * 6, hipY, kx, kneeY, 5.4, 3.8, STONE, d < 0 ? 0.02 : -0.08);
-        limb(q, kx, kneeY, 24 + d * 12, GG_FLOOR - 2, 3.8, 3.0, STONE, d < 0 ? 0 : -0.10);
-        mass(q, 24 + d * 12, GG_FLOOR, 4.6, 2.2, STONE, { n: 2.8, bias: -0.10 });
+        limb(q, kx, kneeY, 24 + d * 12, GG_AFLOOR - 2, 3.8, 3.0, STONE, d < 0 ? 0 : -0.10);
+        mass(q, 24 + d * 12, GG_AFLOOR, 4.6, 2.2, STONE, { n: 2.8, bias: -0.10 });
       });
-      claws(p, 24 + d * 12, GG_FLOOR + 2, 0, 1, 3, 3, 3);
+      claws(p, 24 + d * 12, GG_AFLOOR + 2, 0, 1, 3, 3, 3);
     }
     // torso: narrow waist under a broad carved chest
     mass(p, 24 + lean, hipY - 2, 8.0, 6.4, STONE, { n: 2.5 });
@@ -803,10 +883,10 @@ function gargFrame(f, o = {}) {
         claws(p, sx + 16, sy - 7, 1, -1, 3, 5, 2);
       } else {
         part(p, STONE, (q) => {
-          curve(q, [[sx, sy], [sx + d * 1, sy + 9], [sx - d * 2, GG_FLOOR - 3]], 4.0, 2.7, STONE, d < 0 ? 0.02 : -0.08);
-          mass(q, sx - d * 2, GG_FLOOR - 1, 3.4, 2.3, STONE, { n: 2.8, bias: d < 0 ? -0.02 : -0.10 });
+          curve(q, [[sx, sy], [sx + d * 1, sy + 9], [sx - d * 2, GG_AFLOOR - 3]], 4.0, 2.7, STONE, d < 0 ? 0.02 : -0.08);
+          mass(q, sx - d * 2, GG_AFLOOR - 1, 3.4, 2.3, STONE, { n: 2.8, bias: d < 0 ? -0.02 : -0.10 });
         });
-        claws(p, sx - d * 2, GG_FLOOR + 1, 0, 1, 3, 3, 2);
+        claws(p, sx - d * 2, GG_AFLOOR + 1, 0, 1, 3, 3, 2);
       }
     }
     // head thrust forward off a short thick neck, horns swept back off the temples
@@ -826,8 +906,8 @@ function gargFrame(f, o = {}) {
     // far leg, folded
     part(p, STONE, (q) => {
       limb(q, 20, hipY, 12, kneeY, 4.6, 3.4, STONE, -0.20);
-      limb(q, 12, kneeY, 16, GG_FLOOR - 2, 3.4, 2.7, STONE, -0.22);
-      mass(q, 16, GG_FLOOR, 4.2, 2.2, STONE, { n: 2.8, bias: -0.24 });
+      limb(q, 12, kneeY, 16, GG_AFLOOR - 2, 3.4, 2.7, STONE, -0.22);
+      mass(q, 16, GG_AFLOOR, 4.2, 2.2, STONE, { n: 2.8, bias: -0.24 });
     });
     // torso in profile: hunched, the spine arching over the shoulders
     mass(p, 21 + lean, hipY - 2, 7.6, 6.2, STONE, { n: 2.5 });
@@ -840,10 +920,10 @@ function gargFrame(f, o = {}) {
     // near leg, folded up under the ribs
     part(p, STONE, (q) => {
       limb(q, 24, hipY, 34, kneeY + 1, 5.0, 3.6, STONE, -0.02);
-      limb(q, 34, kneeY + 1, 29, GG_FLOOR - 2, 3.6, 2.8, STONE, -0.04);
-      mass(q, 29, GG_FLOOR, 4.4, 2.2, STONE, { n: 2.8, bias: -0.08 });
+      limb(q, 34, kneeY + 1, 29, GG_AFLOOR - 2, 3.6, 2.8, STONE, -0.04);
+      mass(q, 29, GG_AFLOOR, 4.4, 2.2, STONE, { n: 2.8, bias: -0.08 });
     });
-    claws(p, 30, GG_FLOOR + 2, 0, 1, 3, 3, 3);
+    claws(p, 30, GG_AFLOOR + 2, 0, 1, 3, 3, 3);
     // arm: knuckles down in front, or raked out
     if (claw) {
       if (o.smear) smearArc(p, 32, chestY + 2, 10, 18, -1.5, 0.4, ['@', 'i', 'k', 'l']);
@@ -854,10 +934,10 @@ function gargFrame(f, o = {}) {
       claws(p, 44, chestY - 7, 1, -1, 3, 5, 2);
     } else {
       part(p, STONE, (q) => {
-        curve(q, [[29 + lean, chestY - 1], [35, chestY + 8], [34, GG_FLOOR - 3]], 4.0, 2.7, STONE, 0.03);
-        mass(q, 34, GG_FLOOR - 1, 3.4, 2.3, STONE, { n: 2.8, bias: -0.06 });
+        curve(q, [[29 + lean, chestY - 1], [35, chestY + 8], [34, GG_AFLOOR - 3]], 4.0, 2.7, STONE, 0.03);
+        mass(q, 34, GG_AFLOOR - 1, 3.4, 2.3, STONE, { n: 2.8, bias: -0.06 });
       });
-      claws(p, 34, GG_FLOOR + 1, 0, 1, 3, 3, 2);
+      claws(p, 34, GG_AFLOOR + 1, 0, 1, 3, 3, 2);
     }
     // head jutting forward, horns swept back over the wing roots
     const hy = chestY - 11 + hd;
@@ -876,8 +956,8 @@ function gargFrame(f, o = {}) {
     const kx = 24 + d * 15;
     part(p, STONE, (q) => {
       limb(q, 24 + d * 6, hipY, kx, kneeY, 5.4, 3.8, STONE, d < 0 ? -0.02 : -0.10);
-      limb(q, kx, kneeY, 24 + d * 12, GG_FLOOR - 2, 3.8, 3.0, STONE, d < 0 ? -0.04 : -0.12);
-      mass(q, 24 + d * 12, GG_FLOOR, 4.6, 2.2, STONE, { n: 2.8, bias: -0.14 });
+      limb(q, kx, kneeY, 24 + d * 12, GG_AFLOOR - 2, 3.8, 3.0, STONE, d < 0 ? -0.04 : -0.12);
+      mass(q, 24 + d * 12, GG_AFLOOR, 4.6, 2.2, STONE, { n: 2.8, bias: -0.14 });
     });
   }
   mass(p, 24, hipY - 2, 8.0, 6.4, STONE, { n: 2.5, bias: -0.05 });
@@ -942,16 +1022,31 @@ export function buildGargoyle() {
 // Read: all vertical, and the thinnest thing in the game for its height. Narrow sloped shoulders,
 // a small head thrust forward on no neck at all, a pot belly slung under a narrow ribcage, and the
 // arms hanging past the knees with the knuckles nearly grazing the floor.
-const TR_W = 46, TR_H = 60, TR_PIV = { x: 23, y: 58 }, TR_FLOOR = 55;
+/**
+ * THE TROLL IS AUTHORED 46x60 AND PAINTED AT 1.46x IT (67x88). style.js puts him at 1.72 of the
+ * hero — the tallest thing that walks on two legs short of the Demon — and the old sheet stood 54
+ * texels to the hero's 46, i.e. 1.17: shorter, on screen, than a War Lord. Re-rasterised at DS the
+ * same authored pose stands 79 texels, and the room it buys goes into the things a 46-wide troll
+ * could not hold: a real ribcage under the hide, knuckles on the dragging hands, a proper
+ * three-knuckle spine and a wound with two rows of knitting flesh instead of one.
+ */
+const TR_S = 1.46;
+const TR_AW = 46, TR_AH = 60, TR_APIV = { x: 23, y: 58 }, TR_AFLOOR = 55;
+const TR_W = R(TR_AW, TR_S), TR_H = R(TR_AH, TR_S);
+const TR_PIV = { x: R(TR_APIV.x, TR_S), y: R(TR_APIV.y, TR_S) }, TR_FLOOR = R(TR_AFLOOR, TR_S);
 
-/** The closing wound: a dark split with pale new flesh knitting across it. `t` = 0 raw .. 1 healed. */
+/**
+ * The closing wound: a dark split with pale new flesh knitting across it. `t` = 0 raw .. 1 healed.
+ * Authored in half-texel steps because at the troll's draw scale the split is nine real texels
+ * wide, wide enough to carry the knit as a row of stitches rather than one dotted line.
+ */
 function wound(p, x, y, t) {
-  const h = (1 - t) * 2.4 + 0.4;
-  for (let i = -3; i <= 3; i++) {
-    const hi = Math.max(0, Math.round(h - Math.abs(i) * 0.45));
-    for (let k = -hi; k <= hi; k++) {
-      if (!getPx(p, x + i, y + k)) continue;
-      const knit = t > 0.62 || (t > 0.28 && (i + 6) % 2 === 0);
+  const h = (1 - t) * 2.4 + 0.4, st = 1 / Math.ceil(DS - 1e-6);
+  for (let i = -3; i <= 3; i += st) {
+    const hi = Math.max(0, h - Math.abs(i) * 0.45);
+    for (let k = -hi; k <= hi; k += st) {
+      if (!atPx(p, x + i, y + k)) continue;
+      const knit = t > 0.62 || (t > 0.28 && (Math.round(i) + 6) % 2 === 0);
       setPx(p, x + i, y + k, knit ? 's' : 'E');
     }
   }
@@ -964,6 +1059,7 @@ function wound(p, x, y, t) {
  * @param {{bob?:number, stride?:number, arm?:number, headDy?:number, crouch?:number, heal?:number, smear?:boolean, lean?:number}} o
  */
 function trollFrame(f, o = {}) {
+  DS = TR_S;
   const p = makePix(TR_W, TR_H);
   const b = o.bob || 0, s = o.stride || 0, c = o.crouch || 0, lean = o.lean || 0;
   const hd = (o.headDy || 0) + c, arm = o.arm ?? 0, heal = o.heal ?? 0;
@@ -995,15 +1091,20 @@ function trollFrame(f, o = {}) {
     // long shanks, knees turned out, splayed flat feet
     for (const [d, lift] of [[-1, lLift], [1, rLift]]) {
       part(p, HIDE, (q) => {
-        curve(q, [[23 + d * 4, 38 + b + c], [23 + d * 8, 46 + b], [23 + d * 8, TR_FLOOR - lift - 1]], 4.2, 3.0, HIDE, d < 0 ? -0.02 : -0.10);
-        mass(q, 23 + d * 9, TR_FLOOR - lift, 5.4, 2.0, HIDE, { n: 2.9, bias: d < 0 ? -0.08 : -0.14 });
+        curve(q, [[23 + d * 4, 38 + b + c], [23 + d * 8, 46 + b], [23 + d * 8, TR_AFLOOR - lift - 1]], 4.2, 3.0, HIDE, d < 0 ? -0.02 : -0.10);
+        mass(q, 23 + d * 9, TR_AFLOOR - lift, 5.4, 2.0, HIDE, { n: 2.9, bias: d < 0 ? -0.08 : -0.14 });
       });
-      for (let i = 0; i < 3; i++) setPx(p, 23 + d * 9 - 3 + i * 3, TR_FLOOR - lift + 2, 'K');
+      for (let i = 0; i < 3; i++) setPx(p, 23 + d * 9 - 3 + i * 3, TR_AFLOOR - lift + 2, 'K');
     }
     // pot belly slung under a narrow ribcage: a barrel on stilts
     mass(p, 23 + lean, 36 + b, 7.6, 7.0, HIDE, { n: 2.4, bias: 0.03 });
     mass(p, 23 + lean, 25 + b, 6.2, 7.2, HIDE, { n: 2.6 });
-    for (let i = 0; i < 3; i++) seam(p, [[17 + lean, 22 + i * 3 + b], [21 + lean, 23.5 + i * 3 + b]], HIDE[1], { every: 1 });
+    // DETAIL THE 46-WIDE CANVAS COULD NOT HOLD: at this draw scale the ribcage is twenty texels
+    // across, so it carries a real set of ribs — four on the lit side, three shorter ones dropping
+    // into the shadow side — and the fold where the pot belly hangs over the bottom of them.
+    for (let i = 0; i < 4; i++) seam(p, [[17.4 + lean, 21 + i * 2.6 + b], [21.4 + lean, 22.4 + i * 2.6 + b]], HIDE[1], { every: 1 });
+    for (let i = 0; i < 3; i++) seam(p, [[28.6 + lean, 22.4 + i * 2.6 + b], [25.6 + lean, 23.6 + i * 2.6 + b]], HIDE[0], { every: 1 });
+    seam(p, [[18 + lean, 32.4 + b], [23 + lean, 34 + b], [28 + lean, 32.4 + b]], HIDE[1], { every: 0 });
     // sloped shoulders — no trapezius line at all, the arms just hang off the ribcage
     mass(p, 23 + lean, 19 + b, 9.2, 4.2, HIDE, { n: 2.7, bias: 0.02 });
     for (const d of [-1, 1]) mass(p, 23 + lean + d * 7.5, 20 + b, 3.4, 3.4, HIDE, { n: 2.3, bias: d < 0 ? 0.04 : -0.06 });
@@ -1030,6 +1131,7 @@ function trollFrame(f, o = {}) {
           curve(q, [[sx, sy], [sx + d * 5, sy + 12], [sx + d * 3, sy + 26]], 4.0, 2.8, HIDE, d < 0 ? 0.03 : -0.04);
           mass(q, sx + d * 3, sy + 28, 3.6, 3.2, HIDE, { n: 2.2, bias: d < 0 ? -0.04 : -0.09 });
         });
+        for (let i = -1; i <= 1; i++) setPx(p, sx + d * 3 + i * 2, sy + 26.4, HIDE[0]);   // knuckles
         claws(p, sx + d * 3, sy + 31, 0, 1, 3, 3, 2);
       }
     }
@@ -1047,8 +1149,8 @@ function trollFrame(f, o = {}) {
 
   if (f === 'E') {
     part(p, HIDE, (q) => {
-      curve(q, [[21, 38 + b + c], [19, 46 + b], [19 + Math.max(0, -s) * 4, TR_FLOOR - rLift - 1]], 4.0, 2.9, HIDE, -0.20);
-      mass(q, 18 + Math.max(0, -s) * 4, TR_FLOOR - rLift, 5.2, 2.0, HIDE, { n: 2.9, bias: -0.24 });
+      curve(q, [[21, 38 + b + c], [19, 46 + b], [19 + Math.max(0, -s) * 4, TR_AFLOOR - rLift - 1]], 4.0, 2.9, HIDE, -0.20);
+      mass(q, 18 + Math.max(0, -s) * 4, TR_AFLOOR - rLift, 5.2, 2.0, HIDE, { n: 2.9, bias: -0.24 });
       curve(q, [[19, 20 + b], [14, 32 + b], [17, 47 + b]], 3.6, 2.5, HIDE, -0.20);      // far arm
       mass(q, 17, 49 + b, 3.4, 3.0, HIDE, { n: 2.2, bias: -0.24 });
     });
@@ -1058,10 +1160,10 @@ function trollFrame(f, o = {}) {
     mass(p, 24 + lean, 20 + b, 4.8, 4.0, HIDE, { n: 2.3, bias: -0.02 });
     wound(p, 25 + lean, 19 + b, heal);
     part(p, HIDE, (q) => {
-      curve(q, [[25, 38 + b + c], [27, 46 + b], [27 + Math.max(0, s) * 4, TR_FLOOR - lLift - 1]], 4.2, 3.0, HIDE, -0.02);
-      mass(q, 28 + Math.max(0, s) * 4, TR_FLOOR - lLift, 5.4, 2.0, HIDE, { n: 2.9, bias: -0.08 });
+      curve(q, [[25, 38 + b + c], [27, 46 + b], [27 + Math.max(0, s) * 4, TR_AFLOOR - lLift - 1]], 4.2, 3.0, HIDE, -0.02);
+      mass(q, 28 + Math.max(0, s) * 4, TR_AFLOOR - lLift, 5.4, 2.0, HIDE, { n: 2.9, bias: -0.08 });
     });
-    for (let i = 0; i < 3; i++) setPx(p, 26 + Math.max(0, s) * 4 + i * 3, TR_FLOOR - lLift + 2, 'K');
+    for (let i = 0; i < 3; i++) setPx(p, 26 + Math.max(0, s) * 4 + i * 3, TR_AFLOOR - lLift + 2, 'K');
     if (arm === 2) {
       if (o.smear) smearArc(p, 27, 27 + b, 15, 25, -1.9, 0.3, ['@', 'p', 'q', 'r']);
       part(p, HIDE, (q) => {
@@ -1096,8 +1198,8 @@ function trollFrame(f, o = {}) {
   // NORTH — the back: a knobbled spine down a narrow back, the long arms hanging either side
   for (const [d, lift] of [[-1, lLift], [1, rLift]]) {
     part(p, HIDE, (q) => {
-      curve(q, [[23 + d * 4, 38 + b + c], [23 + d * 8, 46 + b], [23 + d * 8, TR_FLOOR - lift - 1]], 4.2, 3.0, HIDE, d < 0 ? -0.10 : -0.16);
-      mass(q, 23 + d * 9, TR_FLOOR - lift, 5.4, 2.0, HIDE, { n: 2.9, bias: d < 0 ? -0.16 : -0.20 });
+      curve(q, [[23 + d * 4, 38 + b + c], [23 + d * 8, 46 + b], [23 + d * 8, TR_AFLOOR - lift - 1]], 4.2, 3.0, HIDE, d < 0 ? -0.10 : -0.16);
+      mass(q, 23 + d * 9, TR_AFLOOR - lift, 5.4, 2.0, HIDE, { n: 2.9, bias: d < 0 ? -0.16 : -0.20 });
     });
   }
   mass(p, 23, 36 + b, 7.6, 7.0, HIDE, { n: 2.4, bias: -0.04 });

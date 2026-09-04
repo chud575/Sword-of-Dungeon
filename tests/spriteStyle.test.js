@@ -12,7 +12,7 @@ import { Palette, paint, outline } from '../src/render/sprites/pixelPainter.js';
 import {
   INK, INK_TOL, LIT, SCALE, HERO_SCALE, ramp, lint, lintErrors, analyseSheet, sizeFor, measureFigure,
   CHROMA_CEIL, VALUE_CEIL, VALUE_FLOOR, VALUE_RANGE_MIN, RAMP_MIN_STEPS, RAMP_MAX_STEPS,
-  DENSITY_MIN, DENSITY_MAX, HERO_FIGURE_PX, luminance, chroma,
+  DENSITY_MIN, DENSITY_MAX, LADDER_RANK_MARGIN, HERO_FIGURE_PX, luminance, chroma,
 } from '../src/render/sprites/style.js';
 
 const hexToRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -145,4 +145,92 @@ test('sizeFor turns a SCALE into a billboard multiplier, clamped to a sane texel
 test('measureFigure reads the hero at the height style.js says he is', () => {
   const px = measureFigure(packSheet(buildHero()));
   assert.ok(Math.abs(px - HERO_FIGURE_PX) <= 2, `hero measured ${px}px, HERO_FIGURE_PX is ${HERO_FIGURE_PX}`);
+});
+
+// ============================================================================================
+// THE SIZE LADDER, MEASURED ON THE ART
+// ============================================================================================
+// The tests above check SCALE against ITSELF, which is why the ladder could be dead code for two
+// audits: `spriteBillboard` sizes a creature purely by how many texels its art occupies (see its
+// "ONE TEXEL SIZE FOR THE WHOLE SCREEN" note) and `characters.js` explicitly does not size the
+// billboard, so a sheet painted at 0.70 of its slot walked on screen at 0.70 of its slot no matter
+// what SCALE said. Everything below measures the ART.
+
+/** Figure height in texels of every shipping sprite, plus the hero, measured off the packed sheet. */
+const FIGURE = (() => {
+  const m = { player: measureFigure(packSheet(buildHero())) };
+  for (const t of REAL_SPRITES) m[t] = measureFigure(sheetOf(MONSTER_SPRITES[t]()));
+  return m;
+})();
+/** The height this type's SCALE slot asks for, in texels. */
+const wanted = (t) => (t === 'player' ? HERO_SCALE : SCALE[t]) * HERO_FIGURE_PX;
+
+test('the hero is drawn at exactly the height the rest of the ladder is measured against', () => {
+  assert.ok(Math.abs(FIGURE.player - HERO_FIGURE_PX) <= 2,
+    `the hero measures ${FIGURE.player}px, HERO_FIGURE_PX is ${HERO_FIGURE_PX} — every SCALE below is relative to him`);
+});
+
+test('every sheet is PAINTED at the height its SCALE slot demands (no sprite needs clamping)', () => {
+  // `sizeFor` is the multiplier a sheet would need to reach its slot. Nothing applies it: it is a
+  // measurement of the error. A sheet outside DENSITY_MIN..DENSITY_MAX is a canvas to repaint.
+  const bad = [];
+  for (const t of REAL_SPRITES) {
+    const px = FIGURE[t], want = wanted(t), mult = want / px;
+    if (mult < DENSITY_MIN || mult > DENSITY_MAX) {
+      bad.push(`${t}: art is ${px}px, SCALE ${SCALE[t]} wants ${want.toFixed(0)}px `
+        + `(x${mult.toFixed(2)}, band ${DENSITY_MIN}-${DENSITY_MAX}) — repaint the sheet, do not scale it`);
+    }
+    // and the clamp must never actually bite on shipping art
+    assert.equal(sizeFor(t, px), mult > DENSITY_MAX ? DENSITY_MAX : mult < DENSITY_MIN ? DENSITY_MIN : mult);
+  }
+  assert.deepEqual(bad, []);
+});
+
+test('the ART ranks the cast the way SCALE ranks it', () => {
+  // The band above cannot see an inversion between two creatures that are BOTH mis-drawn by the
+  // same factor — which is exactly how a War Lord ended up out-looming a Fyre Drake. Any two
+  // creatures more than LADDER_RANK_MARGIN apart on the ladder must come out that way in texels.
+  const all = [...REAL_SPRITES, 'player'];
+  const bad = [];
+  for (const a of all) for (const b of all) {
+    if (a === b) continue;
+    const sa = a === 'player' ? HERO_SCALE : SCALE[a], sb = b === 'player' ? HERO_SCALE : SCALE[b];
+    if (sa - sb <= LADDER_RANK_MARGIN) continue;          // close enough to tie
+    if (FIGURE[a] > FIGURE[b]) continue;
+    bad.push(`${a} (SCALE ${sa}) is ${FIGURE[a]}px but ${b} (SCALE ${sb}) is ${FIGURE[b]}px `
+      + '— the art has the hierarchy backwards');
+  }
+  assert.deepEqual(bad, []);
+});
+
+test('the heavies loom, the humans do not, and the hero stands between them', () => {
+  // The three reads a player must get from silhouette size alone, stated on the ART.
+  const px = (t) => FIGURE[t];
+  const hero = px('player');
+  for (const t of ['werebear', 'ogre', 'troll', 'demon', 'wyvern', 'fyre-drake', 'shadow-dragon']) {
+    assert.ok(px(t) > hero * 1.4, `${t} must loom over the hero (${px(t)}px vs ${hero}px)`);
+  }
+  for (const t of ['war-lord', 'dark-warrior', 'barbarian', 'swordsman', 'mercenary', 'monk', 'assassin', 'rogue']) {
+    assert.ok(px(t) < px('werebear'), `${t} is a man: no human may reach the smallest loomer`);
+  }
+  assert.ok(px('war-lord') < px('fyre-drake') && px('war-lord') < px('ogre'),
+    'a human commander must not out-loom an ogre or a drake IN TEXELS, not just in the table');
+  assert.ok(px('shadow-dragon') > px('demon'),
+    'the tallest silhouette in the game must actually be the tallest sheet');
+  assert.ok(px('dimension-spider') > hero, 'a depth-8 horror must not be smaller than the hero');
+  assert.ok(px('barbarian') > px('rogue') && px('barbarian') > px('hobgoblin'),
+    'the barbarian is the big one of his group; on the old shared canvas all five measured the same');
+  // and the hero has to stay readable: nothing may be so big it swallows the frame
+  assert.ok(Math.max(...REAL_SPRITES.map(px)) < hero * 2.5, 'nothing may be two and a half heroes tall');
+});
+
+test('the cast is painted at ONE texel density — no sheet is a zoomed sprite', () => {
+  // Every sheet drawn at its own slot means every sheet shares the hero's texel size. Spread is
+  // the ratio of the worst over-drawn sheet to the worst under-drawn one; it was 1.72 when the art
+  // carried a flatter hierarchy of its own, and the 0.6-2.2 clamp admitted 3.7.
+  const mults = REAL_SPRITES.map((t) => wanted(t) / FIGURE[t]);
+  const spread = Math.max(...mults) / Math.min(...mults);
+  assert.ok(spread <= 1.45, `texel-density spread across the cast is ${spread.toFixed(2)} (max 1.45)`);
+  assert.ok(DENSITY_MAX / DENSITY_MIN <= 1.5,
+    'the density band itself must stay tight — a wide band is how the ladder became dead code');
 });

@@ -245,10 +245,20 @@ export const HERO_FIGURE_PX = 46;
  *
  * The Fyre Drake keeps its one deliberate note: it is a low, sprawling salamander whose bulk runs
  * ALONG the floor, so it is the widest thing in the bestiary while sitting below the Shadow Dragon
- * in height. Its redraw must therefore buy the extra height by RAISING THE HEAD on a taller canvas,
- * not by scaling up the 86x65 sprawl it has now: at the play camera that sprawl times its 2.10 audit
- * is 540 px of screen width, and a creature three tiles wide reaches the HUD from the middle of a
- * room. Height is what the ladder asks of it; footprint is not.
+ * in height. Its redraw therefore bought part of the extra height by RAISING THE HEAD rather than by
+ * inflating the sprawl (monsters/drakes.js `FD_LIFT`): a straight 1.42x repaint would have made it
+ * 125 texels wide, and a creature four tiles across reaches the HUD from the middle of a room.
+ * Height is what the ladder asks of it; footprint is not.
+ *
+ * THE ART NOW CARRIES THIS TABLE. Everything above used to be dead code — `spriteBillboard` sizes a
+ * creature purely by how many texels its art occupies, and `characters.js` explicitly does not size
+ * the billboard, so a sheet drawn at 0.70 of its slot simply walked on screen at 0.70 of its slot.
+ * Every creature above SCALE 1.1 has since been REPAINTED at the height its slot demands — not
+ * scaled: the procedural groups (beasts, boss, drakes) are authored in their own coordinate space
+ * and re-rasterised at a per-creature draw scale, so every capsule, superellipse and terminator is
+ * re-solved on the finer grid; the hand-typed ones (the Barbarian's whole body, the War Lord's
+ * crest) were typed again at the new size. `DENSITY_MIN`/`DENSITY_MAX` and
+ * `tests/spriteStyle.test.js` now hold it there.
  *
  * CHECKED AT THE PLAYING CAMERA ('deep-level' and 'combat'), not just in the bestiary line-up, by
  * rendering the whole cast at the sizes this table asks for. The Shadow Dragon lands at 317 px (a
@@ -291,20 +301,39 @@ export const SCALE = {
 export const HERO_SCALE = 1.0;
 
 /**
- * How far a sprite's texel density may stray from the hero's when its art is drawn at the wrong
- * size for its `SCALE`. A sprite needing a multiplier outside this band is a request to REDRAW it on
- * a bigger (or smaller) canvas — blowing 16px of spider up to three times the hero's texel size is
- * a stopgap, not the house look. The clamp keeps the hierarchy readable in the meantime.
+ * THE ART IS THE SIZE LAW, AND THIS IS HOW FAR IT MAY MISS.
  *
- * When the ladder above was re-keyed, every shipping sheet measured inside the band, so NOTHING is
- * being clamped. The War Lord is the only creature whose art is drawn too BIG (~67 texels where the
- * ladder wants 58, audit ~0.86); the redraw queue, worst first, is the Fyre Drake (~2.05), the
- * Demon (~1.65), the Troll / Shadow Dragon (~1.47), the Ogre / Werebear (~1.43) and the Dimension
- * Spider (~1.39). Those are canvases to grow, not multipliers to apply: `sizeFor` no longer sizes a
- * billboard (see sprites/spriteBillboard.js, "ONE TEXEL SIZE FOR THE WHOLE SCREEN") — the ART is the
- * size law, and these numbers move a texel or two every time a sheet is repainted.
+ * `sizeFor(type, figurePx)` is the multiplier a sheet WOULD need to reach the height its `SCALE`
+ * slot asks for. Nothing applies it any more — `spriteBillboard` sizes a creature purely by how
+ * many texels its art occupies times one shared texel size (see sprites/spriteBillboard.js, "ONE
+ * TEXEL SIZE FOR THE WHOLE SCREEN") — so a multiplier away from 1.0 is not a correction, it is a
+ * MEASUREMENT OF THE ERROR: the amount by which that sheet's art disagrees with the ladder.
+ *
+ * WHY THE BAND USED TO BE 0.6-2.2, AND WHY THAT WAS THE BUG. A window that wide admits a 3.7x
+ * disagreement, which is another way of saying it admits any disagreement at all — and the cast
+ * duly drifted into one. Every sheet above SCALE 1.1 was painted at about 0.70 of the height its
+ * slot demanded, and the ladder inverted where it mattered most: the War Lord (slot 1.25) walked on
+ * screen at 1.46 of the hero, TALLER than the Wyvern (1.41) and the Fyre Drake (1.35); the Shadow
+ * Dragon (slot 2.30, the tallest thing in the game) came on at 1.57, BELOW the Demon; the Dimension
+ * Spider was smaller than the hero it ambushes. Every one of those sheets measured "inside the
+ * band", so nothing failed and nobody noticed for two audits.
+ *
+ * 0.90-1.25 is the band the repainted cast actually holds (worst: the Assassin at 1.22, still drawn
+ * on the 40x40 grunt canvas; the War Lord at 0.96). It is tight enough that the old state fails it
+ * at BOTH ends — the Troll at 1.46 and the War Lord at 0.86 — and `tests/spriteStyle.test.js`
+ * asserts per type that no shipping sheet needs clamping at all, plus the RANK law the band cannot
+ * see: any two creatures more than `LADDER_RANK_MARGIN` apart in `SCALE` must come out that way
+ * round in texels.
  */
-export const DENSITY_MIN = 0.6, DENSITY_MAX = 2.2;
+export const DENSITY_MIN = 0.90, DENSITY_MAX = 1.25;
+
+/**
+ * How far apart two creatures must be on the `SCALE` ladder before the ART is required to put them
+ * in that order. Below this they are the same size to a player across a lit room and the sheets may
+ * tie; above it, a bigger slot MUST measure taller in texels, or the hierarchy is a lie. 0.14 is
+ * about a head of height on a man.
+ */
+export const LADDER_RANK_MARGIN = 0.14;
 
 /**
  * The billboard scale multiplier for a creature: how much bigger than 1 texel = 1/32 tile this

@@ -23,15 +23,51 @@
 //   dimension-spider  EIGHT jointed legs, each one three tapering segments — knees above the body,
 //                     feet planted wide — and a violet echo of itself standing a pixel out of
 //                     register, because half of it is somewhere else.
-import { Palette, outline, makePix, setPx, getPx, blit } from '../pixelPainter.js';
+import { Palette, outline, makePix, setPx as putPx, getPx, blit } from '../pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from '../style.js';
-import { mass, limb, curve, crest, wingFan, clips, flash, squashTo, tilt } from './boss.js';
+import { mass, limb, curve, crest, wingFan, clips, flash, squashTo, tilt, setDrawScale, R } from './boss.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
 
 const lerp = (a, b, t) => a + (b - a) * t;
 /** The one house outline: exactly one pixel of INK, softened to INK_LIT on the lit edges. */
 const ink = (p) => outline(p, '#', { lit: LIT, litKey: '@' });
+
+// ------------------------------------------------------------------- THE DRAW SCALE (the size law)
+/**
+ * THE DRAKES ARE AUTHORED SMALL AND PAINTED BIG. See monsters/boss.js `setDrawScale` for the full
+ * note; the short version is that `spriteBillboard` decides a creature's on-screen size purely from
+ * HOW MANY TEXELS ITS ART OCCUPIES, so style.js `SCALE` — the game's whole size hierarchy — only
+ * reaches the screen if the art is drawn at the height its slot asks for. It was not: the Shadow
+ * Dragon wants 2.30 of the hero and its sheet was 72 texels tall against the hero's 46 (1.57), so
+ * the tallest silhouette in the game came on screen SHORTER than the Demon.
+ *
+ * The toolkit imported from boss.js (`mass`, `limb`, `curve`, `crest`, `wingFan`) is analytic, so
+ * setting the draw scale re-solves every solid on the finer grid rather than stretching pixels: at
+ * DS = 1.47 the dragon's neck is a new capsule with its own terminator and half again as many ramp
+ * steps across it, not four pixels blown up to six. `DSC` below is this file's copy of that scale, and
+ * `drawAt()` hands it to boss.js as well, because the primitives live there.
+ *
+ * The hand-placed marks (talons, fangs, veins, eyes, the spider's knee plates) are written in
+ * AUTHORED space and land through the local `setPx`, which covers exactly the texels an authored
+ * pixel owns on the real grid — one or two, never a gap, never a doubled blob.
+ */
+let DSC = 1;
+/** Authored length -> texels on the real canvas. */
+const SC = (v) => v * DSC;
+/** Set the draw scale for this file AND for the shared boss.js toolkit. */
+function drawAt(s) { DSC = s; setDrawScale(s); }
+/**
+ * Set one AUTHORED-space pixel: it covers exactly the texels that authored pixel owns on the real
+ * grid (`round(x·DS) .. round((x+1)·DS) - 1`). At DS = 1 this is `setPx`.
+ */
+function setPx(p, x, y, key) {
+  const x0 = Math.round(x * DSC), x1 = Math.max(x0, Math.round((x + 1) * DSC) - 1);
+  const y0 = Math.round(y * DSC), y1 = Math.max(y0, Math.round((y + 1) * DSC) - 1);
+  for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) putPx(p, xx, yy, key);
+}
+/** Read one authored-space pixel (the mark's top-left texel). */
+const atPx = (p, x, y) => getPx(p, Math.round(x * DSC), Math.round(y * DSC));
 
 /**
  * THE ATLAS CELL IS PART OF THE DRAWING. A wing tip, a tail barb or a horn that reaches the edge of
@@ -101,9 +137,15 @@ function fangs(p, x0, x1, y, key) { for (let x = x0; x <= x1; x += 2) setPx(p, x
 // Read: a two-legged drake. It has no forelegs at all — the wings hang off the chest like arms,
 // elbows hooked ABOVE the shoulders, membrane falling to the hocks — and it balances that front end
 // on a tail as long as it is tall, finished with a flat barbed spade.
-const WY_SW = 60, WY_SH = 68;                     // the scratch the poses are written in
-const WY_DX = 5, WY_DY = 2, WY_W = WY_SW + 10, WY_H = WY_SH + 3;
-const WY_PIV = { x: 30 + WY_DX, y: 66 + WY_DY };
+// AUTHORED 60x68 IN A 70x71 CELL, PAINTED AT 1.35x IT. The wyvern's slot is 1.90 of the hero and
+// its sheet stood 65 texels to the hero's 46 — 1.41, barely over the War Lord's art. Re-rasterised
+// it stands 88, and the hock, the wrist claw and the spade barb each gain a texel of definition.
+const WY_S = 1.35;
+const WY_ASW = 60, WY_ASH = 68, WY_ADX = 5, WY_ADY = 2;
+const WY_SW = R(WY_ASW, WY_S), WY_SH = R(WY_ASH, WY_S);
+const WY_DX = R(WY_ADX, WY_S), WY_DY = R(WY_ADY, WY_S);
+const WY_W = WY_SW + R(10, WY_S), WY_H = WY_SH + R(3, WY_S);
+const WY_PIV = { x: R(30, WY_S) + WY_DX, y: R(66, WY_S) + WY_DY };
 const wyvDone = pad(WY_W, WY_H, WY_DX, WY_DY);
 const WY = drakePalette()
   .band('123456', '#7a6d3e', HUE)   // dry olive-tan hide
@@ -174,6 +216,7 @@ function wyvHead(p, hx, hy, dir, both = false) {
  *   lunge?:number, droop?:number}} o
  */
 function wyvFrame(f, o = {}) {
+  drawAt(WY_S);
   const p = makePix(WY_SW, WY_SH);
   TB = WY_TB;
   const b = o.bob || 0, s = o.stride || 0, c = o.crouch || 0, k = o.wing ?? 0.24;
@@ -254,7 +297,7 @@ function wyvAnims(f) {
   const hurt = { frames: [flash(recoil), recoil], durations: [80, 190], loop: false };
   const d0 = mk({ wing: 0.8, neck: 2, bob: -1, tail: 2 });
   const d1 = mk({ wing: 0.3, neck: -3, crouch: 3, bob: 2, droop: 0.4 });
-  const d2 = squashTo(tilt(mk({ wing: 0.16, neck: -4, crouch: 4, bob: 3, droop: 0.55 }), 0.3, 30 + WY_DX, 64 + WY_DY), 0.72, WY_H - 3);
+  const d2 = squashTo(tilt(mk({ wing: 0.16, neck: -4, crouch: 4, bob: 3, droop: 0.55 }), 0.3, R(30, WY_S) + WY_DX, R(64, WY_S) + WY_DY), 0.72, WY_H - 3);
   const death = { frames: [d0, d1, d2, squashTo(d2, 0.6, WY_H - 3), squashTo(d2, 0.48, WY_H - 3)], durations: [150, 180, 210, 470, 900], loop: false };
   return { idle, walk, attack, hurt, death };
 }
@@ -270,9 +313,16 @@ export function buildWyvern() {
 // Read: four legs planted under a span twice its own width, and a light that is INSIDE it. The
 // scale is a violet so dark it is nearly the floor; what separates it from the floor is the glow
 // leaking out of the throat, along the chest seams and down the veins of the membrane.
-const SD_SW = 76, SD_SH = 72;
-const SD_DX = 7, SD_DY = 5, SD_W = SD_SW + 14, SD_H = SD_SH + 8;
-const SD_PIV = { x: 38 + SD_DX, y: 70 + SD_DY };
+// AUTHORED 76x72 IN A 90x80 CELL, PAINTED AT 1.47x IT. This is the tallest silhouette in the game
+// (style.js: 2.30) and it was standing at 1.57 — SHORTER on screen than the Demon at 1.61, which is
+// the exact inversion the ladder exists to kill. Re-rasterised the S-neck alone is 24 texels of
+// modelled form instead of 16, and the lyre of horns finally reads as separate horns.
+const SD_S = 1.47;
+const SD_ASW = 76, SD_ASH = 72, SD_ADX = 7, SD_ADY = 5;
+const SD_SW = R(SD_ASW, SD_S), SD_SH = R(SD_ASH, SD_S);
+const SD_DX = R(SD_ADX, SD_S), SD_DY = R(SD_ADY, SD_S);
+const SD_W = SD_SW + R(14, SD_S), SD_H = SD_SH + R(8, SD_S);
+const SD_PIV = { x: R(38, SD_S) + SD_DX, y: R(70, SD_S) + SD_DY };
 const sdDone = pad(SD_W, SD_H, SD_DX, SD_DY);
 const SD = drakePalette()
   .band('123456', '#3a3157', HUE)   // violet-black scale
@@ -299,7 +349,7 @@ function sdWing(p, cx, cy, k, dir, droop = 0) {
     const a = (fingers[i - 1].a + fingers[i].a) / 2, r = (fingers[i - 1].r + fingers[i].r) / 2;
     for (let t = 3; t < r * 0.7; t += 2) {
       const x = Math.round(cx + Math.cos(a) * t * dir), y = Math.round(cy + Math.sin(a) * t);
-      if (getPx(p, x, y)) setPx(p, x, y, t < r * 0.34 ? 'G' : 'I');
+      if (atPx(p, x, y)) setPx(p, x, y, t < r * 0.34 ? 'G' : 'I');
     }
   }
   const t0 = fingers[0];
@@ -325,6 +375,7 @@ function sdHead(p, hx, hy, dir, glow) {
  *   droop?:number, crouch?:number, heat?:number}} o
  */
 function sdFrame(f, o = {}) {
+  drawAt(SD_S);
   const p = makePix(SD_SW, SD_SH);
   TB = SD_TB;
   const b = o.bob || 0, k = o.wing ?? 0.66, s = o.stride || 0, c = o.crouch || 0;
@@ -336,7 +387,7 @@ function sdFrame(f, o = {}) {
     for (let i = 0; i < 4; i++) {
       const y = cy + i * 3;
       for (let x = cx - wide + (i & 1); x <= cx + wide - (i & 1); x += 2) {
-        if (!getPx(p, x, y)) continue;
+        if (!atPx(p, x, y)) continue;
         setPx(p, x, y, heat > 0.7 && i < 2 ? 'H' : heat > 0.35 ? 'G' : 'I');
       }
     }
@@ -425,7 +476,7 @@ function sdAnims(f) {
   const hurt = { frames: [flash(recoil), recoil], durations: [80, 190], loop: false };
   const d0 = mk({ wing: 0.9, neck: 2, bob: -1, heat: 0.9 });
   const d1 = mk({ wing: 0.34, neck: -3, crouch: 3, bob: 2, droop: 0.36, heat: 0.4 });
-  const d2 = squashTo(tilt(mk({ wing: 0.2, neck: -4, crouch: 4, bob: 3, droop: 0.5, heat: 0.15 }), 0.32, 38 + SD_DX, 68 + SD_DY), 0.72, SD_H - 3);
+  const d2 = squashTo(tilt(mk({ wing: 0.2, neck: -4, crouch: 4, bob: 3, droop: 0.5, heat: 0.15 }), 0.32, R(38, SD_S) + SD_DX, R(68, SD_S) + SD_DY), 0.72, SD_H - 3);
   const death = { frames: [d0, d1, d2, squashTo(d2, 0.6, SD_H - 3), squashTo(d2, 0.46, SD_H - 3)], durations: [150, 190, 220, 480, 950], loop: false };
   return { idle, walk, attack, hurt, death };
 }
@@ -482,9 +533,20 @@ export function buildShadowDragon() {
 //   FEET    `talons()` puts two pixels of bone on the floor per toe, which under a creature this
 //           wide is a row of six white blocks; `fdFoot` keeps the toes hide-coloured and lights
 //           one claw pixel each.
-const FD_SW = 78, FD_SH = 74;
-const FD_DX = 5, FD_DY = 3, FD_W = FD_SW + 10, FD_H = FD_SH + 5;
-const FD_PIV = { x: 40 + FD_DX, y: 74 + FD_DY };
+// AUTHORED 78x74 IN AN 88x79 CELL, PAINTED AT 1.34x IT — AND THE HEAD IS RAISED FOUR AUTHORED ROWS
+// ON TOP OF THAT (`FD_LIFT`). style.js is explicit about this one: the fyre drake is a low sprawling
+// salamander whose bulk runs ALONG the floor, so the height its 1.92 slot asks for has to be bought
+// by carrying the skull higher on the neck, not by inflating the footprint. A straight 1.42x would
+// have made it 125 texels wide; lifting the head lets 1.34 do the job at 118, and the longer neck
+// is a better drawing besides — a heavy wedge skull held UP over a barrel slung between four legs.
+const FD_S = 1.34;
+/** Authored rows the skull is carried higher than it used to be. See the note above. */
+const FD_LIFT = 4;
+const FD_ASW = 78, FD_ASH = 74, FD_ADX = 5, FD_ADY = 3;
+const FD_SW = R(FD_ASW, FD_S), FD_SH = R(FD_ASH, FD_S);
+const FD_DX = R(FD_ADX, FD_S), FD_DY = R(FD_ADY, FD_S);
+const FD_W = FD_SW + R(10, FD_S), FD_H = FD_SH + R(5, FD_S);
+const FD_PIV = { x: R(40, FD_S) + FD_DX, y: R(74, FD_S) + FD_DY };
 const FD_SOLE = 72;                                  // the contact row: fills stop here
 /**
  * PULL THE LIT PLANE BACK ONTO THE RIM.
@@ -499,7 +561,11 @@ const FD_SOLE = 72;                                  // the contact row: fills s
  */
 function capRim(p, keys) {
   const ks = [...keys];
-  for (const [i, keep] of [[ks.length - 1, 1], [ks.length - 2, 3]]) {
+  // THE BAND SCALES WITH THE DRAKE. `keep` is a distance in TEXELS from the silhouette, so on a
+  // sheet repainted half again as big it kept the same one- and three-texel ribbon and pushed
+  // everything else down a step — which took the fyre drake's median value from 0.25 to 0.15 and
+  // collapsed the whole animal into the bottom of its own ramp (style.js VALUE_FLOOR).
+  for (const [i, keep] of [[ks.length - 1, Math.round(SC(1))], [ks.length - 2, Math.round(SC(3))]]) {
     const step = ks[i].charCodeAt(0), down = ks[i - 1];
     const snap = new Uint16Array(p.d);
     const solid = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : snap[y * p.w + x]);
@@ -510,7 +576,7 @@ function capRim(p, keys) {
         if (Math.abs(dx) + Math.abs(dy) > keep) continue;
         if (!solid(x + dx, y + dy)) { near = true; break; }
       }
-      if (!near) setPx(p, x, y, down);
+      if (!near) putPx(p, x, y, down);
     }
   }
   return p;
@@ -540,8 +606,15 @@ const FD = drakePalette()
   .set('k', '#b8401a').set('l', '#ff8f30').set('m', '#ffe6a4')  // vein core / vein / white-hot
   .set('E', '#150e18');   // eye socket, nostril, mouth hollow — the one tone below the whole hide
 const FD_HIDE = '123456', FD_PLATE = 'qrstu', FD_HORN = 'HIJK', FD_MEM = 'ABC';
-/** Cooled basalt: dark enough that the molten veins in it are the brightest thing on the creature. */
-const FD_TB = -0.34;
+/**
+ * Cooled basalt: dark enough that the molten veins in it are the brightest thing on the creature.
+ * IT HAD TO COME UP WHEN THE DRAKE GREW. Every form here is a solid whose RIM catches the light and
+ * whose interior sits low on the ramp; repainted at 1.34x the interior grows with the square while
+ * the rim grows with the side, so the old -0.34 took the sheet's median value from 0.25 down to
+ * 0.15 — under style.js VALUE_FLOOR, which is a creature collapsed into the bottom of its own ramp.
+ * -0.26 puts the basalt back where it read at the size the ladder now asks for.
+ */
+const FD_TB = -0.26;
 
 /**
  * THE LIGHT PLANE for the drake, the same device the demon uses (monsters/boss.js): `tone()` lights
@@ -562,7 +635,7 @@ const FL = (p, x0, y0, x1, y1, r0, r1, keys, bias = 0) =>
 function fdGap(p, q, r = 1) {
   for (let y = 0; y < q.h; y++) for (let x = 0; x < q.w; x++) {
     if (!q.d[y * q.w + x]) continue;
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) setPx(p, x + dx, y + dy, 0);
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) putPx(p, x + dx, y + dy, 0);
   }
   return blit(p, q, 0, 0);
 }
@@ -577,15 +650,15 @@ function veins(p, pts, heat) {
       const t = s / n, x = Math.round(lerp(ax, bx, t)), y = Math.round(lerp(ay, by, t));
       // a 1-px DIAGONAL run touches only at its corners, which at gameplay distance is exactly the
       // dotted seam this drake was named after: fill the elbow so the seam is 4-connected
-      if (s > 0 && x !== lx && y !== ly && getPx(p, lx, y)) setPx(p, lx, y, 'l');
+      if (s > 0 && x !== lx && y !== ly && atPx(p, lx, y)) setPx(p, lx, y, 'l');
       lx = x; ly = y;
-      if (!getPx(p, x, y)) continue;
+      if (!atPx(p, x, y)) continue;
       // CONTINUOUS, and lipped: the seam itself never breaks, a char lip runs under it and the
       // hide above it is pulled back to its darkest step. A vein drawn as alternating hot and dark
       // pixels (which is what this used to be) reads at gameplay distance as a dotted line.
       setPx(p, x, y, n0 % 5 === 0 && heat > 0.45 ? 'm' : 'l');
-      if (getPx(p, x, y + 1)) setPx(p, x, y + 1, 'k');
-      if (getPx(p, x, y - 1)) setPx(p, x, y - 1, 'q');
+      if (atPx(p, x, y + 1)) setPx(p, x, y + 1, 'k');
+      if (atPx(p, x, y - 1)) setPx(p, x, y - 1, 'q');
     }
   }
 }
@@ -596,7 +669,7 @@ function veins(p, pts, heat) {
  */
 function underLight(p, x0, x1, y, key) {
   for (let x = x0; x <= x1; x++) {
-    if (!getPx(p, x, y) || !getPx(p, x, y + 1)) continue;
+    if (!atPx(p, x, y) || !atPx(p, x, y + 1)) continue;
     setPx(p, x, y, key);
   }
 }
@@ -644,7 +717,7 @@ function fdLeg(p, hx, hy, dir, sweep, lift, bias, gap = true) {
   // fuse into a single rounded slab and the leg has no joint anywhere along its length.
   for (let x = -4; x <= 4; x++) {
     const px = Math.round(hx + dir * 2 + sweep) + x, py = Math.round(hy + 12);
-    if (getPx(q, px, py)) setPx(q, px, py, x < -1 ? '2' : '1');
+    if (atPx(q, px, py)) setPx(q, px, py, x < -1 ? '2' : '1');
   }
   fdFoot(q, hx + dir * 1.4 + sweep, sole, dir >= 0 ? 1 : -1);
   return gap ? fdGap(p, q) : p;
@@ -663,12 +736,12 @@ function fdHead(p, hx, hy, dir, heat, both = false) {
   FL(q, hx + dir * 1, hy + 5, hx + dir * 9, hy + 4, 2.8, 1.6, FD_PLATE, -0.14);       // the jaw, slung under
   for (let x = 1; x <= 9; x++) {                                                      // THE MOUTH LINE
     const mx = hx + dir * x, my = hy + 3;
-    if (getPx(q, mx, my)) setPx(q, mx, my, '#');
+    if (atPx(q, mx, my)) setPx(q, mx, my, '#');
   }
   // THREE fangs, interlocking, not a comb of them every second pixel: at this scale an even row
   // reads as a zip fastener sewn along the jaw.
-  for (const t of [2, 5, 8]) if (getPx(q, hx + dir * t, hy + 2)) setPx(q, hx + dir * t, hy + 2, 'y');
-  for (const t of [3, 6]) if (getPx(q, hx + dir * t, hy + 4)) setPx(q, hx + dir * t, hy + 4, 'x');
+  for (const t of [2, 5, 8]) if (atPx(q, hx + dir * t, hy + 2)) setPx(q, hx + dir * t, hy + 2, 'y');
+  for (const t of [3, 6]) if (atPx(q, hx + dir * t, hy + 4)) setPx(q, hx + dir * t, hy + 4, 'x');
   // A PAIR of short thick horns off the crown, swept back over the neck — the near one over the
   // far one, so a profile still reads two. A single long blade here is a duck-billed crest.
   C(q, [[hx - dir * 5, hy - 4], [hx - dir * 8, hy - 9], [hx - dir * 10, hy - 13]], 1.6, 0.5, FD_HORN, TB - 0.46);
@@ -680,7 +753,7 @@ function fdHead(p, hx, hy, dir, heat, both = false) {
   if (both) C(q, [[hx + dir * 3, hy - 5], [hx + dir * 6, hy - 10], [hx + dir * 8, hy - 14]], 2.2, 0.6, FD_HORN, TB - 0.46);
   setPx(q, hx + dir * 9, hy + 1, 'E');                                                // the nostril
   // the eye: a SLIT under the brow, not a lit panel. Four dark pixels and two of ember.
-  for (let x = 1; x <= 3; x++) for (let y = -1; y <= 0; y++) if (getPx(q, hx + dir * x, hy + y)) setPx(q, hx + dir * x, hy + y, 'E');
+  for (let x = 1; x <= 3; x++) for (let y = -1; y <= 0; y++) if (atPx(q, hx + dir * x, hy + y)) setPx(q, hx + dir * x, hy + y, 'E');
   setPx(q, hx + dir * 2, hy, heat > 0.4 ? 'm' : 'l');
   if (heat > 0.6) underLight(q, Math.min(hx + dir * 2, hx + dir * 9), Math.max(hx + dir * 2, hx + dir * 9), hy + 6, 'k');
   return fdGap(p, q);
@@ -710,7 +783,7 @@ function fdWingSide(p, sx, sy, dir) {
   // one pixel of light down the leading edge, so the fold reads as leather and not as shadow
   for (let i = 0; i <= 14; i++) {
     const x = Math.round(wx - dir * i), y = Math.round(wy + 1 + i * 0.55);
-    if ('AB'.includes(String.fromCharCode(getPx(q, x, y - 1)))) setPx(q, x, y - 1, 'C');
+    if ('AB'.includes(String.fromCharCode(atPx(q, x, y - 1)))) setPx(q, x, y - 1, 'C');
   }
   // the finger bones lying across the fold, drawn only where the membrane already is
   for (let i = 1; i <= 3; i++) {
@@ -718,7 +791,7 @@ function fdWingSide(p, sx, sy, dir) {
     const n = Math.max(2, Math.round(Math.hypot(ex - wx, ey - wy)));
     for (let j = 0; j <= n; j++) {
       const x = Math.round(lerp(wx, ex, j / n)), y = Math.round(lerp(wy, ey, j / n));
-      if ('AB'.includes(String.fromCharCode(getPx(q, x, y)))) setPx(q, x, y, 'C');
+      if ('AB'.includes(String.fromCharCode(atPx(q, x, y)))) setPx(q, x, y, 'C');
     }
   }
   setPx(q, Math.round(wx + dir), Math.round(wy - 2), 'x');                // the wrist claw
@@ -755,16 +828,16 @@ function fdHeadFront(p, hx, hy, heat) {
   FM(q, hx, hy + 5, 5.4, 3.4, FD_HIDE, { n: 2.6, bias: -0.14 });                      // the snout
   FM(q, hx, hy + 8, 5.0, 2.0, FD_PLATE, { n: 3.0, bias: -0.40 });                     // the jaw
   for (let x = hx - 6; x <= hx + 6; x++) for (let y = 6; y <= 7; y++) {                // THE MOUTH LINE
-    if (getPx(q, x, hy + y)) setPx(q, x, hy + y, '#');
+    if (atPx(q, x, hy + y)) setPx(q, x, hy + y, '#');
   }
-  for (const fx of [hx - 5, hx, hx + 5]) if (getPx(q, fx, hy + 6)) setPx(q, fx, hy + 6, 'y');
-  for (const fx of [hx - 3, hx + 3]) if (getPx(q, fx, hy + 7)) setPx(q, fx, hy + 7, 'x');
+  for (const fx of [hx - 5, hx, hx + 5]) if (atPx(q, fx, hy + 6)) setPx(q, fx, hy + 6, 'y');
+  for (const fx of [hx - 3, hx + 3]) if (atPx(q, fx, hy + 7)) setPx(q, fx, hy + 7, 'x');
   for (const ex of [hx - 5, hx + 3]) {                                                 // the eye pits
-    for (let x = 0; x <= 2; x++) for (let y = -1; y <= 1; y++) if (getPx(q, ex + x, hy + y)) setPx(q, ex + x, hy + y, 'E');
-    for (let x = 0; x <= 1; x++) if (getPx(q, ex + x, hy)) setPx(q, ex + x, hy, heat > 0.4 ? 'm' : 'l');
+    for (let x = 0; x <= 2; x++) for (let y = -1; y <= 1; y++) if (atPx(q, ex + x, hy + y)) setPx(q, ex + x, hy + y, 'E');
+    for (let x = 0; x <= 1; x++) if (atPx(q, ex + x, hy)) setPx(q, ex + x, hy, heat > 0.4 ? 'm' : 'l');
   }
   setPx(q, hx - 2, hy + 4, 'E'); setPx(q, hx + 2, hy + 4, 'E');                         // the nostrils
-  for (let x = hx - 7; x <= hx + 7; x++) if (getPx(q, x, hy - 2)) setPx(q, x, hy - 2, '1');  // under the brow
+  for (let x = hx - 7; x <= hx + 7; x++) if (atPx(q, x, hy - 2)) setPx(q, x, hy - 2, '1');  // under the brow
   // HEAD-ON, A BACK-SWEPT HORN IS A STUB. Drawn at its true length it stands straight up off the
   // skull as a long tapering blade — which, in a pair, either side of a rounded cranium, is a
   // rabbit. Foreshortened it is what it should be: a thick splayed nub at each top corner.
@@ -774,7 +847,7 @@ function fdHeadFront(p, hx, hy, heat) {
     // an ear, whatever angle it leaves the skull at.
     for (const t of [4, 7, 10]) for (let k = -3; k <= 3; k++) {
       const x = Math.round(hx + d * (4 + t)), y = Math.round(hy - 3 - t * 0.28) + k;
-      if ('IJK'.includes(String.fromCharCode(getPx(q, x, y)))) setPx(q, x, y, 'H');
+      if ('IJK'.includes(String.fromCharCode(atPx(q, x, y)))) setPx(q, x, y, 'H');
     }
   }
   return fdGap(p, q);
@@ -786,6 +859,7 @@ function fdHeadFront(p, hx, hy, heat) {
  * @param {{bob?:number, gait?:number, tail?:number, heat?:number, rear?:number, breath?:number, crouch?:number}} o
  */
 function fdFrame(f, o = {}) {
+  drawAt(FD_S);
   const p = makePix(FD_SW, FD_SH);
   const fx = o.breath ? makePix(FD_W, FD_H) : null;
   TB = FD_TB;
@@ -807,8 +881,8 @@ function fdFrame(f, o = {}) {
     crest(p, [[22, bodyY - 6], [32, bodyY - 9], [44, bodyY - 10], [54, bodyY - 8]], 5, '1223', { tip: 'v' });
     fdWingSide(p, 50, bodyY - 4, 1);
     // THE NECK: short, thick, and it RISES — this is where the drake's height comes from
-    FC(p, [[53, bodyY - 6], [60, 32 + b - rear], [64, 27 + b - rear * 1.4]], 8.4, 6.2, FD_HIDE, -0.04);
-    fdHead(p, 66, 21 + b - rear * 1.6, 1, heat);
+    FC(p, [[53, bodyY - 6], [60, 32 - FD_LIFT * 0.5 + b - rear], [64, 27 - FD_LIFT + b - rear * 1.4]], 8.4, 6.2, FD_HIDE, -0.04);
+    fdHead(p, 66, 21 - FD_LIFT + b - rear * 1.6, 1, heat);
     // THE VEINS GO ON THE BODY, BEFORE THE NEAR LEGS. Painted afterwards they run straight across
     // the leg in front of it, and a molten seam crossing a limb reads as a harness strap.
     // THE VEINS RUN WITH THE RIBS, DOWN. Drawn along the flank they came back as three horizontal
@@ -817,11 +891,11 @@ function fdFrame(f, o = {}) {
     veins(p, [[33, bodyY - 9], [32, bodyY - 2], [34, bodyY + 5]], heat);
     veins(p, [[43, bodyY - 10], [42, bodyY - 3], [44, bodyY + 4]], heat * 0.85);
     veins(p, [[25, bodyY - 6], [24, bodyY + 1]], heat * 0.7);
-    veins(p, [[58, 32 + b - rear], [63, 26 + b - rear * 1.3]], heat);
+    veins(p, [[58, 32 - FD_LIFT * 0.5 + b - rear], [63, 26 - FD_LIFT + b - rear * 1.3]], heat);
     fdLeg(p, 34, 50 + b, -1, 2, Math.max(0, -g) * 2, -0.04);                           // near hind
     fdLeg(p, 55, 51 + b, 1, -1, Math.max(0, g) * 2, 0.0);                              // near fore
     underLight(p, 32, 52, bodyY + 11, 'k');
-    if (fx) gout(fx, 76 + FD_DX, 22 + b - rear * 1.6 + FD_DY, 1, 0, o.breath);
+    if (fx) gout(fx, 76 + FD_ADX, 22 - FD_LIFT + b - rear * 1.6 + FD_ADY, 1, 0, o.breath);
     return fdSeat(p, fx);
   }
 
@@ -846,10 +920,10 @@ function fdFrame(f, o = {}) {
     veins(p, [[40, 33 + b], [40, 43 + b]], heat * 0.7);
     fdLeg(p, 28, 44 + b, -1, -2, Math.max(0, -g) * 2, -0.02);                          // near fore
     fdLeg(p, 52, 44 + b, 1, 2, Math.max(0, g) * 2, -0.10);                             // near fore
-    FC(p, [[40, 38 + b], [40, 33 + b - rear], [40, 29 + b - rear]], 7.6, 6.2, FD_HIDE, -0.02);
-    fdHeadFront(p, 40, 23 + b - rear, heat);
+    FC(p, [[40, 38 + b], [40, 33 - FD_LIFT * 0.5 + b - rear], [40, 29 - FD_LIFT + b - rear]], 7.6, 6.2, FD_HIDE, -0.02);
+    fdHeadFront(p, 40, 23 - FD_LIFT + b - rear, heat);
 
-    if (fx) gout(fx, 40 + FD_DX, 30 + b - rear + FD_DY, 0, 1, o.breath);
+    if (fx) gout(fx, 40 + FD_ADX, 30 - FD_LIFT + b - rear + FD_ADY, 0, 1, o.breath);
     return fdSeat(p, fx);
   }
 
@@ -865,11 +939,11 @@ function fdFrame(f, o = {}) {
   fdWingBack(p, 27, bodyY - 6, -1);
   fdWingBack(p, 53, bodyY - 6, 1);
   crest(p, [[40, bodyY - 9], [40, bodyY - 1], [40, bodyY + 6]], 4, '1223', { tip: 'v' });
-  FC(p, [[40, 36 + b], [40, 31 + b], [40, 28 + b]], 7.6, 6.2, FD_HIDE, -0.06);
+  FC(p, [[40, 36 + b], [40, 31 - FD_LIFT * 0.5 + b], [40, 28 - FD_LIFT + b]], 7.6, 6.2, FD_HIDE, -0.06);
   { const q = makePix(FD_SW, FD_SH);
-    FM(q, 40, 23 + b, 7.4, 5.2, FD_HIDE, { n: 2.7, bias: -0.26 });
-    C(q, [[36, 19 + b], [31, 16 + b], [26, 14 + b]], 2.1, 0.6, FD_HORN, TB - 0.26);
-    C(q, [[44, 19 + b], [49, 16 + b], [54, 14 + b]], 2.1, 0.6, FD_HORN, TB - 0.40);
+    FM(q, 40, 23 - FD_LIFT + b, 7.4, 5.2, FD_HIDE, { n: 2.7, bias: -0.26 });
+    C(q, [[36, 19 - FD_LIFT + b], [31, 16 - FD_LIFT + b], [26, 14 - FD_LIFT + b]], 2.1, 0.6, FD_HORN, TB - 0.26);
+    C(q, [[44, 19 - FD_LIFT + b], [49, 16 - FD_LIFT + b], [54, 14 - FD_LIFT + b]], 2.1, 0.6, FD_HORN, TB - 0.40);
     fdGap(p, q); }
   veins(p, [[28, bodyY - 4], [32, bodyY + 6]], heat);
   veins(p, [[52, bodyY - 4], [48, bodyY + 6]], heat);
@@ -913,9 +987,16 @@ export function buildFyreDrake() {
 // which is what a spider's legs actually do and what the old six untapered sticks never did. A
 // violet echo of the whole animal stands a pixel out of register behind it, and a cold shimmer
 // crawls the carapace: it is not walking across the room, it is arriving in it.
-const DS_SW = 52, DS_SH = 46;
-const DS_DX = 4, DS_DY = 2, DS_W = DS_SW + 8, DS_H = DS_SH + 5;
-const DS_PIV = { x: 26 + DS_DX, y: 44 + DS_DY };
+// AUTHORED 52x46 IN A 60x51 CELL, PAINTED AT 1.39x IT. A depth-8 horror (style.js: 1.15) whose art
+// stood 38 texels — 0.83 of the hero, i.e. SMALLER THAN THE MAN IT AMBUSHES, and smaller than a
+// depth-1 hobgoblin. Re-rasterised it stands 53: still crouched and wide, but never a mook. Each
+// leg segment gains a texel, which is what lets the three joints read as three joints.
+const DSP_S = 1.39;
+const DS_ASW = 52, DS_ASH = 46, DS_ADX = 4, DS_ADY = 2;
+const DS_SW = R(DS_ASW, DSP_S), DS_SH = R(DS_ASH, DSP_S);
+const DS_DX = R(DS_ADX, DSP_S), DS_DY = R(DS_ADY, DSP_S);
+const DS_W = DS_SW + R(8, DSP_S), DS_H = DS_SH + R(5, DSP_S);
+const DS_PIV = { x: R(26, DSP_S) + DS_DX, y: R(44, DSP_S) + DS_DY };
 const dsDone = pad(DS_W, DS_H, DS_DX, DS_DY);
 const DS = drakePalette()
   .band('123456', '#3c4a68', HUE)   // cold slate carapace: violet-navy in shadow, teal in the light
@@ -966,7 +1047,7 @@ function shimmer(p, cx, cy, phase) {
   for (let i = 0; i < 4; i++) {
     const [dx, dy] = DS_SHIMMER[(phase * 2 + i) % DS_SHIMMER.length];
     const x = Math.round(cx + dx), y = Math.round(cy + dy);
-    if (!getPx(p, x, y)) continue;
+    if (!atPx(p, x, y)) continue;
     setPx(p, x, y, i & 1 ? 'x' : 'y');
   }
 }
@@ -977,6 +1058,7 @@ function shimmer(p, cx, cy, phase) {
  * @param {{bob?:number, gait?:number, phase?:number, rear?:number, blink?:number, drop?:number}} o
  */
 function dsFrame(f, o = {}) {
+  drawAt(DSP_S);
   const p = makePix(DS_SW, DS_SH);
   TB = DS_TB;
   const b = (o.bob || 0) + (o.drop || 0), g = o.gait || 0, rear = o.rear || 0;

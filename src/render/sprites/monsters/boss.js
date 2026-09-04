@@ -31,7 +31,7 @@
 //              a hard ink gap where they leave the skull, wings FOLDED INTO TWO SPIRES that break
 //              the skyline over those horns, cloven hooves, one furnace split down the breastbone,
 //              and the signature — the ring of stolen soul-light hanging above its open palm.
-import { Palette, paint, outline, houseOutline, keyShade, makePix, setPx, getPx, shift, smearArc, mirrorLit, blit } from '../pixelPainter.js';
+import { Palette, paint, outline, houseOutline, keyShade, makePix, setPx as putPx, getPx, shift, smearArc as rawSmear, mirrorLit, blit } from '../pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from '../style.js';
 
 /** @typedef {import('../pixelPainter.js').Pix} Pix */
@@ -127,6 +127,48 @@ export const BOSS_PALETTE = new HousePalette()
 /** Compose is not used here: every creature draws straight into one Pix, then takes the outline. */
 const ink = (p) => outline(p, '#', { lit: LIT, litKey: '@' });
 
+// ------------------------------------------------------------------- THE DRAW SCALE (the size law)
+/**
+ * See monsters/beasts.js for the full note. In short: style.js `SCALE` is the game's size ladder and
+ * it never reached the screen, because `spriteBillboard` sizes a creature purely by HOW MANY TEXELS
+ * ITS ART OCCUPIES. An Ogre asking for 1.58 of the hero on a sheet 51 texels tall (hero: 46) walked
+ * on at 1.11 — shorter than the War Lord he is supposed to pick up.
+ *
+ * The fix is not a multiplier on the billboard (that breaks the shared texel grid and reads as a
+ * zoomed sprite). Every creature here is AUTHORED in its own coordinate space and RASTERISED at `DS`
+ * times it: `mass`, `limb`, `curve`, `crest` and `wingFan` are analytic, so a haunch at DS = 1.43 is
+ * the same solid re-solved on a finer grid — its own terminator, its own rim, half again as many
+ * ramp steps across it — not four pixels stretched into six. The hand-painted detail sheets
+ * (`OG_FACE_S`, the drake heads) are RE-TYPED at the bigger size rather than scaled, and the room
+ * the redraw buys is spent on detail the small canvas could not hold.
+ *
+ * `setDrawScale` lets monsters/drakes.js — which shares this toolkit — set the scale for its own
+ * creatures before it draws a frame.
+ */
+let DS = 1;
+/** Authored length -> texels on the real canvas. */
+const S = (v) => v * DS;
+/** Round an authored canvas measurement (width, pivot, floor row) onto the real grid. */
+export const R = (v, s) => Math.round(v * s);
+/** Set the draw scale for the frames about to be painted (monsters/drakes.js shares this toolkit). */
+export function setDrawScale(s) { DS = s; }
+
+/**
+ * Set one AUTHORED-space pixel: it covers EXACTLY the texels that authored pixel owns on the real
+ * grid (`round(x·DS) .. round((x+1)·DS) - 1`), so at DS = 1 this is `setPx`, and above it a mark is
+ * one or two texels wide with no gaps and no overdraw — a hand-placed brow, fang, seam, rivet or
+ * eye stays a line at the new resolution instead of falling apart into dots.
+ */
+function setPx(p, x, y, key) {
+  const x0 = Math.round(x * DS), x1 = Math.max(x0, Math.round((x + 1) * DS) - 1);
+  const y0 = Math.round(y * DS), y1 = Math.max(y0, Math.round((y + 1) * DS) - 1);
+  for (let yy = y0; yy <= y1; yy++) for (let xx = x0; xx <= x1; xx++) putPx(p, xx, yy, key);
+}
+/** Read one authored-space pixel (the mark's top-left texel). */
+const atPx = (p, x, y) => getPx(p, Math.round(x * DS), Math.round(y * DS));
+/** `smearArc` in authored space. */
+const smearArc = (p, cx, cy, r0, r1, a0, a1, keys) => rawSmear(p, S(cx), S(cy), S(r0), S(r1), a0, a1, keys);
+
 /** Solid-key copy for the hurt flash (the outline stays dark so the silhouette still reads). */
 function flash(p) {
   const o = { w: p.w, h: p.h, d: new Uint16Array(p.d) };
@@ -140,7 +182,7 @@ function squashTo(p, k, baseY) {
   const o = makePix(p.w, p.h);
   for (let y = 0; y < p.h; y++) {
     const ty = Math.round(baseY - (baseY - y) * k);
-    for (let x = 0; x < p.w; x++) { const c = p.d[y * p.w + x]; if (c) setPx(o, x, ty, c); }
+    for (let x = 0; x < p.w; x++) { const c = p.d[y * p.w + x]; if (c) putPx(o, x, ty, c); }
   }
   return o;
 }
@@ -152,7 +194,7 @@ function tilt(p, a, cx, cy) {
     const dx = x - cx, dy = y - cy;
     const sx = Math.round(cx + dx * ca - dy * sa), sy = Math.round(cy + dx * sa + dy * ca);
     const c = getPx(p, sx, sy);
-    if (c) setPx(o, x, y, c);
+    if (c) putPx(o, x, y, c);
   }
   return o;
 }
@@ -206,18 +248,23 @@ function tone(nx, ny, keys, bias = 0) {
  * `n` = 2 is an ellipse, 2.6 a barrel, 3.4 nearly a slab.
  */
 function mass(p, cx, cy, rx, ry, keys, { n = 2, bias = 0 } = {}) {
+  cx = S(cx); cy = S(cy); rx = S(rx); ry = S(ry);
   const x0 = Math.max(0, Math.floor(cx - rx) - 1), x1 = Math.min(p.w - 1, Math.ceil(cx + rx) + 1);
   const y0 = Math.max(0, Math.floor(cy - ry) - 1), y1 = Math.min(p.h - 1, Math.ceil(cy + ry) + 1);
   for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
     const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
     if (Math.pow(Math.abs(nx), n) + Math.pow(Math.abs(ny), n) > 1) continue;
-    setPx(p, x, y, tone(nx, ny, keys, bias));
+    putPx(p, x, y, tone(nx, ny, keys, bias));
   }
   return p;
 }
 
 /** A shaded capsule from (x0,y0) to (x1,y1), radius r0 -> r1: arms, legs, necks, tails, horns. */
 function limb(p, x0, y0, x1, y1, r0, r1, keys, bias = 0) {
+  return limbRaw(p, S(x0), S(y0), S(x1), S(y1), S(r0), S(r1), keys, bias);
+}
+/** `limb` in REAL texels, for callers (`wingFan`) that have already scaled their own geometry. */
+function limbRaw(p, x0, y0, x1, y1, r0, r1, keys, bias = 0) {
   const dx = x1 - x0, dy = y1 - y0, len2 = dx * dx + dy * dy || 1e-6;
   const rmax = Math.max(r0, r1);
   const bx0 = Math.max(0, Math.floor(Math.min(x0, x1) - rmax) - 1), bx1 = Math.min(p.w - 1, Math.ceil(Math.max(x0, x1) + rmax) + 1);
@@ -228,7 +275,7 @@ function limb(p, x0, y0, x1, y1, r0, r1, keys, bias = 0) {
     t = t < 0 ? 0 : t > 1 ? 1 : t;
     const ox = px - dx * t, oy = py - dy * t, r = r0 + (r1 - r0) * t;
     if (ox * ox + oy * oy > r * r) continue;
-    setPx(p, x, y, tone(ox / r, oy / r, keys, bias));
+    putPx(p, x, y, tone(ox / r, oy / r, keys, bias));
   }
   return p;
 }
@@ -248,6 +295,7 @@ function curve(p, pts, r0, r1, keys, bias = 0) {
  * normal, tallest in the middle of the run. Used for the salamander's crest and the dragon's ridge.
  */
 function crest(p, pts, height, keys, { flip = false, tip = null } = {}) {
+  pts = pts.map(([x, y]) => [S(x), S(y)]); height = S(height);
   const n = pts.length - 1;
   for (let i = 0; i < n; i++) {
     const [ax, ay] = pts[i], [bx, by] = pts[i + 1];
@@ -262,7 +310,7 @@ function crest(p, pts, height, keys, { flip = false, tip = null } = {}) {
       const cx = mx + nx * k, cy = my + ny * k;
       for (let j = -Math.ceil(half); j <= Math.ceil(half); j++) {
         const x = Math.round(cx + (dx / L) * j), y = Math.round(cy + (dy / L) * j);
-        setPx(p, x, y, tip && t > 0.72 ? tip : keys[Math.min(keys.length - 1, 1 + ((t * keys.length) | 0))]);
+        putPx(p, x, y, tip && t > 0.72 ? tip : keys[Math.min(keys.length - 1, 1 + ((t * keys.length) | 0))]);
       }
     }
   }
@@ -279,8 +327,9 @@ function crest(p, pts, height, keys, { flip = false, tip = null } = {}) {
  * @param {{tatter?:number, scallop?:number}} [o] tatter = bites taken out of the hem
  */
 function wingFan(p, cx, cy, fingers, dir, keys, o = {}) {
+  cx = S(cx); cy = S(cy); fingers = fingers.map((f) => ({ a: f.a, r: S(f.r) }));
   const n = fingers.length - 1;
-  const scallop = o.scallop ?? 3.1, tatter = o.tatter ?? 0;
+  const scallop = S(o.scallop ?? 3.1), tatter = S(o.tatter ?? 0);
   const rmax = Math.max(...fingers.map((f) => f.r));
   const bx0 = Math.max(0, Math.floor(cx - rmax) - 1), bx1 = Math.min(p.w - 1, Math.ceil(cx + rmax) + 1);
   const by0 = Math.max(0, Math.floor(cy - rmax) - 1), by1 = Math.min(p.h - 1, Math.ceil(cy + rmax) + 1);
@@ -301,7 +350,7 @@ function wingFan(p, cx, cy, fingers, dir, keys, o = {}) {
     let ki = k < 0.30 ? 2 : k < 0.68 ? 1 : 0;
     if (rad > 0.80) ki = Math.max(0, ki - 1);
     else if (rad < 0.34) ki = Math.min(2, ki + 1);
-    setPx(p, x, y, keys[ki]);
+    putPx(p, x, y, keys[ki]);
   }
   for (let i = 0; i <= n; i++) {
     const { a, r } = fingers[i];
@@ -310,16 +359,16 @@ function wingFan(p, cx, cy, fingers, dir, keys, o = {}) {
       const t = (s / steps) * len;
       const x = Math.round(cx + Math.cos(a) * t * dir), y = Math.round(cy + Math.sin(a) * t);
       if (!getPx(p, x, y)) continue;                       // a bone only shows where membrane is
-      setPx(p, x, y, keys[3]);
+      putPx(p, x, y, keys[3]);
     }
   }
   // the wing's own arm: root to the leading finger, two pixels thick
-  limb(p, cx, cy, cx + Math.cos(fingers[0].a) * fingers[0].r * 0.55 * dir, cy + Math.sin(fingers[0].a) * fingers[0].r * 0.55, 2.2, 1.4, keys[3] + keys[3] + keys[3]);
+  limbRaw(p, cx, cy, cx + Math.cos(fingers[0].a) * fingers[0].r * 0.55 * dir, cy + Math.sin(fingers[0].a) * fingers[0].r * 0.55, S(2.2), S(1.4), keys[3] + keys[3] + keys[3]);
   return p;
 }
 
 /** Stamp a hand-painted detail sheet at (x,y) (transparent source pixels are skipped). */
-const stamp = (p, art, x, y, mir = false) => blit(p, art, Math.round(x), Math.round(y), { mirror: mir });
+const stamp = (p, art, x, y, mir = false) => blit(p, art, Math.round(S(x)), Math.round(S(y)), { mirror: mir });
 
 const lerp = (a, b, t) => a + (b - a) * t;
 
@@ -329,23 +378,41 @@ const lerp = (a, b, t) => a + (b - a) * t;
 // Read: a boulder on legs. The skull is sunk between two shoulder humps so nothing breaks the
 // shoulder line, the gut overhangs the kilt, and the bone club is as long as he is tall.
 // drawn in a 48-wide frame and shifted right by OG_PAD, so the club never clips the canvas edge
-const OG_W = 56, OG_H = 56, OG_PAD = 4, OG_PIV = { x: 28, y: 54 };
+/**
+ * AUTHORED 56x56 AND PAINTED AT 1.43x IT (80x80). style.js puts the Ogre at 1.58 of the hero — one
+ * of the three loomers — and the old sheet stood 51 texels to the hero's 46, i.e. 1.11: level with
+ * a Dark Warrior. Re-rasterised he stands 73. The face below is RE-TYPED at the new size rather
+ * than scaled: 17x9 instead of 12x6, which buys a nose, a second row of teeth and a jaw line the
+ * small block had no room for.
+ */
+const OG_S = 1.43;
+const OG_AW = 56, OG_AH = 56, OG_APAD = 4, OG_APIV = { x: 28, y: 54 }, OG_AFLOOR = 52;
+const OG_W = R(OG_AW, OG_S), OG_H = R(OG_AH, OG_S), OG_PAD = R(OG_APAD, OG_S);
+const OG_PIV = { x: R(OG_APIV.x, OG_S), y: R(OG_APIV.y, OG_S) }, OG_FLOOR = R(OG_AFLOOR, OG_S);
 const HIDE = '1234', BELLY = '567', BONE = '89z', LEATHER = 'ab';
 
 // a lit brow ridge, two small deep-set eyes under it, and the under-bite: tusks past the upper lip
+// RE-TYPED AT THE OGRE'S DRAW SCALE (17x9 where the old block was 12x6). The extra rows are spent
+// on a broad flat nose with a nostril under it, a full upper lip and a second row of teeth behind
+// the tusks, and a jaw line that closes the mouth — none of which fits in six rows.
 const OG_FACE_S = paint(`
-.4444444444.
-.#EW#..#WE#.
-..#......#..
-..9.......9.
-..9#8888#9..
-...######...`);
+...44444444444...
+..#EEW#...#WEE#..
+..#..#.....#..#..
+...9....3....9...
+...9...#3#...9...
+...9#########9...
+...9#8888888#9...
+....#8888888#....
+.....#######.....`);
 const OG_FACE_E = paint(`
-.4444...
-.#EW#...
-..#...9.
-..9#889.
-...###..`);
+..4444444..
+..#EEW#....
+..##...3...
+...#..#3#..
+...9#8889..
+...9#888#9.
+....#####..`);
 
 /** The club: a knotted bone shaft with an iron band and a heavy knobbed head. */
 function ogreClub(p, hx, hy, tx, ty, { far = false } = {}) {
@@ -364,7 +431,7 @@ function ogreClub(p, hx, hy, tx, ty, { far = false } = {}) {
     const off = [1.4, 2.2, -1.7][i], t0 = [0.26, 0.30, 0.24][i], t1 = [0.66, 0.70, 0.60][i];
     for (let t = t0; t <= t1; t += 0.04) {
       const [gx, gy] = at(t, off);
-      if (getPx(p, Math.round(gx), Math.round(gy))) setPx(p, Math.round(gx), Math.round(gy), off > 0 ? '8' : '9');
+      if (atPx(p, Math.round(gx), Math.round(gy))) setPx(p, Math.round(gx), Math.round(gy), off > 0 ? '8' : '9');
     }
   }
   // KNUCKLES on the head: three lumps, lit up-left, shadowed down-right
@@ -376,7 +443,7 @@ function ogreClub(p, hx, hy, tx, ty, { far = false } = {}) {
   for (const [t, half] of [[0.08, 2.2], [0.17, 2.5], [0.74, 3.2]]) {
     for (let k = -half; k <= half; k += 0.5) {
       const [bxp, byp] = at(t, k);
-      if (getPx(p, Math.round(bxp), Math.round(byp))) setPx(p, Math.round(bxp), Math.round(byp), k < -half * 0.25 ? 'b' : 'a');
+      if (atPx(p, Math.round(bxp), Math.round(byp))) setPx(p, Math.round(bxp), Math.round(byp), k < -half * 0.25 ? 'b' : 'a');
     }
   }
   // the iron ferrule at the very butt of the grip
@@ -390,7 +457,7 @@ function ogreClub(p, hx, hy, tx, ty, { far = false } = {}) {
 function ogreFold(p, cx, cy, rx, ry) {
   for (let a = -0.45; a < 1.9; a += 0.06) {
     const x = Math.round(cx + Math.cos(a) * rx * 0.99), y = Math.round(cy + Math.sin(a) * ry * 0.99);
-    if (getPx(p, x, y)) setPx(p, x, y, '5');
+    if (atPx(p, x, y)) setPx(p, x, y, '5');
   }
 }
 
@@ -424,6 +491,7 @@ function foot(p, cx, y, keys, nail, bias = 0) {
 }
 
 function ogreFrame(f, o = {}) {
+  setDrawScale(OG_S);
   const p = makePix(OG_W, OG_H);
   const done = (q) => ink(shift(q, OG_PAD, 0));
   const b = o.bob || 0, s = o.stride || 0, c = o.crouch || 0, lean = o.lean || 0;
@@ -554,8 +622,8 @@ function ogreAnims(f) {
   const recoil = mk({ bob: 2, crouch: 2, headDy: 2, lean: -2 });
   const hurt = { frames: [flash(recoil), recoil], durations: [80, 190], loop: false };
   const d0 = mk({ bob: 2, crouch: 2, headDy: 2 });
-  const d1 = tilt(mk({ bob: 3, crouch: 3, headDy: 3 }), 0.28, 28, 52);
-  const d2 = squashTo(tilt(mk({ bob: 4, crouch: 4 }), 0.6, 28, 52), 0.7, OG_H - 3);
+  const d1 = tilt(mk({ bob: 3, crouch: 3, headDy: 3 }), 0.28, OG_PIV.x, OG_FLOOR);
+  const d2 = squashTo(tilt(mk({ bob: 4, crouch: 4 }), 0.6, OG_PIV.x, OG_FLOOR), 0.7, OG_H - 3);
   const death = {
     frames: [d0, d1, d2, squashTo(d2, 0.62, OG_H - 3), squashTo(d2, 0.5, OG_H - 3)],
     durations: [140, 170, 200, 460, 900], loop: false,
@@ -584,7 +652,7 @@ function cracks(p, pts, heat) {
     const n = Math.max(2, Math.round(Math.hypot(bx - ax, by - ay)));
     for (let s = 0; s <= n; s++) {
       const t = s / n, x = Math.round(lerp(ax, bx, t)), y = Math.round(lerp(ay, by, t));
-      if (!getPx(p, x, y)) continue;
+      if (!atPx(p, x, y)) continue;
       const hot = (i + s) % 4 === 0 && heat > 0.55;
       setPx(p, x, y, hot ? 'm' : (i + s) % 2 ? 'l' : 'k');
       if (hot) setPx(p, x, y - 1, 'l');
@@ -631,6 +699,7 @@ fgggggggggggf
  * @param {{bob?:number, gait?:number, tail?:number, heat?:number, rear?:number, breath?:number, dy?:number}} o
  */
 function salaFrame(f, o = {}) {
+  setDrawScale(1);   // the dead alias builders draw at 1:1; DS is module state, so say so
   const p = makePix(SA_W, SA_H);
   const b = (o.bob || 0) + (o.dy || 0), g = o.gait || 0, heat = o.heat ?? 0.5;
   const tp = o.tail || 0, rear = o.rear || 0;
@@ -790,6 +859,7 @@ rqqqqqqqqqqr
  * @param {{bob?:number, wing?:number, stride?:number, neck?:number, lunge?:number, breath?:number, droop?:number, crouch?:number}} o
  */
 function dragonFrame(f, o = {}) {
+  setDrawScale(1);   // ditto: never inherit the scale of whatever was painted last
   const p = makePix(DR_W, DR_H);
   const b = o.bob || 0, k = o.wing ?? 0.62, s = o.stride || 0, c = o.crouch || 0;
   const neck = o.neck || 0, lunge = o.lunge || 0, droop = o.droop || 0;
@@ -940,13 +1010,24 @@ export function buildDragon() {
 //  · THE CHEST HAD MEASLES. Isolated amber pixels ringed in black, scattered over the sternum. All
 //    of it is now ONE furnace: a single fissure down the breastbone opening into a cavity, with
 //    continuous char cracks running off it along the ribs and the light spilling DOWN the belly.
-const DE_SW = 60, DE_SH = 72;                       // the scratch the BODY is written in
-const DE_DX = 13, DE_DY = 3, DE_W = DE_SW + 26, DE_H = DE_SH + 5;
-const DE_PIV = { x: 30 + DE_DX, y: 72 + DE_DY };
+/**
+ * AUTHORED 60x72 (in an 86x77 cell) AND PAINTED AT 1.11x IT. The Demon is the deepest thing that
+ * walks (style.js: 1.78) and its sheet stood 74 texels — 1.61 of the hero, which put it BELOW the
+ * Shadow Dragon's slot but only barely above the Wyvern's art. The eleven per cent it gains is
+ * small enough that every hand-placed mark below stays one or two texels (see `setPx`), and it is
+ * what makes the furnace, the maw and the horn rings hold together at the size the ladder asks for.
+ */
+const DE_S = 1.11;
+const DE_ASW = 60, DE_ASH = 72;                     // the scratch the BODY is authored in
+const DE_ADX = 13, DE_ADY = 3, DE_AW = DE_ASW + 26, DE_AH = DE_ASH + 5;
+const DE_SW = R(DE_ASW, DE_S), DE_SH = R(DE_ASH, DE_S);
+const DE_DX = R(DE_ADX, DE_S), DE_DY = R(DE_ADY, DE_S);
+const DE_W = R(DE_AW, DE_S), DE_H = R(DE_AH, DE_S);
+const DE_PIV = { x: R(30 + DE_ADX, DE_S), y: R(72 + DE_ADY, DE_S) };
 const SKIN = 'ABCDOP', KERA = 'GHIQ', WING = 'JKL';
 const TOOTH = 'V';
 /** The sole row: fills stop here so the ink lands on DE_SH - 1 and the contact shadow under it. */
-const DE_SOLE = 70;
+const DE_SOLE = 70;   // authored
 
 /**
  * Seat a pose in its cell. THE WINGS ARE DRAWN IN CELL SPACE, not in the body's scratch: a wing
@@ -991,7 +1072,7 @@ const DL = (p, x0, y0, x1, y1, r0, r1, keys, bias = 0) =>
 function gapBlit(p, q, r = 1) {
   for (let y = 0; y < q.h; y++) for (let x = 0; x < q.w; x++) {
     if (!q.d[y * q.w + x]) continue;
-    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) setPx(p, x + dx, y + dy, 0);
+    for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) putPx(p, x + dx, y + dy, 0);
   }
   return blit(p, q, 0, 0);
 }
@@ -1009,7 +1090,7 @@ function ridges(p, pts, key, every = 3) {
       const h = 3.4 * (1 - 0.62 * (i / Math.max(1, pts.length - 1)));
       for (let k = -h; k <= h; k += 0.5) {
         const px = Math.round(cx - uy * k), py = Math.round(cy + ux * k);
-        if (getPx(p, px, py)) setPx(p, px, py, key);
+        if (atPx(p, px, py)) setPx(p, px, py, key);
       }
     }
   }
@@ -1062,7 +1143,7 @@ function rimLight(p, keys) {
     // drawing round it.
     const top = ks.length - 1;
     const lift = (up && lf && i >= 1) ? top - i : i >= 3 ? 2 : 1;
-    setPx(p, x, y, ks[Math.min(top, i + lift)]);
+    putPx(p, x, y, ks[Math.min(top, i + lift)]);   // a real-grid pass: never the authored-space dab
   }
   return p;
 }
@@ -1074,7 +1155,7 @@ function litRidge(p, keys, key) {
   const at = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : snap[y * p.w + x]);
   for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
     if (!set.has(snap[y * p.w + x])) continue;
-    if (!at(x - 1, y) || !at(x, y - 1)) setPx(p, x, y, key);
+    if (!at(x - 1, y) || !at(x, y - 1)) putPx(p, x, y, key);   // real grid, not authored space
   }
 }
 
@@ -1111,7 +1192,7 @@ function demonHorn(p, x, y, dir, k = 1, arc = 6) {
  * amber studs ringed in black, which at gameplay distance read as measles.
  */
 function furnace(p, cx, cy, glow) {
-  const put = (x, y, k) => { if (getPx(p, x, y)) setPx(p, x, y, k); };
+  const put = (x, y, k) => { if (atPx(p, x, y)) setPx(p, x, y, k); };
   // 1. THE BURN. The hide around the split is charred back into a soft patch, so the fissure sits
   //    in its own shadow. Without it the glow is a decal stuck on a flat chest.
   for (let dy = -10; dy <= 12; dy++) {
@@ -1135,7 +1216,7 @@ function furnace(p, cx, cy, glow) {
   for (let i = 0; i < prof.length; i++) {
     const y = cy - 8 + i, hw = prof[i], jx = cx + jit[i];
     for (let dx = -hw; dx <= hw; dx++) {
-      if (!getPx(p, jx + dx, y)) continue;
+      if (!atPx(p, jx + dx, y)) continue;
       const a = Math.abs(dx);
       const hot = a <= Math.max(0, hw - 2) && glow > 0.25;
       setPx(p, jx + dx, y, a >= hw ? 'N' : hot ? 'M' : 'S');
@@ -1144,7 +1225,7 @@ function furnace(p, cx, cy, glow) {
   // 4. THE SPILL: firelight running DOWN the belly out of the open chest, dimming as it goes.
   const drop = Math.round(3 + glow * 4);
   for (let y = cy + 7; y < cy + 7 + drop; y++) for (let x = cx - 2; x <= cx + 2; x++) {
-    if (!getPx(p, x, y)) continue;
+    if (!atPx(p, x, y)) continue;
     const t = (y - cy - 7) / drop;
     if (Math.abs(x - cx) <= 1.6 - t) setPx(p, x, y, t < 0.4 && glow > 0.5 ? 'S' : 'N');
   }
@@ -1218,7 +1299,7 @@ function castShadow(p, cx, cy, rx, ry, keys, n = 2) {
       const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry;
       const q = dx * dx + dy * dy;
       if (q > 1) continue;
-      const i = idx.get(getPx(p, x, y));
+      const i = idx.get(atPx(p, x, y));
       if (i === undefined) continue;
       setPx(p, x, y, ks[Math.max(0, i - (q > 0.55 ? n - 1 : n))]);
     }
@@ -1278,31 +1359,31 @@ function demonFace(p, cx, hy, glow, { half = false, dir = 1, w = 6 } = {}) {
   const eyes = half ? [cx - dir * 2] : [cx - 5, cx + 2];
   // TWO ROWS of brow shadow, not one: an eye only looks sunk when something overhangs it
   for (let x = cx - 8; x <= cx + 8; x++) for (let y = -2; y <= -1; y++) {
-    if (getPx(p, x, hy + y)) setPx(p, x, hy + y, y === -2 ? 'A' : 'N');
+    if (atPx(p, x, hy + y)) setPx(p, x, hy + y, y === -2 ? 'A' : 'N');
   }
   // the eyes are 2x2 EMBERS in a 4x4 pit, because one lit pixel is not a face at any distance
   for (const ex of eyes) {
-    for (let x = -1; x <= 2; x++) for (let y = -1; y <= 2; y++) if (getPx(p, ex + x, hy + y)) setPx(p, ex + x, hy + y, 'N');
+    for (let x = -1; x <= 2; x++) for (let y = -1; y <= 2; y++) if (atPx(p, ex + x, hy + y)) setPx(p, ex + x, hy + y, 'N');
     for (let x = 0; x <= 1; x++) for (let y = 0; y <= 1; y++) {
-      if (getPx(p, ex + x, hy + y)) setPx(p, ex + x, hy + y, glow > 0.3 && y === 0 ? 'M' : 'S');
+      if (atPx(p, ex + x, hy + y)) setPx(p, ex + x, hy + y, glow > 0.3 && y === 0 ? 'M' : 'S');
     }
   }
   // the nasal ridge between them, and the cheek hollows that narrow the skull toward the jaw
-  if (!half) for (let y = -1; y <= 2; y++) if (getPx(p, cx - 1, hy + y)) setPx(p, cx - 1, hy + y, 'C');
-  for (const sx of [cx - 7, cx + 6]) for (let y = 2; y <= 3; y++) if (getPx(p, sx, hy + y)) setPx(p, sx, hy + y, 'A');
+  if (!half) for (let y = -1; y <= 2; y++) if (atPx(p, cx - 1, hy + y)) setPx(p, cx - 1, hy + y, 'C');
+  for (const sx of [cx - 7, cx + 6]) for (let y = 2; y <= 3; y++) if (atPx(p, sx, hy + y)) setPx(p, sx, hy + y, 'A');
   // THE MAW: a two-row ink slot the width of the skull with fangs standing in it. A full grid of
   // even teeth at this size reads as a zip fastener; four interlocking fangs read as a mouth.
   const my = hy + 5;
-  for (let x = cx - w; x <= cx + w; x++) for (let y = 0; y <= 1; y++) if (getPx(p, x, my + y)) setPx(p, x, my + y, '#');
+  for (let x = cx - w; x <= cx + w; x++) for (let y = 0; y <= 1; y++) if (atPx(p, x, my + y)) setPx(p, x, my + y, '#');
   // FOUR fangs, interlocking: two corner tusks biting UP out of the lower jaw and two hanging down
   // between them. An even comb of teeth every third pixel is a zip fastener at gameplay distance.
   for (const fx of [cx - w + 1, cx + w - 1]) {
-    if (getPx(p, fx, my + 1)) setPx(p, fx, my + 1, TOOTH);
-    if (getPx(p, fx, my)) setPx(p, fx, my, 'Q');
+    if (atPx(p, fx, my + 1)) setPx(p, fx, my + 1, TOOTH);
+    if (atPx(p, fx, my)) setPx(p, fx, my, 'Q');
   }
   for (const fx of [cx - Math.round(w * 0.35), cx + Math.round(w * 0.35)]) {
-    if (getPx(p, fx, my)) setPx(p, fx, my, TOOTH);
-    if (getPx(p, fx, my + 1)) setPx(p, fx, my + 1, 'Q');
+    if (atPx(p, fx, my)) setPx(p, fx, my, TOOTH);
+    if (atPx(p, fx, my + 1)) setPx(p, fx, my + 1, 'Q');
   }
 }
 
@@ -1312,9 +1393,10 @@ function demonFace(p, cx, hy, glow, { half = false, dir = 1, w = 6 } = {}) {
  * @param {{bob?:number, wing?:number, stride?:number, ring?:number, glow?:number, crouch?:number, reach?:number}} o
  */
 function demonFrame(f, o = {}) {
+  setDrawScale(DE_S);
   const p = makePix(DE_SW, DE_SH);                       // the BODY, in its own tight scratch
   const back = makePix(DE_W, DE_H), front = makePix(DE_W, DE_H);   // the WINGS, in cell space
-  const WX = DE_DX, WY = DE_DY;                          // body coords -> cell coords
+  const WX = DE_ADX, WY = DE_ADY;                        // body coords -> cell coords (both authored)
   const b = o.bob || 0, k = o.wing ?? 0.12, s = o.stride || 0, c = o.crouch || 0;
   const glow = o.glow ?? 0.5, reach = o.reach || 0;
   const lLift = Math.max(0, s) * 3, rLift = Math.max(0, -s) * 3;
@@ -1427,7 +1509,7 @@ function demonFrame(f, o = {}) {
   DM(p, 44, 27 + b, 5.6, 4.8, SKIN, { n: 2.2, bias: -0.16 });
   // the spine: a run of short ridges, each lit on its own top-left, down the middle of the back
   for (let y = 24; y < 48; y += 3) {
-    if (!getPx(p, 30, y + b)) continue;
+    if (!atPx(p, 30, y + b)) continue;
     setPx(p, 29, y + b, 'N'); setPx(p, 30, y + b, 'D'); setPx(p, 31, y + b, 'B');
     setPx(p, 30, y + 1 + b, 'N');
   }
@@ -1474,7 +1556,7 @@ function demonAnims(f) {
   const hurt = { frames: [flash(recoil), recoil], durations: [80, 190], loop: false };
   const d0 = mk({ wing: 0.6, glow: 0.9, bob: -1 });
   const d1 = mk({ wing: 0.15, glow: 0.35, crouch: 3, bob: 2 });
-  const d2 = squashTo(tilt(mk({ wing: 0.05, glow: 0.15, crouch: 4, bob: 3 }), 0.3, 30, DE_SOLE), 0.72, DE_H - 4);
+  const d2 = squashTo(tilt(mk({ wing: 0.05, glow: 0.15, crouch: 4, bob: 3 }), 0.3, R(30, DE_S), R(DE_SOLE, DE_S)), 0.72, DE_H - 4);
   const death = {
     frames: [d0, d1, d2, squashTo(d2, 0.58, DE_H - 4), squashTo(d2, 0.42, DE_H - 4)],
     durations: [140, 180, 210, 460, 900], loop: false,
@@ -1514,4 +1596,4 @@ export const BOSS_SPRITES = {
   'dragon': build('dragon', buildDragon),
 };
 
-export { mass, limb, curve, crest, wingFan, tone, clips, flash, squashTo, tilt };
+export { mass, limb, curve, crest, wingFan, tone, clips, flash, squashTo, tilt, stamp };
