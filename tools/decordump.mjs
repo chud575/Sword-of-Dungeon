@@ -52,8 +52,9 @@ export function decorDump(lv) {
     }
     grid.push(row);
   }
-  // decor last so it wins the tile; a blocking piece is shown in [brackets] by the stats line
-  for (const d of lv.decor) {
+  // decor last so it wins the tile, and a standing prop wins over the decal it stands on
+  const order = { decal: 0, wall: 1, prop: 2 };
+  for (const d of [...lv.decor].sort((a, b) => order[DECOR_TYPES[a.type].cls] - order[DECOR_TYPES[b.type].cls])) {
     const cls = DECOR_TYPES[d.type].cls;
     const g = DECOR_GLYPH[d.type] || (cls === 'wall' ? '"' : '?');
     grid[d.y][d.x] = cls === 'wall' ? '"' : g;
