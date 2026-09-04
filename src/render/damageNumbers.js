@@ -222,6 +222,10 @@ export class DamageNumbers {
     const u = s.userData;
     u.t = 0;
     u.big = st.big;
+    // A pickup banner is deliberately placed high above the hero's head, so it does not need the
+    // keep-off-the-hero push that combat numbers do — that push slides a wide label sideways and
+    // the announcement stops reading as "this happened to ME".
+    u.overHero = !!o.overHero;
     u.life = o.life ?? (st.big ? LIFE_BIG : LIFE);
     u.texW = mask.w + PAD * 2; u.texH = GH + PAD * 2;
     const base = o.y ?? 0.95;
@@ -308,7 +312,8 @@ export class DamageNumbers {
       u.dx = dx; u.dy = dy;
       const a = this._rect(s);
       if (!a) return;
-      let clash = hero ? !!DamageNumbers._hit(a, hero, 2, 2) : false;
+      // An `overHero` banner is placed high on purpose: it may sit in the hero's column.
+      let clash = (hero && !u.overHero) ? !!DamageNumbers._hit(a, hero, 2, 2) : false;
       if (!clash) {
         for (const o of this.active) {
           if (o === s) continue;
@@ -345,7 +350,7 @@ export class DamageNumbers {
         if (!a) continue;
         let px = 0, py = 0;
         // the hero is immovable: a number never wins a fight with the sprite that owns the frame
-        const H = hero && DamageNumbers._hit(a, hero, 2, 2);
+        const H = (hero && !u.overHero) && DamageNumbers._hit(a, hero, 2, 2);
         if (H) {
           if (H.ox < H.oy) px = a.cx >= hero.cx ? H.ox : -H.ox;
           else py = a.cy >= hero.cy ? H.oy : -H.oy;

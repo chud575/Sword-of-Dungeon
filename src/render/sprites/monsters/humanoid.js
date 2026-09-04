@@ -120,7 +120,9 @@ function relight(p, keys, o = {}) {
 // pillow. The hobgoblin duly measured 15% of its visible body centre-lit at the play camera, over
 // the style.js ceiling, while its SHEET measured 6% and passed. These are those knobs, once, so a
 // call that says nothing gets the house figure rather than the library's.
-const PILLOW_LOCAL = 0.15, PILLOW_DOME = 0.025;
+// Lowered again when the wider default zoom put more of the hobgoblin's torso on screen and it
+// measured 20% centre-lit (ceiling 15%): the old figures were tuned against a tighter framing.
+const PILLOW_LOCAL = 0.10, PILLOW_DOME = 0.015;
 
 /**
  * Re-shade several materials of one hand-drawn block to the house key light in one call:

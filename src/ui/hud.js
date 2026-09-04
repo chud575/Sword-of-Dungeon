@@ -227,6 +227,10 @@ export class Hud {
     if (p.enchant > 0) chips.push(['enchant', `Weapon +${p.enchant}`, 'var(--combat)', '+1 damage per enchantment', false, 'enchant']);
     if (p.maps.length) chips.push(['maps', `Maps ${p.maps.join(', ')}`, 'var(--magic)', 'Those levels will be lit on entry', false, 'maps']);
     if (g.playerOnTemple()) chips.push(['temple', 'Sanctuary', 'var(--loot)', 'Monsters ignore you; healing doubled', false, 'temple']);
+    // One turn is one exchange: your blow and the monster's answer together. Rounds land every
+    // 250ms, far too fast for floating text, so the count lives here where it stays readable.
+    const cb = g.state && g.state.combat;
+    if (cb && cb.rounds > 0) chips.push(['turn', `Turn ${cb.rounds}`, 'var(--combat)', 'One turn is your blow and the monster\'s answer together', false, 'skill']);
     const key = chips.map((c) => c[0] + c[1] + (c[4] ? 'o' : '')).join('|');
     if (key === this.statusKey) return;
     this.statusKey = key;

@@ -25,9 +25,10 @@ const BASE_YAW = 0;
 // Orthographic: apparent size is set purely by how much world the frustum covers, independent of
 // distance, so one world unit is the same number of screen pixels everywhere in the frame. That is
 // what makes an exact pixel grid possible - see viewHeightFor().
-// Chosen so the viewport height divides into a whole number of sprite texels: at a 900px buffer
-// this lands on 3 device pixels per texel, which is the size the cast is drawn to read at.
-const BASE_TILES_TALL = 9.4; // world tiles visible top-to-bottom at zoom 1
+// Chosen so the viewport height divides into a whole number of sprite texels. At a 900px buffer
+// this lands on 2 device pixels per texel: the wider, zoomed-out view the game opens on, which
+// shows enough of the room around you to plan a route. Zooming in steps to 3 and beyond.
+const BASE_TILES_TALL = 14.0; // world tiles visible top-to-bottom at zoom 1
 /** Zoom stops: each wheel notch moves to the neighbouring stop. */
 export const ZOOM_STOPS = [0.72, 0.85, 1, 1.18, 1.4];
 const DEAD_ZONE = { x: 0.42, z: 0.32 }; // half extents, tiles

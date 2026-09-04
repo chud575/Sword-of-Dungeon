@@ -43,7 +43,7 @@ export function createGameState({ seed, difficulty = 'standard' }) {
     deepest: 1,
     quest: createQuestState(seed, balance),
     combat: null,
-    stats: { kills: 0, steps: 0, treasures: 0, goldFound: 0, goldSacrificed: 0, levelsVisited: 0, trapsSprung: 0, timeline: [] },
+    stats: { kills: 0, steps: 0, combatTurns: 0, treasures: 0, goldFound: 0, goldSacrificed: 0, levelsVisited: 0, trapsSprung: 0, timeline: [] },
     log: [],
     player: null,
     nextId: 1,

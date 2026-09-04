@@ -8,6 +8,7 @@ import { createRng } from '../core/rng.js';
 import { COLORS } from '../core/constants.js';
 import { ParticlePool } from './particles.js';
 import { DamageNumbers } from './damageNumbers.js';
+import { ITEM_TABLE, SPELL_TABLE } from '../game/items.js';
 import { attachFog, glowTexture, splatTexture, runeCircleTexture } from './propFx.js';
 import { updateProps, getPropFactory } from './props.js';
 
@@ -182,7 +183,7 @@ export class Effects {
     on('entity:died', (p) => { const v = this.resolve(p.entity); this.deathPuff(v.x, v.z, p.entity); });
     on('spell:cast', (p) => this.onSpell(p));
     on('fx:teleport', (p) => this.teleport(p.from, p.to));
-    on('fx:levelup', (p) => this.levelUp(p.x, p.y));
+    on('fx:levelup', (p) => this.levelUp(p.x, p.y)); // levelUp() already shouts LEVEL UP!
     on('fx:explosion', (p) => this.explosion(p.x, p.y));
     on('fx:fall', (p) => { this.dust(p.x, p.y, 40); this.rings.play({ x: p.x, z: p.y, color: 0x8a7a68, dur: 0.5, intensity: 0.5, fn: (m, k) => { m.scale.setScalar(0.3 + k * 1.6); m.material.opacity = 0.6 * (1 - k); } }); });
     on('fx:ceiling', (p) => { this.dust(p.x, p.y, 70); this.matter.emit({ x: p.x, y: 2.5, z: p.y, count: 30, color: [0x6a6058, 0x4a4038], speed: 0.6, up: -0.5, life: 1.2, size: 0.09, gravity: -6, drag: 0.5, radius: 0.3, bounce: 0.2 }, this.rng); this.shakeRequest += 0.7; this.flash.color.set(0.6, 0.6, 0.6); this.flash.amount = 0.5; });
@@ -191,9 +192,9 @@ export class Effects {
     on('fx:sword-stolen', (p) => { this.burst(p.x, p.y, { color: [0x2a1040, 0x7a3ad0], count: 60, speed: 2.5, up: 2, life: 1.0, size: 0.14, y: 0.6 }); this.rings.play({ x: p.x, z: p.y, color: 0x7a3ad0, dur: 0.6, fn: (m, k) => { m.scale.setScalar(2.2 * (1 - easeOut(k)) + 0.2); m.material.opacity = 0.9 * k; } }); this.shakeRequest += 0.5; this.flash.color.set(0.3, 0, 0.5); this.flash.amount = 0.6; this.lights.pulse({ x: p.x, z: p.y, color: 0x7a3ad0, intensity: 14, dur: 0.6 }); });
     on('fx:mage', (p) => { this.castCore(p.x, p.y, 0x7fd4ff, 1.2); this.burst(p.x, p.y, { color: [0x7fd4ff, 0xffffff], count: 60, speed: 2, up: 3, life: 1.2, size: 0.12, y: 0.5, gravity: -0.5, kind: 2 }); });
     on('fx:demon', (p) => { this.burst(p.x, p.y, { color: [0xff3a2a, 0x3a0000], count: 80, speed: 2.5, up: 2, life: 1.2, size: 0.14, y: 0.5 }); this.matter.emit({ x: p.x, y: 0.4, z: p.y, count: 40, color: [0x1a0a0a, 0x3a1010], speed: 1.2, up: 1.8, life: 1.8, size: 0.28, gravity: 0.2, drag: 1, radius: 0.3, kind: 3 }, this.rng); this.flashes.play({ x: p.x, y: 0.7, z: p.y, color: 0xff3a2a, size0: 0.5, size1: 3, dur: 0.4 }); this.lights.pulse({ x: p.x, z: p.y, color: 0xff3a2a, intensity: 16, dur: 0.6 }); this.shakeRequest += 0.7; this.flash.color.set(0.5, 0, 0); this.flash.amount = 0.7; });
-    on('sword:found', (p) => this.swordFound(p.x, p.y));
+    on('sword:found', (p) => { this.swordFound(p.x, p.y); this.numbers.spawn(p.x, p.y, 'THE SWORD OF FARGOAL!', { style: 'banner', y: 1.8, life: 3.0, overHero: true }); });
     on('item:picked', (p) => this.onPicked(p));
-    on('temple:sacrifice', () => { const v = this.playerPos; this.burst(v.x, v.z, { color: [0xffd866, 0xbfe6ff], count: 80, speed: 0.8, up: 3, life: 1.6, size: 0.1, gravity: 0.6, drag: 0.5, kind: 2 }); this.pillar(v.x, v.z, 0xbfe6ff, 1.6, 0.3); this.lights.pulse({ x: v.x, z: v.z, color: 0xbfe6ff, intensity: 10, dur: 0.8 }); });
+    on('temple:sacrifice', (p) => { const v = this.playerPos; this.numbers.spawn(v.x, v.z, `SACRIFICED ${p?.gold ?? ''} GOLD`.replace('  ', ' '), { style: 'banner', y: 1.8, life: 2.2, overHero: true }); if (p?.xp) this.numbers.spawn(v.x, v.z, `+${p.xp} XP`, { style: 'magic', y: 0.8, life: 2.0 }); this.burst(v.x, v.z, { color: [0xffd866, 0xbfe6ff], count: 80, speed: 0.8, up: 3, life: 1.6, size: 0.1, gravity: 0.6, drag: 0.5, kind: 2 }); this.pillar(v.x, v.z, 0xbfe6ff, 1.6, 0.3); this.lights.pulse({ x: v.x, z: v.z, color: 0xbfe6ff, intensity: 10, dur: 0.8 }); });
     on('trap:triggered', (p) => { if (p.type === 'teleport') { this.castCore(p.x, p.y, 0x4ee1ff, 0.9); this.burst(p.x, p.y, { color: [0x4ee1ff, 0xffffff], count: 40, speed: 2, up: 2, life: 0.7, size: 0.1 }); } });
     on('monster:stole', (p) => { const v = this.resolve(p.entity); this.coinFountain(v.x, v.z, 14); this.numbers.spawn(v.x, v.z, `-${p.gold} gold`, { style: 'gold' }); });
     on('player:hp', (p) => { if (p.delta > 0 && p.source !== 'regen' && p.delta >= 5) { const v = this.playerPos; this.numbers.spawn(v.x, v.z, `+${p.delta}`, { style: 'heal' }); this.burst(v.x, v.z, { color: [0x69db7c, 0xd0ffd8], count: 30, speed: 0.6, up: 2, life: 1.2, size: 0.08, gravity: 0.3, drag: 0.8, y: 0.3, kind: 2 }); this.flashes.play({ x: v.x, y: 0.5, z: v.z, color: 0x69db7c, size0: 0.4, size1: 1.4, dur: 0.35, intensity: 1 }); } });
@@ -497,12 +498,26 @@ export class Effects {
     this.flash.color.set(1, 0.8, 0.4); this.flash.amount = Math.max(this.flash.amount, 0.18);
   }
 
+  /** What to shout above the hero when a pickup lands. The log records it too, but a message at the
+   *  player's own feet is what actually reads mid-run. */
+  pickupLabel(item) {
+    if (item.type === 'gold') return item.gold ? `+${item.gold} GOLD` : 'GOLD';
+    const spell = SPELL_TABLE[item.type];
+    if (spell) return `${spell.name.toUpperCase()} SPELL`;
+    const it = ITEM_TABLE[item.type];
+    if (it) return it.name.toUpperCase();
+    if (item.type === 'beacon') return 'BEACON';
+    return String(item.type || 'ITEM').replace(/[-_]/g, ' ').toUpperCase();
+  }
+
   onPicked({ item, entity }) {
     if (!item) return;
     const x = item.x ?? entity.x, z = item.y ?? entity.y;
-    if (item.type === 'gold') { this.coinFountain(x, z, item.gold || 20); if (item.gold) this.numbers.spawn(x, z, `+${item.gold} gold`, { style: 'gold', y: 0.85, life: 2.0 }); }
+    if (item.type === 'gold') { this.coinFountain(x, z, item.gold || 20); if (item.gold) this.numbers.spawn(x, z, `+${item.gold} GOLD`, { style: 'gold', y: 1.7, life: 2.0, overHero: true }); }
     else if (item.type === 'sword') return;
     else {
+      // Name it out loud: particles alone do not say WHAT was picked up.
+      this.numbers.spawn(x, z, this.pickupLabel(item), { style: SPELL_TABLE[item.type] ? 'magic' : 'banner', y: 1.7, life: 2.2, overHero: true });
       const col = COLORS.spells[item.type] ? new THREE.Color(COLORS.spells[item.type]).getHex() : item.type === 'potion' ? 0xff5a48 : 0x9fd0ff;
       this.burst(x, z, { color: [0xffffff, col], count: 34, speed: 0.8, up: 2.2, life: 0.9, size: 0.08, y: 0.3, gravity: -0.5, kind: 2 });
       this.flashes.play({ x, y: 0.4, z, color: col, size0: 0.3, size1: 1.3, dur: 0.3, intensity: 1.3 });

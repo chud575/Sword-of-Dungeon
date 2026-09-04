@@ -108,6 +108,9 @@ export function monsterHits(game, monster, { damage, crit, glancing }, { fromSid
  */
 export function resolveRound(game, monster, { playerFirst = true } = {}) {
   const p = game.player, depth = Math.max(1, game.level.depth), rng = game.rngs.combat;
+  // One turn is one exchange: your blow and the monster's answer together, not each swing.
+  if (game.stats) game.stats.combatTurns = (game.stats.combatTurns || 0) + 1;
+  game.emit('combat:turn', { entity: monster, turn: game.state.combat ? game.state.combat.rounds : 1, total: game.stats ? game.stats.combatTurns : 0 });
   const result = { playerDamage: 0, monsterDamage: 0, killed: false, playerDead: false };
   makeNoise(game.level, p.x, p.y, AI.combatNoise, game.state.time, 'combat');
   const order = playerFirst ? ['p', 'm'] : ['m', 'p'];
