@@ -7,6 +7,7 @@ import { addHallOfFameEntry, getHallOfFame } from '../core/save.js';
 import { drawSheet, packSheet } from '../render/sprites/spriteSheet.js';
 import { MONSTER_SPRITES } from '../render/sprites/monsters/index.js';
 import { FURNITURE_TYPES, furnitureVariants } from '../render/props/furniture.js';
+import { DRESSING_TYPES, dressingClass, dressingVariants } from '../render/props/dressing.js';
 
 /** Walkable tiles adjacent to (x,y) (8-way), nearest-first order as given by DIRS8. */
 function neighbours(level, x, y, { empty = true } = {}) {
@@ -1341,6 +1342,129 @@ export const scenarios = {
       if (o) ctx.renderer.dungeon.addAt(o, x, y);
     }
     ctx.step(600);
+  },
+
+  /**
+   * THE DRESSING PLATE: every scatter prop, every floor decal and every wall piece `props.decor()`
+   * can build, in its three geometries, named.
+   *
+   * The three classes are photographed together on purpose — they are drawn in three different
+   * projections and the whole risk of this feature is that they stop agreeing: a decal drawn in the
+   * sprites' `SQUASH` instead of in plan reads as a sticker on the floor, and a wall piece drawn in
+   * plan reads as a decal that has fallen over. Standing props are on the top band, decals on the
+   * middle one and the wall pieces hang on the masonry strip between them.
+   */
+  async 'dressing'(ctx) {
+    const g = ctx.reset();
+    const props = DRESSING_TYPES.filter((t) => dressingClass(t) === 'prop');
+    const decals = DRESSING_TYPES.filter((t) => dressingClass(t) === 'decal');
+    const walls = DRESSING_TYPES.filter((t) => dressingClass(t) === 'wall');
+    const cols = 9, gap = 3;
+    const W = cols * gap + 3, depth = 3;
+    const rowsP = Math.ceil(props.length / cols), rowsW = Math.ceil(walls.length / cols), rowsD = Math.ceil(decals.length / cols);
+    const yProps = 2, yWall = yProps + rowsP * gap, yDecals = yWall + rowsW * gap + 1;
+    const H = yDecals + rowsD * gap + 2;
+    const lv = bestiaryHall(g, W, H, depth, { dress: false });
+    // two tiles of masonry behind each hanging row, so a piece that rises past the wall's top edge
+    // lands on stone (as it does in a real room) instead of on a lit floor tile
+    for (let r = 0; r < rowsW; r++) for (let x = 1; x < W - 1; x++) { lv.set(x, yWall + r * gap, TILE.WALL); lv.set(x, yWall + r * gap - 1, TILE.WALL); }
+    g.enterLevel(depth, 'teleport', { arrival: { x: 1, y: H - 2 } });
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    platelight(ctx);
+    const placed = [];
+    const put = (t, x, y, v, facing) => {
+      const o = ctx.renderer.props.decor({ type: t, x, y, facing, variant: v, blocking: false });
+      if (!o) return;
+      if (o.userData.mountY !== undefined) o.position.set(x, 0, y + 0.5);   // the wall FACE, looking south
+      else o.position.set(x, 0, y);
+      ctx.renderer.dungeon.root.add(o);
+      if (o.userData.anim) ctx.renderer.dungeon.animated.push(o);
+      placed.push({ label: t, x, y: y + (o.userData.mountY !== undefined ? 0.5 : 0) });
+    };
+    props.forEach((t, i) => put(t, 2 + (i % cols) * gap, yProps + Math.floor(i / cols) * gap, 0, 's'));
+    walls.forEach((t, i) => put(t, 2 + (i % cols) * gap, yWall + Math.floor(i / cols) * gap, 0, 's'));
+    decals.forEach((t, i) => put(t, 2 + (i % cols) * gap, yDecals + Math.floor(i / cols) * gap, 0, 's'));
+    ctx.renderer.cameraRig.setOverview((W - 1) / 2, (H - 1) / 2, W + 1, H + 1, { elevation: 62 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed, { font: 12, dy: 16 });
+  },
+
+  /**
+   * THE SAME PIECES AGED, left to right. `room.decay` indexes straight into `variant`, so a type
+   * whose variants run the wrong way makes the deepest crypt the tidiest room on the level.
+   */
+  async 'dressing-decay'(ctx) {
+    const g = ctx.reset();
+    const rows = ['candlestick', 'skull', 'bottles', 'mushroomCluster', 'banner', 'cobweb', 'sconce', 'puddle', 'rug', 'bloodstain'];
+    const gap = 3, W = 4 * gap + 5, H = rows.length * gap + 4, depth = 3;
+    const lv = bestiaryHall(g, W, H, depth, { dress: false });
+    g.enterLevel(depth, 'teleport', { arrival: { x: 1, y: H - 2 } });
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    platelight(ctx);
+    const placed = [];
+    rows.forEach((t, r) => {
+      for (let v = 0; v < dressingVariants(t); v++) {
+        const x = 3 + v * gap, y = 2 + r * gap;
+        const o = ctx.renderer.props.decor({ type: t, x, y, facing: 's', variant: v, blocking: false });
+        if (!o) continue;
+        o.position.set(x, 0, y);
+        ctx.renderer.dungeon.root.add(o);
+        placed.push({ label: `${t} v${v}`, x, y });
+      }
+    });
+    ctx.renderer.cameraRig.setOverview((W - 1) / 2, (H - 1) / 2, W + 1, H + 1, { elevation: 62 });
+    ctx.renderer.cameraRig.snap();
+    ctx.step(600);
+    nameplates(ctx, placed, { font: 12, dy: 16 });
+  },
+
+  /**
+   * A CRYPT AT THE PLAY CAMERA, furnished AND dressed, with the hero standing in it — the only shot
+   * that answers the question the player actually asks. The furniture says what the room is; the
+   * dressing says somebody was here and did not leave; the mood (`cold`) says how long ago.
+   */
+  async 'dressed-crypt'(ctx) {
+    const g = ctx.reset();
+    const W = 13, H = 11, depth = 14;
+    const lv = bestiaryHall(g, W, H, depth, { dress: false });
+    lv.rooms[0].archetype = 'crypt'; lv.rooms[0].lightMood = 'cold'; lv.rooms[0].decay = 0.7;
+    const decor = [
+      { type: 'sarcophagus', x: 3, y: 1, facing: 's', variant: 2, blocking: false },
+      { type: 'sarcophagus', x: 8, y: 1, facing: 's', variant: 0, blocking: false },
+      { type: 'tombSlab', x: 2, y: 5, facing: 'e', variant: 1, blocking: false },
+      { type: 'tombSlab', x: 10, y: 5, facing: 'w', variant: 1, blocking: false },
+      { type: 'urn', x: 1, y: 1, facing: 's', variant: 2, blocking: false },
+      { type: 'candlestick', x: 11, y: 1, facing: 's', variant: 0, blocking: false },
+      { type: 'candlestick', x: 5, y: 8, facing: 's', variant: 1, blocking: false },
+      { type: 'skullPile', x: 1, y: 8, facing: 's', variant: 1, blocking: false },
+      { type: 'skull', x: 4, y: 4, facing: 's', variant: 1, blocking: false },
+      { type: 'rat', x: 9, y: 7, facing: 'w', variant: 0, blocking: false },
+      { type: 'bones', x: 3, y: 2, facing: 's', variant: 2, blocking: false },
+      { type: 'bones', x: 9, y: 6, facing: 's', variant: 3, blocking: false },
+      { type: 'crackedFlags', x: 6, y: 5, facing: 's', variant: 1, blocking: false },
+      { type: 'scree', x: 2, y: 2, facing: 's', variant: 3, blocking: false },
+      { type: 'rime', x: 8, y: 2, facing: 's', variant: 0, blocking: false },
+      { type: 'bloodstain', x: 10, y: 8, facing: 's', variant: 2, blocking: false },
+      { type: 'skullNiche', x: 2, y: 0, facing: 's', variant: 0, blocking: false },
+      { type: 'skullNiche', x: 10, y: 0, facing: 's', variant: 1, blocking: false },
+      { type: 'plaque', x: 6, y: 0, facing: 's', variant: 1, blocking: false },
+      { type: 'cobweb', x: 1, y: 0, facing: 's', variant: 1, blocking: false },
+      { type: 'cobweb', x: 11, y: 0, facing: 's', variant: 0, blocking: false },
+      { type: 'ossuaryShelf', x: 4, y: 0, facing: 's', variant: 1, blocking: false },
+      { type: 'ossuaryShelf', x: 8, y: 0, facing: 's', variant: 0, blocking: false },
+      { type: 'wallCrack', x: 9, y: 0, facing: 's', variant: 1, blocking: false },
+    ];
+    lv.setDecor(decor);
+    g.enterLevel(depth, 'teleport', { arrival: { x: 6, y: 7 } });
+    g.player.facing = { dx: 0, dy: -1 };
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.step(900);
   },
 };
 

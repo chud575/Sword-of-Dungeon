@@ -18,6 +18,9 @@ import { PX_PER_TILE, frameTexelSize, texelGrid } from './sprites/spriteBillboar
 // is being evaluated: furniture.js only declares painters and a registry at module scope, and this
 // file only calls `buildFurniture` from a method.
 import { buildFurniture, isFurniture, FURNITURE_TYPES } from './props/furniture.js';
+// ...and the same for the other half of the catalogue: the scatter, the floor decals and the wall
+// dressing that make a furnished room a lived-in one (docs/AMBIENCE.md §5.1-§5.3).
+import { buildDressing, isDressing, DRESSING_TYPES } from './props/dressing.js';
 
 const geoCache = new Map();
 function geo(key, make) { let g = geoCache.get(key); if (!g) { g = make(); geoCache.set(key, g); } return g; }
@@ -715,7 +718,7 @@ const bookPal = (() => {
 // chest, which is exactly the fault the pickups above were rebuilt to fix. One projection, one
 // grid, one key light, for the loot and for the furniture it is standing on.
 export {
-  itemPalette, pixelSprite, floorDecal, contactShadow, onArt,
+  itemPalette, pixelSprite, pixelTexture, floorDecal, contactShadow, onArt,
   span, box, ell, topFace, frontFace, shift, model, step,
   SQUASH, ITEM_PIVOT_Y,
 };
@@ -1053,18 +1056,27 @@ export class PropFactory {
    *
    * An unknown `type` returns null rather than throwing: the contract (AMBIENCE §4.1) is that the
    * renderer DROPS ids it cannot draw, with one warning per level, and keeps the level playable.
-   * Half the catalogue (the floor decals and the wall-mounted pieces) is deliberately not here yet;
-   * a room dressed with a bookcase and a candelabra still reads as a study without them.
-   * @param {{type:string, variant?:number, facing?:'n'|'e'|'s'|'w', blocking?:boolean}} d
+   * The furniture comes from `props/furniture.js` and the scatter, floor decals and wall dressing
+   * from `props/dressing.js`; between them they cover the whole catalogue.
+   *
+   * A WALL-MOUNTED piece is returned already lifted to its `mountY` and nudged clear of the
+   * masonry, and carries `userData.mountY`: the caller places the group at the wall FACE
+   * (`x + dx*0.5, 0, y + dy*0.5`), the way `lighting.js` places a torch spot. A floor decal is
+   * marked `userData.floorDecal` only when it has no direction of its own, so DungeonView turns the
+   * bones with the slab and leaves the rug lying the way it was laid.
+   * @param {{type:string, x?:number, y?:number, variant?:number, facing?:'n'|'e'|'s'|'w', blocking?:boolean}} d
    * @returns {THREE.Group|null}
    */
   decor(d) {
-    if (!d || !isFurniture(d.type)) return null;
-    return buildFurniture(d.type, { variant: d.variant | 0, facing: d.facing || 's', blocking: !!d.blocking });
+    if (!d) return null;
+    const o = { variant: d.variant | 0, facing: d.facing || 's', blocking: !!d.blocking, x: d.x | 0, y: d.y | 0 };
+    if (isFurniture(d.type)) return buildFurniture(d.type, o);
+    if (isDressing(d.type)) return buildDressing(d.type, o);
+    return null;
   }
 
   /** Every decor id `decor()` can currently build. */
-  decorTypes() { return FURNITURE_TYPES.slice(); }
+  decorTypes() { return FURNITURE_TYPES.concat(DRESSING_TYPES); }
 
   // ------------------------------------------------------------------ dungeon dressing
   /** Placed beacon marker. */

@@ -151,6 +151,78 @@ export function patchFog(material, fog) {
 
 const TORCH_POOL = 5;
 const TEMPLE_POOL = 2;
+const MOOD_POOL = 4;
+
+/**
+ * THE ELEVEN LIGHT MOODS (docs/AMBIENCE.md §7) — the thing that turns dressing into ambience.
+ *
+ * `room.lightMood` is set by the generator and this table says what each mood DOES. It is deliberately
+ * built out of the vocabulary that was already here (wall-torch spots, flicker, the pooled point
+ * lights, the dust density) rather than a second lighting system beside it:
+ *
+ *  · `torches` — how many wall-torch spots the room is allowed. A crypt gets none; a guardroom two.
+ *  · `fill`    — a soft coloured point light following the player while he is IN a room of this
+ *                mood. THIS IS WHAT MAKES A ROOM FEEL COLD OR WARM, and it is the reason the moods
+ *                ADD light rather than subtract it: "under-lit and blue" drawn by turning the
+ *                ambient down is just a dark room, and it walks the cast straight through
+ *                `screenTruth.test.js`'s GROUND_LIT_MIN gate. Drawn as a blue fill it reads as cold
+ *                AND leaves the hero legible, which is the only version of it that ships.
+ *  · `ambient` — a gentle multiplier on the hemisphere/moon fill, clamped near 1 for the same reason.
+ *  · `dust`    — how much air the room carries (atmosphere.js reads this).
+ *
+ * The per-piece fires (a hearth, a forge, a brazier, a candle, a glowing bench) are separate: they
+ * are real point lights at the decor that carries them, from `DECOR_LIGHTS` below.
+ */
+export const LIGHT_MOODS = {
+  torchlit: { torches: 2, ambient: 1.00, fill: 0.00, color: 0xffa04a, dust: 1.0 },
+  hearth: { torches: 1, ambient: 1.06, fill: 0.55, color: 0xff8a3a, dust: 1.4 },
+  forge: { torches: 1, ambient: 1.08, fill: 0.75, color: 0xff6a20, dust: 1.6 },
+  candle: { torches: 0, ambient: 0.92, fill: 0.55, color: 0xffe0a8, dust: 0.8 },
+  ember: { torches: 0, ambient: 0.88, fill: 0.90, color: 0xc0442a, dust: 1.2 },
+  cold: { torches: 0, ambient: 0.94, fill: 1.05, color: 0x86aad4, dust: 0.7 },
+  dark: { torches: 0, ambient: 0.86, fill: 0.00, color: 0x000000, dust: 0.6 },
+  water: { torches: 1, ambient: 0.96, fill: 1.00, color: 0x9fd0e8, dust: 0.5 },
+  fungal: { torches: 0, ambient: 0.90, fill: 1.00, color: 0x7fe3a8, dust: 0.9 },
+  shrine: { torches: 0, ambient: 1.00, fill: 0.60, color: 0xdfe8ff, dust: 1.0 },
+  sword: { torches: 0, ambient: 0.92, fill: 0.90, color: 0xb08ad0, dust: 0.7 },
+};
+export const MOOD_KEYS = Object.keys(LIGHT_MOODS);
+const MOOD_INDEX = new Map(MOOD_KEYS.map((k, i) => [k, i]));
+
+/**
+ * The decor that is literally alight, and what it throws. `maxV`/`minV` gate on the piece's variant,
+ * because AMBIENCE §2.1 runs wear UP with the index: a brazier at v3 is cold and tipped over, and a
+ * cold brazier is not a lamp.
+ */
+const DECOR_LIGHTS = {
+  hearth: { color: 0xff8a3a, intensity: 5.5, radius: 6.0, y: 0.65, kind: 'fire', maxV: 1 },
+  forge: { color: 0xff6a20, intensity: 6.5, radius: 6.5, y: 0.55, kind: 'forge', maxV: 0 },
+  brazier: { color: 0xff7a2a, intensity: 4.2, radius: 5.2, y: 0.80, kind: 'fire', maxV: 1 },
+  candelabra: { color: 0xffe6b0, intensity: 2.4, radius: 3.4, y: 0.85, kind: 'candle', maxV: 1 },
+  candlestick: { color: 0xffe6b0, intensity: 1.6, radius: 2.6, y: 0.55, kind: 'candle', maxV: 1 },
+  alchemyBench: { color: 0x9fe07a, intensity: 1.5, radius: 2.8, y: 0.55, kind: 'sickly', maxV: 1 },
+  retortStand: { color: 0x9fe07a, intensity: 1.0, radius: 2.2, y: 0.5, kind: 'sickly', maxV: 1 },
+  cauldron: { color: 0x8fd07a, intensity: 1.0, radius: 2.2, y: 0.4, kind: 'sickly', maxV: 0 },
+  mushroomCluster: { color: 0x7fe3a8, intensity: 1.3, radius: 2.8, y: 0.22, kind: 'fungal', minV: 2 },
+  spill: { color: 0x7fe3a8, intensity: 0.8, radius: 2.0, y: 0.08, kind: 'fungal', maxV: 0 },
+};
+
+/**
+ * How each kind of small light behaves in 0..1-ish. A hearth breathes, a forge PULSES (the bellows
+ * at about 0.7 Hz), a candle barely moves, fungus swells and fades with no flicker at all, and
+ * reflected water light ripples on two beats that never line up.
+ */
+export function moodFlicker(kind, t, phase) {
+  switch (kind) {
+    case 'forge': return 0.78 + 0.34 * Math.max(0, Math.sin(t * 4.4 + phase)) ** 2 + 0.07 * Math.sin(t * 13.1 + phase);
+    case 'fire': return torchFlicker(t, phase) * 0.95;
+    case 'candle': return 0.86 + 0.10 * Math.sin(t * 6.3 + phase) + 0.05 * Math.sin(t * 2.1 + phase * 1.7);
+    case 'sickly': return 0.80 + 0.14 * Math.sin(t * 1.3 + phase) + 0.06 * Math.sin(t * 0.41 + phase * 2.3);
+    case 'fungal': return 0.70 + 0.30 * Math.sin(t * 0.55 + phase);
+    case 'water': return 0.78 + 0.22 * Math.sin(t * 1.9 + phase) * Math.sin(t * 0.71 + phase * 0.5);
+    default: return 1;
+  }
+}
 
 /**
  * Depth bands drive the whole look (DESIGN.md §9.3): ambient/sky colours, the fog "memory" tint,
@@ -185,6 +257,9 @@ export function depthTint(depth) {
     atmo: { shaft: c(0xb08ad0), shaftStrength: 0.08, dust: c(0xe6c8ff), dustDensity: 0.7 },
   };
 }
+
+/** Scratch colour for the mood crossfade (no per-frame allocation). */
+const _moodTarget = new THREE.Color();
 
 /** Layered, deterministic torch flicker (8 Hz body + 0.5 Hz drift + gusts) in 0..1. */
 export function torchFlicker(t, phase) {
@@ -239,6 +314,21 @@ export class Lighting {
       const l = new THREE.PointLight(0xbfe6ff, 0, 6, 1.7);
       scene.add(l); this.temples.push(l);
     }
+    // The per-room mood (AMBIENCE §7): a fixed pool for the fires standing in the rooms, plus one
+    // soft fill that follows the player and carries the colour of the room he is standing in.
+    this.moodLights = [];
+    for (let i = 0; i < MOOD_POOL; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 5, 2);
+      scene.add(l); this.moodLights.push(l);
+    }
+    /** every alight decor piece on the level: {x,y,z,color,intensity,radius,kind,phase} */
+    this.moodSources = [];
+    /** mood index per tile (-1 outside every room), and the blended state of the room we are in */
+    this.moodTiles = null; this.moodW = 0; this.moodH = 0;
+    this.mood = { ambient: 1, fill: 0, dust: 1, name: 'torchlit' };
+    this.moodColor = new THREE.Color(0xffffff);
+    /** what atmosphere.js multiplies its dust density by this frame */
+    this.dustScale = 1;
     /** wall torch positions for the current level: {x, y, z, nx, nz, tx, ty, phase} */
     this.torchSpots = [];
     this.templeSpots = [];
@@ -248,7 +338,7 @@ export class Lighting {
     this.depth = 1;
     this._near = []; // scratch for the per-frame nearest-spot sort
     /** live light list for the atmosphere shaders: [{x,y,z,r,g,b,i}] (fixed length, in place) */
-    this.activeLights = Array.from({ length: 1 + TORCH_POOL + TEMPLE_POOL }, () => ({ x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, i: 0 }));
+    this.activeLights = Array.from({ length: 2 + TORCH_POOL + TEMPLE_POOL + MOOD_POOL }, () => ({ x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, i: 0 }));
   }
 
   /** Nearest `n` spots to (x,z), reusing the scratch array (spots carry a transient `d`). */
@@ -267,6 +357,8 @@ export class Lighting {
     this.depth = level.depth;
     this.hemi.color.copy(tint.sky); this.hemi.groundColor.copy(tint.ground);
     this.moon.color.copy(tint.ambient);
+    // the band's own key colour, kept so a room's mood can tint it without losing it
+    this.moonBase = tint.ambient.clone();
     this.fog.uniforms.fogTint.value.copy(tint.fogTint);
     this.baseHemi = 0.55 * tint.ambientScale; this.baseMoon = 0.45 * tint.ambientScale;
     if (level.depth === 0) { this.baseHemi = 1.4; this.baseMoon = 1.6; }
@@ -288,7 +380,7 @@ export class Lighting {
     const perRoom = new Map();
     for (const c of candidates) {
       const n = perRoom.get(c.room) || 0;
-      const max = c.room.type === 'temple' || c.room.type === 'shrine' ? 0 : (c.room.w * c.room.h > 20 ? 2 : 1);
+      const max = this.torchBudget(c.room);
       if (n >= max) continue;
       if (spots.some((s) => Math.abs(s.x - c.x) + Math.abs(s.y - c.y) < 4)) continue;
       perRoom.set(c.room, n + 1);
@@ -297,6 +389,72 @@ export class Lighting {
     this.torchSpots = spots;
     this.templeSpots = level.temples.map((t) => ({ x: t.x, z: t.y }));
     this.lightScale = 1;
+    this.setMoods(level, rng);
+  }
+
+  /**
+   * How many wall torches a room may light. A crypt is cold because nobody has been down to light
+   * it, not because the renderer dimmed it — so the mood decides the torch count, and a room with a
+   * mood the generator never set keeps exactly the budget it had before this feature existed.
+   */
+  torchBudget(room) {
+    if (room.type === 'temple' || room.type === 'shrine') return 0;
+    const m = room.lightMood && LIGHT_MOODS[room.lightMood];
+    if (!m) return room.w * room.h > 20 ? 2 : 1;
+    return m.torches > 1 && room.w * room.h <= 20 ? 1 : m.torches;
+  }
+
+  /**
+   * Per-room mood (AMBIENCE §7): a tile -> mood map for the fill that follows the player, and one
+   * point-light source per piece of decor that is actually alight.
+   */
+  setMoods(level, rng) {
+    this.moodW = level.width; this.moodH = level.height;
+    this.moodTiles = new Int8Array(level.width * level.height).fill(-1);
+    for (const r of level.rooms) {
+      const mi = MOOD_INDEX.has(r.lightMood) ? MOOD_INDEX.get(r.lightMood) : -1;
+      if (mi < 0) continue;
+      for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) {
+        if (x >= 0 && y >= 0 && x < level.width && y < level.height) this.moodTiles[y * level.width + x] = mi;
+      }
+    }
+    const src = [];
+    for (const d of level.decor || []) {
+      const spec = DECOR_LIGHTS[d.type];
+      if (!spec) continue;
+      const v = d.variant | 0;
+      if (spec.maxV !== undefined && v > spec.maxV) continue;
+      if (spec.minV !== undefined && v < spec.minV) continue;
+      src.push({ x: d.x, y: spec.y, z: d.y, color: spec.color, intensity: spec.intensity, radius: spec.radius, kind: spec.kind, phase: rng.float(0, 100) });
+    }
+    // A flooded room throws its own reflected light: one rippling source over the water it holds.
+    for (const r of level.rooms) {
+      if (r.lightMood !== 'water') continue;
+      let wx = 0, wz = 0, n = 0;
+      for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) {
+        if (level.get(x, y) === TILE.WATER) { wx += x; wz += y; n++; }
+      }
+      const cx = n ? wx / n : r.cx ?? r.x + r.w / 2, cz = n ? wz / n : r.cy ?? r.y + r.h / 2;
+      src.push({ x: cx, y: 0.35, z: cz, color: 0x9fd0e8, intensity: n ? 3.0 : 1.8, radius: 6.0, kind: 'water', phase: rng.float(0, 100) });
+    }
+    this.moodSources = src;
+    const start = this.moodAt(level.stairsUp ? level.stairsUp.x : 0, level.stairsUp ? level.stairsUp.y : 0);
+    this.mood = { ...start };
+    this.moodColor.setHex(LIGHT_MOODS[start.name].color);
+    this.dustScale = start.dust;
+  }
+
+  /** The mood in force on a tile: the room's, or the level default outside every room. */
+  moodAt(x, y) {
+    const ix = Math.round(x), iy = Math.round(y);
+    let name = 'torchlit';
+    if (this.moodTiles && ix >= 0 && iy >= 0 && ix < this.moodW && iy < this.moodH) {
+      const mi = this.moodTiles[iy * this.moodW + ix];
+      if (mi >= 0) name = MOOD_KEYS[mi];
+      else name = 'torchlit';                 // a corridor keeps the plain warm default
+    }
+    const m = LIGHT_MOODS[name];
+    return { name, ambient: m.ambient, fill: m.fill, dust: m.dust };
   }
 
   /**
@@ -309,8 +467,39 @@ export class Lighting {
     this.time += dt;
     const t = this.time;
     const lit = state.allLit ? 1 : 0;
-    this.hemi.intensity = this.baseHemi * (1 + lit * 2.4) * (state.lightOn ? 1.25 : 1);
-    this.moon.intensity = this.baseMoon * (1 + lit * 3.0);
+    // Crossfade into the mood of the room the player is standing in. Half a second: long enough
+    // that walking a doorway is a change of light rather than a cut, short enough to feel like one.
+    const want = this.moodAt(player.x, player.z);
+    const k = 1 - Math.exp(-dt / 0.45);
+    this.mood.name = want.name;
+    this.mood.ambient += (want.ambient - this.mood.ambient) * k;
+    this.mood.fill += (want.fill - this.mood.fill) * k;
+    this.mood.dust += (want.dust - this.mood.dust) * k;
+    this.moodColor.lerp(_moodTarget.setHex(LIGHT_MOODS[want.name].color), k);
+    this.dustScale = this.mood.dust;
+    // THE MOOD IS A COLOUR ON THE KEY LIGHT. Three versions of this were measured out of the frame
+    // by `screenTruth.test.js`'s pillow gate on the demon in 'deep-level', and the three failures
+    // are the whole lesson:
+    //
+    //   1. A coloured POINT light over the player's head worked as colour and failed as light: a
+    //      point light at the middle of the frame lights every nearby sprite from ITS OWN CENTRE,
+    //      which is the definition of pillow shading (0.151 against a ceiling of 0.150).
+    //   2. Pushing it into the HEMISPHERE instead was flatter and no better — an omnidirectional
+    //      tint colours the SHADOW side of a form as much as the lit side, so the terminator stops
+    //      separating them and the body reads as lit down its middle again (0.151).
+    //   3. DIMMING the ambient for the cold and dark moods did the same thing from the other end:
+    //      it raised the share of the frame that comes from the player's own overhead lantern,
+    //      which is a centre light. So `amb` never drops below 1: a dark room is dark because
+    //      nothing in it is burning, never because the renderer turned the room down.
+    //
+    // What works, measured at 0.146, is to colour the KEY: `moon` is the directional from
+    // (-6, 14, -4) — top-left, the direction every sprite in the game is painted for — so a cold
+    // room is a room whose key light has gone blue, which is what cold light actually is. The
+    // hemisphere keeps the depth band's own colour and the modelling on the cast survives it.
+    const amb = Math.max(1, this.mood.ambient);
+    this.hemi.intensity = this.baseHemi * (1 + lit * 2.4) * (state.lightOn ? 1.25 : 1) * amb * (1 + this.mood.fill * 0.12);
+    this.moon.intensity = this.baseMoon * (1 + lit * 3.0) * amb * (1 + this.mood.fill * 1.25);
+    if (this.moonBase) this.moon.color.copy(this.moonBase).lerp(this.moodColor, Math.min(0.55, this.mood.fill * 0.5));
     // The carried lantern breathes slowly (a lantern, not a torch: no fast flicker).
     const breathe = 0.94 + 0.04 * Math.sin(t * 1.7 + this.flickerPhase) + 0.02 * Math.sin(t * 5.3);
     const target = state.lightOn ? 1.7 : 1;
@@ -354,6 +543,18 @@ export class Lighting {
       ts.target.position.set(nearestTorch.x + nearestTorch.nx * 3.2, -0.6, nearestTorch.z + nearestTorch.nz * 3.2);
       ts.intensity = 7 * f;
     } else this.torchSpot.intensity = 0;
+    // The fires standing in the rooms: nearest four get the pool, each on its own beat.
+    const near = this.nearest(this.moodSources, player.x, player.z);
+    for (let i = 0; i < MOOD_POOL; i++) {
+      const l = this.moodLights[i], sp = near[i];
+      if (!sp || (sp.d > 15 && !state.allLit)) { l.intensity = 0; continue; }
+      const f = moodFlicker(sp.kind, t, sp.phase);
+      l.position.set(sp.x, sp.y, sp.z);
+      l.color.setHex(sp.color);
+      l.intensity = sp.intensity * f;
+      l.distance = sp.radius;
+      put(l.position.x, l.position.y, l.position.z, l.color, l.intensity);
+    }
     const temples = this.nearest(this.templeSpots, player.x, player.z);
     for (let i = 0; i < TEMPLE_POOL; i++) {
       const l = this.temples[i];

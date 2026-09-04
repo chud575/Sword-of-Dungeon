@@ -16,6 +16,8 @@ const CAP_OVER = 0.045;   // capstone overhang on exposed sides
 const MASONRY_U = 0.25;   // masonry strip spans 4 tiles
 const MASONRY_V = 1;      // the masonry strip is exactly one world unit tall (materials.js)
 const HOLE_TILES = new Set([TILE.PIT, TILE.TRAP_PIT, TILE.STAIRS_DOWN]);
+/** decor `facing` -> the step from a wall tile into the tile it looks at (docs/AMBIENCE.md §4.1). */
+const DECOR_FACE = { n: { dx: 0, dy: -1 }, e: { dx: 1, dy: 0 }, s: { dx: 0, dy: 1 }, w: { dx: -1, dy: 0 } };
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color(), _e = new THREE.Euler();
 
 // ------------------------------------------------------------------ stairwell mouth (see addStairsUp)
@@ -316,8 +318,45 @@ export class DungeonView {
       this.root.add(tch);
       tch.traverse((o) => { if (o.userData.flame) this.flames.push(o); });
     }
+    this.addDecor(level);
     this.syncItems(level, true);
     this.syncMarkers(level, true);
+  }
+
+  /**
+   * Stand the level's dressing on the board (docs/AMBIENCE.md §4.1). `level.decor` is plain data —
+   * type, tile, facing, variant, blocking — and `props.decor()` turns each entry into one of three
+   * geometries, which is the only thing this method has to know the difference between:
+   *
+   *   · a WALL-mounted piece names the WALL tile it hangs on, and is placed on the wall FACE
+   *     (`x + dx*0.5, y + dy*0.5`), exactly where `lighting.js` puts its torch spots;
+   *   · a FLOOR DECAL lies in the slab's plane and is turned with the slab, but only if the piece
+   *     has no direction of its own (a rug keeps the way it was laid, bones do not care);
+   *   · everything else stands on its tile like a pickup.
+   *
+   * An id the renderer cannot draw is DROPPED with one warning for the whole level, never an
+   * exception: a level that will not build is worse than a level with a missing skull in it.
+   */
+  addDecor(level) {
+    const list = level.decor;
+    if (!list || !list.length) return;
+    let dropped = 0;
+    for (const d of list) {
+      const o = this.props.decor(d);
+      if (!o) { dropped++; continue; }
+      const cls = (o.userData.decor && o.userData.decor.cls) || 'prop';
+      if (cls === 'wall') {
+        const f = DECOR_FACE[d.facing] || DECOR_FACE.s;
+        o.position.set(d.x + f.dx * 0.5, 0, d.y + f.dy * 0.5);
+        this.root.add(o);
+        if (o.userData.anim) this.animated.push(o);
+        o.traverse((c) => { if (c.userData.flame) this.flames.push(c); });
+      } else {
+        this.addAt(o, d.x, d.y);
+        if (cls === 'decal') this.turnDecal(o, d.x, d.y);
+      }
+    }
+    if (dropped) console.warn(`DungeonView: dropped ${dropped} decor entries this renderer cannot draw`);
   }
 
   /** Generic InstancedMesh from a list + fill callback. */
