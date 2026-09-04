@@ -10,6 +10,9 @@ import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
 import { PALETTE, createShaftMaterial } from './materials.js';
 import { glowTexture, glintTexture, sigilTexture, runeCircleTexture, billboard, groundGlow, flame, litMaterial, getFog, updateFlames } from './propFx.js';
+import { paint, outline, toRGBA, Palette, makePix, blit } from './sprites/pixelPainter.js';
+import { INK, INK_LIT, LIT, ramp } from './sprites/style.js';
+import { PX_PER_TILE } from './sprites/spriteBillboard.js';
 
 const geoCache = new Map();
 function geo(key, make) { let g = geoCache.get(key); if (!g) { g = make(); geoCache.set(key, g); } return g; }
@@ -24,6 +27,290 @@ function mesh(g, m, x = 0, y = 0, z = 0, opts = {}) {
 }
 
 export const SPELL_COLORS = { teleport: 0x4ee1ff, shield: 0xffd43b, regeneration: 0x69db7c, invisibility: 0xb197fc, light: 0xfff3bf, drift: 0xe9ecef };
+
+// ==================================================================== hand-pixelled item sprites
+// A treasure chest built from smooth-shaded low-poly primitives sits in the diorama like a render
+// test: every other surface in shot is painted and high-frequency, and the chest has no texture at
+// all. Octopath's props are 3D, but they are *painted*. So the pickups are drawn the same way the
+// cast is — a hand-pixelled sprite on the house ramps, with the house ink outline and the house
+// top-left key light — and billboarded upright in the lit room. Everything else (glow pools,
+// glints, motes, particles) is unchanged, so the props still read as magical, just not as plastic.
+const _wp = new THREE.Vector3(), _bufSize = new THREE.Vector2();
+const pixTex = new Map();
+
+/**
+ * Palette from house ramps. `ramps` maps a key STRING (5-7 chars, darkest first) to a base colour;
+ * `extra` sets single keys directly. The ink and its lit variant are always present.
+ * @param {Object<string, string|number>} ramps @param {Object<string, string|number[]>} [extra]
+ */
+function itemPalette(ramps, extra = {}) {
+  const p = new Palette().set('#', INK).set('@', INK_LIT);
+  for (const keys in ramps) {
+    const cols = ramp(ramps[keys], keys.length);
+    for (let i = 0; i < keys.length; i++) p.set(keys[i], cols[i]);
+  }
+  for (const k in extra) p.set(k, extra[k]);
+  return p;
+}
+
+/** Painted rows -> a padded, house-outlined, NearestFilter texture (built once per key). */
+function pixelTexture(key, rows, pal) {
+  let t = pixTex.get(key);
+  if (t) return t;
+  const src = paint(rows);
+  const pad = makePix(src.w + 2, src.h + 2);
+  blit(pad, src, 1, 1);
+  const art = outline(pad, '#', { lit: LIT, litKey: '@' });
+  const canvas = document.createElement('canvas');
+  canvas.width = art.w; canvas.height = art.h;
+  canvas.getContext('2d').putImageData(new ImageData(toRGBA(art, pal), art.w, art.h), 0, 0);
+  t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+  t.userData.size = { w: art.w, h: art.h };
+  pixTex.set(key, t);
+  return t;
+}
+
+/**
+ * Size a pixel prop from the camera so one art texel covers a WHOLE number of device pixels (the
+ * rounding spriteBillboard.js explains at length), and turn it to the camera's yaw so it stays
+ * upright. Without the rounding the same 3px/4px/3px mush that ruined the characters shows up on
+ * the pickups.
+ */
+function syncPixelSprite(m, renderer, camera) {
+  m.getWorldPosition(_wp);
+  // SCREEN-ALIGNED, not merely yawed to the camera. A world-upright quad under this steeply pitched
+  // camera is foreshortened to about 60% of its height, which turns every carefully drawn pickup
+  // into a flat lozenge on the floor. Facing the image plane keeps the art at its true aspect and
+  // keeps all four corners at one depth, so the texels stay square — the same bargain the character
+  // billboards make.
+  m.quaternion.copy(camera.quaternion);
+  const size = renderer.getDrawingBufferSize(_bufSize);
+  const d = Math.max(0.5, camera.position.distanceTo(_wp));
+  const pxPerWorld = (size.y * (camera.zoom || 1)) / (2 * Math.tan((camera.fov || 45) * Math.PI / 360) * d);
+  const S = Math.max(2, Math.round(pxPerWorld / PX_PER_TILE));
+  const w = S / pxPerWorld;
+  const t = m.userData.tex;
+  m.scale.set(t.w * w, t.h * w, 1);
+  m.updateMatrix();
+  if (m.parent) m.matrixWorld.multiplyMatrices(m.parent.matrixWorld, m.matrix);
+  else m.matrixWorld.copy(m.matrix);
+}
+
+/**
+ * A hand-pixelled item billboard, pivoted on its bottom edge and lit by the room like any other
+ * surface (alpha-tested, so it writes depth and sorts against the dungeon properly).
+ * @param {string} key @param {string[]} rows @param {Palette} pal
+ * @param {{glow?:number, emissive?:number, y?:number}} [o] `glow` is the emissive floor that keeps
+ *   a pickup legible in an unlit corridor; magical items push it up.
+ */
+function pixelSprite(key, rows, pal, o = {}) {
+  const tex = pixelTexture(key, rows, pal);
+  const mat = litMaterial('pixel:' + key, {
+    map: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide,
+    roughness: 1, metalness: 0,
+    emissiveMap: tex, emissive: new THREE.Color(o.emissive ?? 0xffffff), emissiveIntensity: o.glow ?? 0.14,
+  });
+  const m = new THREE.Mesh(geo('pixelQuad', () => new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0)), mat);
+  m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
+  m.position.y = o.y ?? 0.01;
+  m.userData.tex = tex.userData.size;
+  m.onBeforeRender = (renderer, scene, camera) => syncPixelSprite(m, renderer, camera);
+  return m;
+}
+
+// ------------------------------------------------------------------ the art
+const ART = {
+  potion: [
+    '.....dd.....',
+    '.....bc.....',
+    '....s33q....',
+    '....s33q....',
+    '...s3333q...',
+    '..s443333q..',
+    '.s44333333q.',
+    's443*333333q',
+    's4333333333q',
+    's3333333222q',
+    's3222222221q',
+    '.s22222211q.',
+    '..s211111q..',
+    '...s1111q...',
+    '....qqqq....',
+  ],
+  sack: [
+    '.....non......',
+    '...nonomon....',
+    '..nomooomon...',
+    '.jnomoooomonj.',
+    '.jihhhhhhhggf.',
+    'jiihgihhgihgff',
+    'jiihgihhgihgff',
+    'jiihgihhgihgff',
+    'iiihgihhgihgff',
+    'iihhgihhgihgff',
+    'iihhhhhhhggfff',
+    '.ihhhhhhggfff.',
+    '..hhhgggggff..',
+    '..onm...onm...',
+  ],
+  magicSack: [
+    '.....jij......',
+    '....pppp......',
+    '....jihhhg....',
+    '...jiihhhhgf..',
+    '..jiihhhhhggf.',
+    '.jiihhXhhhggff',
+    '.jiihXXXhhggff',
+    'jiiihhXhhhggff',
+    'iiihhhhhhggfff',
+    'iihhhhhhggffff',
+    '.ihhhhhhggfff.',
+    '..hhhgggggff..',
+  ],
+  cache: [
+    '....wvvu....',
+    '..wvvuuuts..',
+    '.wvvuuuuttss',
+    'vvvuuuuttsss',
+    'vvuuuuonmsss',
+    'uuuuttonmsss',
+    '.uutttsssss.',
+  ],
+  scroll: [
+    '..vwwwwwwwv..',
+    '.uvwwwwwwwvu.',
+    'tuvwwiiiwwvut',
+    'tuvwwhhhwwvut',
+    'stuvvhhhvvuts',
+    '.sttuhhhutts.',
+    '..sstttttss..',
+  ],
+  book: [
+    '.ssssssssxy.',
+    'prrrrrrrrxyw',
+    'prrrrrrrrxyw',
+    'prrrrrrrrxyw',
+    'prrr**rrrxyw',
+    'prr*oo*rrxyw',
+    'prr*oo*rrxyw',
+    'prrr**rrrxyw',
+    'prrrrrrrrxyw',
+    'prrrrrrrrxyw',
+    'pqqqqqqqqxyw',
+    'pqqqqqqqqxyw',
+    'pqqqqqqqqxyw',
+    '.qqqqqqqqxy.',
+    '.pppppppppp.',
+  ],
+  blade: [
+    '....e....',
+    '...dec...',
+    '...dec...',
+    '...dec...',
+    '...dec...',
+    '...dec...',
+    '...dec...',
+    '...dec...',
+    '...dec...',
+    '...dec...',
+    '.iiihiii.',
+    '.hhhghhh.',
+    '....l....',
+    '....l....',
+    '....k....',
+    '...hih...',
+  ],
+  crystal: [
+    '....e....',
+    '...dee...',
+    '..cddee..',
+    '.ccdddee.',
+    'bccdddeed',
+    'bccdddeed',
+    '.bccddee.',
+    '..bccdd..',
+    '...bcc...',
+    '....b....',
+  ],
+  chest: [
+    '.....bccccccb.....',
+    '...bccddddddccb...',
+    '..bccddddddddccb..',
+    '.bccddfddddddfccb.',
+    'bccddfddddddfccbba',
+    'bccddfddddddfccbba',
+    'hhhhhhhhhhhhhhhhhh',
+    'ddcccfccbbbbfbaaaa',
+    'ddcccfccnmncfbaaaa',
+    'ddcccfccnkncfbaaaa',
+    'ddcccfccbbbbfbaaaa',
+    'ccbbbfbbaaaafaaaaa',
+    'ccbbbfbbaaaafaaaaa',
+    'hhhhhhhhhhhhhhhhhh',
+    '.gg............gg.',
+  ],
+  chestOpen: [
+    '..bccddddddddccb..',
+    '..bccddddddddccb..',
+    '..hhhhhhhhhhhhhh..',
+    '.gg###########gg..',
+    '.gg#nmnlmnlnm#gg..',
+    '.gg#mnmnmnmnm#gg..',
+    '.ggclmlmlmlmlcgg..',
+    'ddcccfccbbbbfbaaaa',
+    'ddcccfccbbbbfbaaaa',
+    'ccbbbfbbaaaafaaaaa',
+    'hhhhhhhhhhhhhhhhhh',
+    '.gg............gg.',
+  ],
+  // a floor slab, seen from above: worn stone speckle inside a brass frame
+  trapSlab: [
+    'pppppppppppppppp',
+    'pmmmmmmmmmmmmmmp',
+    'pnqqqqqqqqqqqqnp',
+    'pnqrrrsrsrrrrqnp',
+    'pnqrsrrrrrsrrqnp',
+    'pnqrrrrsrrrrrqnp',
+    'pnqrrsrrrrsrrqnp',
+    'pnqsrrrrrrrrsqnp',
+    'pnqrrrrsrrrrrqnp',
+    'pnqrsrrrrrrsrqnp',
+    'pnqrrrrrsrrrrqnp',
+    'pnqrrsrrrrrrsqnp',
+    'pnqrrrrrrsrrrqnp',
+    'pnqqqqqqqqqqqqnp',
+    'pllllllllllllllp',
+    'pppppppppppppppp',
+  ],
+};
+
+const GOLD_RAMP = { klmno: '#c99a2e' };
+const PAL = {
+  potion: itemPalette({ qrstu: '#8ba4c2', 12345: '#c8322f', abcde: '#8a6034' }, { '*': '#f4f8ff' }),
+  sack: itemPalette({ fghij: '#7a5a34', ...GOLD_RAMP }, { p: '#9a7840' }),
+  magicSack: itemPalette({ fghij: '#5b3a8a', ...GOLD_RAMP }, { p: '#c9a94e', X: '#e8d8ff' }),
+  cache: itemPalette({ stuvw: '#6d5a42', ...GOLD_RAMP }),
+  scroll: itemPalette({ stuvw: '#c6b183', fghij: '#a5262a' }),
+  blade: itemPalette({ abcde: '#9fc0d8', fghij: '#c9a94e' }, { k: '#4a3020', l: '#5d3d28' }),
+  crystal: itemPalette({ abcde: '#3fbf62' }),
+  chest: itemPalette({ abcde: '#7a5230', fghij: '#8f8b86', ...GOLD_RAMP }),
+  trapSlab: itemPalette({ pqrst: '#7d7468', klmno: '#a8843a' }),
+};
+/** Spellbook: cream pages + a cover in the spell's own colour (one palette per spell type). */
+const bookPal = (() => {
+  const cache = new Map();
+  return (type) => {
+    let p = cache.get(type);
+    if (!p) {
+      const c = '#' + new THREE.Color(SPELL_COLORS[type] || 0xffffff).getHexString();
+      p = itemPalette({ pqrst: c, uvwxy: '#d9cdaa' }, { '*': '#fff6d8', o: '#e8c45a' });
+      cache.set(type, p);
+    }
+    return p;
+  };
+})();
 
 // ------------------------------------------------------------------ animator registry
 const LIVE = new Set();
@@ -113,97 +400,49 @@ export class PropFactory {
   }
 
   goldSack(g, amount = 20) {
-    const M = this.mats;
     const rich = Math.min(1, amount / 120);
-    // sack: squashed sphere body with a pinched neck and a rope tie
-    const body = mesh(geo('sack', () => new THREE.SphereGeometry(0.19, 12, 10)), M.sackCloth, 0, 0.17, -0.02);
-    body.scale.set(1.05, 0.9, 1);
-    g.add(body);
-    g.add(mesh(geo('sackNeck', () => new THREE.CylinderGeometry(0.06, 0.12, 0.13, 8)), M.sackCloth, 0, 0.33, -0.02));
-    g.add(mesh(geo('sackFlare', () => new THREE.ConeGeometry(0.075, 0.07, 8)), M.sackCloth, 0, 0.42, -0.02));
-    g.add(mesh(geo('sackTie', () => new THREE.TorusGeometry(0.068, 0.018, 6, 12)), M.rope, 0, 0.35, -0.02, { rx: Math.PI / 2 }));
-    // coin heap spilling out in front, plus stray coins around
-    const coin = geo('coin', () => new THREE.CylinderGeometry(0.048, 0.048, 0.014, 12));
-    const n = 9 + Math.round(rich * 8);
-    const spots = [];
-    for (let i = 0; i < n; i++) {
-      const a = this.rng.float(-0.4, Math.PI + 0.4), r = this.rng.float(0.12, 0.3);
-      const x = Math.cos(a) * r * 0.9, z = 0.08 + Math.sin(a) * r * 0.55;
-      const y = 0.008 + (r < 0.2 ? this.rng.float(0, 0.045) : 0);
-      const c = mesh(coin, M.gold, x, y, z, { ry: this.rng.float(0, 3), rx: this.rng.float(-0.35, 0.35), rz: this.rng.float(-0.35, 0.35) });
-      g.add(c);
-      if (i < 4) spots.push([x, y + 0.03, z]);
-    }
-    // a couple of coins peeking from the sack mouth
-    g.add(mesh(coin, M.gold, 0.02, 0.44, -0.02, { rx: 0.9, ry: 0.4 }));
-    g.add(mesh(coin, M.gold, -0.03, 0.46, -0.04, { rx: 1.2, ry: -0.6 }));
-    spots.push([0.02, 0.48, 0.0]);
+    g.add(pixelSprite('sack', ART.sack, PAL.sack, { glow: 0.1 }));
     g.add(groundGlow(0xffb340, 0.42, { opacity: 0.32 + rich * 0.15 }));
-    this.addGlints(g, 0xfff0b0, spots, { size: 0.15 + rich * 0.05 });
+    this.addGlints(g, 0xfff0b0, [[-0.17, 0.035, 0.05], [0.17, 0.035, 0.05], [0.0, 0.4, 0.03]], { size: 0.14 + rich * 0.05 });
     this.finishGlints(g);
     g.userData.anim.sparkle = true;
     return g;
   }
 
   buriedCache(g) {
-    const M = this.mats;
-    const mound = mesh(geo('mound', () => new THREE.SphereGeometry(0.24, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2)), M.dirt, 0, 0, 0);
-    mound.scale.set(1.15, 0.42, 1);
-    g.add(mound);
-    const pebble = geo('pebble', () => new THREE.DodecahedronGeometry(0.035, 0));
-    for (let i = 0; i < 5; i++) { const a = this.rng.float(0, 6.28), r = this.rng.float(0.18, 0.3); g.add(mesh(pebble, M.rim, Math.cos(a) * r, 0.02, Math.sin(a) * r, { ry: a, s: this.rng.float(0.6, 1.3) })); }
-    const coin = geo('coin', () => new THREE.CylinderGeometry(0.048, 0.048, 0.014, 12));
-    g.add(mesh(coin, M.gold, 0.08, 0.09, 0.05, { rx: 0.5 }));
-    g.add(mesh(coin, M.gold, -0.1, 0.06, -0.03, { rx: -0.7, ry: 1 }));
+    g.add(pixelSprite('cache', ART.cache, PAL.cache, { glow: 0.08 }));
     g.add(groundGlow(0xffb340, 0.3, { opacity: 0.18 }));
-    this.addGlints(g, 0xfff0b0, [[0.08, 0.12, 0.05]], { size: 0.12, rate: 1.1 });
+    this.addGlints(g, 0xfff0b0, [[0.05, 0.11, 0.04]], { size: 0.12, rate: 1.1 });
     this.finishGlints(g);
     return g;
   }
 
-  /** Hidden treasure/trap square: a subtly different, inset checkered slab framed in brass. */
+  /** Hidden treasure/trap square: an inset slab of painted flagstone framed in brass. */
   trapSquare(g) {
     const M = this.mats;
-    const slab = mesh(geo('trapSlab', () => new THREE.BoxGeometry(0.7, 0.04, 0.7)), litMaterial('trapChecker', { map: M.checker.map, color: 0x7e7668, roughness: 0.85 }), 0, 0.03, 0);
+    const slab = mesh(geo('trapSlab', () => new THREE.BoxGeometry(0.7, 0.04, 0.7)),
+      litMaterial('trapSlabPix', { map: pixelTexture('trapSlab', ART.trapSlab, PAL.trapSlab), roughness: 0.92, metalness: 0.05 }), 0, 0.03, 0);
     g.add(slab);
     const frame = geo('trapFrame', () => new THREE.BoxGeometry(0.78, 0.03, 0.05));
     for (const [x, z, ry] of [[0, 0.365, 0], [0, -0.365, 0], [0.365, 0, Math.PI / 2], [-0.365, 0, Math.PI / 2]]) g.add(mesh(frame, M.brass, x, 0.035, z, { ry }));
     return g;
   }
 
-  /** Closed chest: planked body, iron bands, curved lid, hinge and a gold lock. */
+  /** Closed chest: painted planks, iron bands and a gold lock, hand-pixelled. */
   chest(g) {
-    const M = this.mats;
-    g.add(mesh(geo('chestBase', () => new THREE.BoxGeometry(0.52, 0.26, 0.36)), M.wood, 0, 0.13, 0));
-    const groove = geo('chestGroove', () => new THREE.BoxGeometry(0.53, 0.012, 0.37));
-    for (const y of [0.07, 0.14, 0.21]) g.add(mesh(groove, M.dark, 0, y, 0, { shadow: false }));
-    const lid = mesh(geo('chestLid', () => new THREE.CylinderGeometry(0.18, 0.18, 0.52, 10, 1, false, 0, Math.PI)), M.wood, 0, 0.26, 0, { rz: Math.PI / 2 });
-    g.add(lid);
-    g.userData.lid = lid;
-    const band = geo('band', () => new THREE.BoxGeometry(0.54, 0.29, 0.05));
-    for (const z of [-0.13, 0.13]) g.add(mesh(band, M.iron, 0, 0.14, z));
-    const lidBand = geo('lidBand', () => new THREE.TorusGeometry(0.185, 0.022, 6, 12, Math.PI));
-    for (const x of [-0.13, 0.13]) g.add(mesh(lidBand, M.iron, x, 0.26, 0, { ry: Math.PI / 2 }));
-    g.add(mesh(geo('chestFoot', () => new THREE.BoxGeometry(0.56, 0.04, 0.4)), M.iron, 0, 0.02, 0));
-    g.add(mesh(geo('lock', () => new THREE.BoxGeometry(0.08, 0.11, 0.035)), M.gold, 0, 0.19, 0.19));
-    g.add(mesh(geo('lockHole', () => new THREE.BoxGeometry(0.02, 0.04, 0.02)), M.dark, 0, 0.18, 0.205, { shadow: false }));
+    g.add(pixelSprite('chest', ART.chest, PAL.chest, { glow: 0.1 }));
     g.add(groundGlow(0xffb340, 0.45, { opacity: 0.22 }));
-    if (!g.userData.glints) { this.addGlints(g, 0xfff0b0, [[0.02, 0.22, 0.21], [0.2, 0.36, 0.05]], { size: 0.13, rate: 1.2 }); this.finishGlints(g); }
-    g.scale.setScalar(1.18);
+    if (!g.userData.glints) { this.addGlints(g, 0xfff0b0, [[0.0, 0.29, 0.03], [0.2, 0.44, 0.02]], { size: 0.13, rate: 1.2 }); this.finishGlints(g); }
     return g;
   }
 
   /** Open chest for the loot moment: lid thrown back, gold heaped inside, light spilling out. */
   chestOpen() {
     const g = new THREE.Group();
-    this.chest(g);
-    const lid = g.userData.lid;
-    lid.position.set(0, 0.27, -0.18); lid.rotation.z = Math.PI / 2; lid.rotation.x = -1.9;
-    const heap = mesh(geo('heap', () => new THREE.SphereGeometry(0.2, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2)), this.mats.gold, 0, 0.2, 0);
-    heap.scale.set(1.1, 0.5, 0.75); g.add(heap);
-    const inner = billboard(glowTexture(), 0xffc860, 0.9); inner.position.set(0, 0.42, 0); g.add(inner);
+    g.add(pixelSprite('chestOpen', ART.chestOpen, PAL.chest, { glow: 0.12 }));
+    const inner = billboard(glowTexture(), 0xffc860, 0.9); inner.position.set(0, 0.32, 0.02); g.add(inner);
     g.userData.inner = inner;
-    this.addGlints(g, 0xfff4c0, [[0.1, 0.32, 0.04], [-0.12, 0.3, -0.02], [0.02, 0.36, 0.1]], { size: 0.2, rate: 3 });
+    this.addGlints(g, 0xfff4c0, [[0.09, 0.3, 0.02], [-0.11, 0.28, 0.02], [0.0, 0.36, 0.02]], { size: 0.2, rate: 3 });
     this.finishGlints(g);
     return g;
   }
@@ -270,103 +509,70 @@ export class PropFactory {
     return s;
   }
 
-  /** Healing potion: round glass flask with glowing liquid, cork and a glint. */
+  /** Healing potion: hand-pixelled flask, glowing liquid, cork and a catch-light glint. */
   potion(g) {
-    const M = this.mats;
-    const glass = litMaterial('potionGlass', { color: 0xe8f0ff, roughness: 0.05, metalness: 0.1, transparent: true, opacity: 0.45, depthWrite: false });
-    const liquid = litMaterial('potionLiquid', { color: 0xff2a2a, roughness: 0.3, emissive: 0xff2010, emissiveIntensity: 0.9, transparent: true, opacity: 0.92 });
-    const liq = mesh(geo('liquid', () => new THREE.SphereGeometry(0.115, 12, 10)), liquid, 0, 0.12, 0);
-    liq.scale.set(1, 0.72, 1); g.add(liq);
-    g.add(mesh(geo('flask', () => new THREE.SphereGeometry(0.155, 14, 12)), glass, 0, 0.165, 0));
-    g.add(mesh(geo('flaskNeck', () => new THREE.CylinderGeometry(0.045, 0.065, 0.13, 10)), glass, 0, 0.3, 0));
-    g.add(mesh(geo('flaskLip', () => new THREE.TorusGeometry(0.05, 0.014, 6, 12)), glass, 0, 0.36, 0, { rx: Math.PI / 2 }));
-    g.add(mesh(geo('cork', () => new THREE.CylinderGeometry(0.036, 0.04, 0.06, 8)), M.wood, 0, 0.385, 0));
+    g.add(pixelSprite('potion', ART.potion, PAL.potion, { glow: 0.2, emissive: 0xffb4a4 }));
     g.add(groundGlow(0xff5a48, 0.35, { opacity: 0.35 }));
-    this.addGlints(g, 0xffd8d0, [[0.06, 0.24, 0.08]], { size: 0.12, rate: 1.3 });
+    this.addGlints(g, 0xffd8d0, [[-0.1, 0.36, 0.03]], { size: 0.12, rate: 1.3 });
     this.finishGlints(g);
-    g.userData.anim = { y0: 0.05, amp: 0.04, speed: 2.2, spin: 1.2, t: this.rng.float(0, 6) };
+    g.userData.anim = { y0: 0.04, amp: 0.035, speed: 2.2, spin: 0, t: this.rng.float(0, 6) };
     return g;
   }
 
-  /** Magic sack: violet cloth with a glowing sigil. */
+  /** Magic sack: violet cloth with a glowing sigil woven into it. */
   magicSack(g) {
-    const body = mesh(geo('sack', () => new THREE.SphereGeometry(0.19, 12, 10)), this.mats.magicSack, 0, 0.17, 0);
-    body.scale.set(1.05, 0.9, 1); g.add(body);
-    g.add(mesh(geo('sackNeck', () => new THREE.CylinderGeometry(0.06, 0.12, 0.13, 8)), this.mats.magicSack, 0, 0.33, 0));
-    g.add(mesh(geo('sackTie', () => new THREE.TorusGeometry(0.068, 0.018, 6, 12)), this.mats.gold, 0, 0.35, 0, { rx: Math.PI / 2 }));
-    const sig = billboard(sigilTexture('sack'), 0xd0b0ff, 0.26); sig.position.set(0, 0.2, 0.19); g.add(sig);
+    g.add(pixelSprite('magicSack', ART.magicSack, PAL.magicSack, { glow: 0.18, emissive: 0xc9a8ff }));
+    const sig = billboard(sigilTexture('sack'), 0xd0b0ff, 0.26); sig.position.set(0, 0.22, 0.02); g.add(sig);
     g.add(groundGlow(0xb197fc, 0.36, { opacity: 0.3 }));
-    this.addGlints(g, 0xe0d0ff, [[0.12, 0.3, 0.1], [-0.1, 0.12, 0.14]], { size: 0.12 });
+    this.addGlints(g, 0xe0d0ff, [[0.13, 0.3, 0.02], [-0.11, 0.14, 0.02]], { size: 0.12 });
     this.finishGlints(g);
-    g.userData.anim = { y0: 0.05, amp: 0.03, speed: 1.8, spin: 0.8, t: this.rng.float(0, 6) };
+    g.userData.anim = { y0: 0.04, amp: 0.03, speed: 1.8, spin: 0, t: this.rng.float(0, 6) };
     return g;
   }
 
-  /** Treasure map: parchment scroll with a ribbon. */
+  /** Treasure map: a rolled parchment tied with a red ribbon. */
   scroll(g) {
-    const M = this.mats;
-    const roll = geo('scroll', () => new THREE.CylinderGeometry(0.06, 0.06, 0.36, 10));
-    g.add(mesh(roll, M.parchment, 0, 0.12, 0, { rz: Math.PI / 2 }));
-    g.add(mesh(geo('scrollInner', () => new THREE.CylinderGeometry(0.035, 0.035, 0.4, 8)), M.parchment, 0, 0.12, 0, { rz: Math.PI / 2 }));
-    g.add(mesh(geo('scrollBand', () => new THREE.TorusGeometry(0.065, 0.014, 6, 12)), litMaterial('ribbon', { color: 0xa02020, roughness: 0.8 }), 0, 0.12, 0, { ry: Math.PI / 2 }));
+    g.add(pixelSprite('scroll', ART.scroll, PAL.scroll, { glow: 0.12 }));
     g.add(groundGlow(0xffe0a0, 0.3, { opacity: 0.22 }));
-    g.userData.anim = { y0: 0.06, amp: 0.04, speed: 2, spin: 1.0, t: this.rng.float(0, 6) };
+    g.userData.anim = { y0: 0.05, amp: 0.035, speed: 2, spin: 0, t: this.rng.float(0, 6) };
     return g;
   }
 
-  /** Spellbook lying open: two angled cover halves with cream pages, a gold clasp, and a sigil rising from the pages. */
+  /** Spellbook lying open: hand-pixelled cover in the spell's colour, with a sigil rising off the pages. */
   spellbook(g, type) {
-    const M = this.mats;
     const c = SPELL_COLORS[type] || 0xffffff;
-    const cover = this.spellMaterial(type);
-    const pages = litMaterial('pages', { color: 0xf1e6cc, roughness: 0.95 });
-    const inkMat = litMaterial('ink:' + type, { color: 0x3a3028, roughness: 0.9, emissive: new THREE.Color(c), emissiveIntensity: 0.9 });
-    const half = geo('bookHalfCover', () => new THREE.BoxGeometry(0.2, 0.02, 0.28));
-    const halfPages = geo('bookHalfPages', () => new THREE.BoxGeometry(0.18, 0.05, 0.26));
-    const tilt = 0.22;
-    for (const s of [-1, 1]) {
-      const h = new THREE.Group();
-      h.position.set(s * 0.1, 0.02, 0); h.rotation.z = -s * tilt;
-      h.add(mesh(half, cover, 0, 0, 0));
-      h.add(mesh(halfPages, pages, 0, 0.035, 0));
-      // lines of script on the page
-      for (let i = 0; i < 4; i++) h.add(mesh(geo('inkLine', () => new THREE.BoxGeometry(0.12, 0.006, 0.014)), inkMat, 0, 0.063, -0.09 + i * 0.06, { shadow: false }));
-      g.add(h);
-    }
-    g.add(mesh(geo('bookSpineOpen', () => new THREE.BoxGeometry(0.04, 0.03, 0.29)), cover, 0, 0.015, 0));
-    g.add(mesh(geo('bookClaspOpen', () => new THREE.BoxGeometry(0.05, 0.02, 0.05)), M.gold, 0.19, 0.045, 0.1));
-    g.add(mesh(geo('bookGem', () => new THREE.OctahedronGeometry(0.035, 0)), litMaterial('gem:' + type, { color: c, emissive: c, emissiveIntensity: 1.4, roughness: 0.2 }), 0, 0.045, 0));
-    const pageGlow = billboard(glowTexture(), c, 0.55, { intensity: 0.7 }); pageGlow.position.set(0, 0.12, 0); g.add(pageGlow);
-    const sig = billboard(sigilTexture(type), c, 0.34); sig.position.set(0, 0.42, 0); g.add(sig);
-    g.add(groundGlow(c, 0.4, { opacity: 0.4 }));
-    this.addGlints(g, 0xffffff, [[0.14, 0.12, 0.1], [-0.15, 0.12, -0.08], [0.02, 0.1, 0.12]], { size: 0.12 });
+    g.add(pixelSprite('book:' + type, ART.book, bookPal(type), { glow: 0.15, emissive: c }));
+    const pageGlow = billboard(glowTexture(), c, 0.22, { intensity: 0.4 }); pageGlow.position.set(0, 0.05, 0.02); g.add(pageGlow);
+    const sig = billboard(sigilTexture(type), c, 0.26); sig.position.set(0, 0.5, 0.02); g.add(sig);
+    g.add(groundGlow(c, 0.36, { opacity: 0.26 }));
+    this.addGlints(g, 0xffffff, [[0.15, 0.14, 0.02], [-0.16, 0.14, 0.02], [0.02, 0.24, 0.02]], { size: 0.12 });
     this.finishGlints(g);
     const tick = g.userData.tick;
     animate(g, (dt, time, ctx, d) => {
       tick(dt, time, ctx, d);
-      sig.position.y = 0.42 + 0.06 * Math.sin(time * 2.3 + g.userData.anim.t);
-      const s = 0.34 * (0.9 + 0.1 * Math.sin(time * 4.1)); sig.scale.set(s, s, 1);
-      const pg = 0.55 * (0.85 + 0.15 * Math.sin(time * 3.1 + 1)); pageGlow.scale.set(pg, pg, 1);
+      sig.position.y = 0.5 + 0.06 * Math.sin(time * 2.3 + g.userData.anim.t);
+      const s = 0.26 * (0.9 + 0.1 * Math.sin(time * 4.1)); sig.scale.set(s, s, 1);
+      const pg = 0.22 * (0.85 + 0.15 * Math.sin(time * 3.1 + 1)); pageGlow.scale.set(pg, pg, 1);
       if (ctx.emit && d < 9) { g.userData.acc = (g.userData.acc || 0) + dt; while (g.userData.acc > 0.3) { g.userData.acc -= 0.3; ctx.emit({ x: g.position.x, y: 0.12, z: g.position.z, count: 1, color: [c, 0xffffff], speed: 0.1, spread: 1, up: 0.9, life: 1.3, size: 0.06, gravity: 0.15, drag: 1, radius: 0.15, kind: 2 }); } }
     });
-    g.userData.anim = { y0: 0.05, amp: 0.035, speed: 2, spin: 0.6, t: this.rng.float(0, 6) };
+    g.userData.anim = { y0: 0.04, amp: 0.03, speed: 2, spin: 0, t: this.rng.float(0, 6) };
     return g;
   }
 
   enchantedWeapon(g) {
-    const s = this.swordMesh(0.7);
-    s.position.y = 0.2; s.rotation.z = 0.8;
-    g.add(s);
+    g.add(pixelSprite('blade', ART.blade, PAL.blade, { glow: 0.2, emissive: 0x9fd0ff }));
     g.add(groundGlow(0x9fd0ff, 0.35, { opacity: 0.3 }));
-    g.userData.anim = { y0: 0.05, amp: 0.05, speed: 2, spin: 1.5, t: 0 };
+    this.addGlints(g, 0xdff0ff, [[0.0, 0.5, 0.02]], { size: 0.16, rate: 2.2 });
+    this.finishGlints(g);
+    g.userData.anim = { y0: 0.05, amp: 0.045, speed: 2, spin: 0, t: 0 };
     return g;
   }
 
   beaconItem(g) {
-    g.add(mesh(geo('crystal', () => new THREE.OctahedronGeometry(0.16, 0)), this.mats.beacon, 0, 0.3, 0));
-    const b = billboard(glowTexture(), 0x4bd66a, 0.7, { intensity: 0.8 }); b.position.y = 0.3; g.add(b);
+    g.add(pixelSprite('crystal', ART.crystal, PAL.crystal, { glow: 0.4, emissive: 0x4bd66a, y: 0.16 }));
+    const b = billboard(glowTexture(), 0x4bd66a, 0.7, { intensity: 0.8 }); b.position.y = 0.32; g.add(b);
     g.add(groundGlow(0x4bd66a, 0.35, { opacity: 0.35 }));
-    g.userData.anim = { y0: 0.05, amp: 0.05, speed: 2.5, spin: 2, t: 0 };
+    g.userData.anim = { y0: 0.05, amp: 0.05, speed: 2.5, spin: 0, t: 0 };
     return g;
   }
 
@@ -452,7 +658,7 @@ export class PropFactory {
     const g = new THREE.Group();
     const rock = geo('rock', () => new THREE.DodecahedronGeometry(0.1, 0));
     for (let i = 0; i < 6; i++) {
-      const m = mesh(rock, this.mats.rim, r.float(-0.3, 0.3), 0.05, r.float(-0.3, 0.3), { ry: r.float(0, 3), s: r.float(0.5, 1.4) });
+      const m = mesh(rock, this.mats.rock, r.float(-0.3, 0.3), 0.05, r.float(-0.3, 0.3), { ry: r.float(0, 3), s: r.float(0.5, 1.4) });
       g.add(m);
     }
     return g;

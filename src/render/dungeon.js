@@ -8,6 +8,7 @@ import { TILE, DIRS8, DIRS4 } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
 import { createWaterMaterial, createShaftMaterial, CELLS, cellUV } from './materials.js';
 import { MeshBuilder, slabGeometry, pushWornStep, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
+import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
 
 const WALL_H = 0.82;      // body top; caps sit on top
 const WALL_BOT = -0.3;    // buried below the floor so gaps never show through
@@ -16,6 +17,63 @@ const MASONRY_U = 0.25;   // masonry strip spans 4 tiles
 const MASONRY_V = 1 / 0.85;
 const HOLE_TILES = new Set([TILE.PIT, TILE.TRAP_PIT, TILE.STAIRS_DOWN]);
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color(), _e = new THREE.Euler();
+
+// ------------------------------------------------------------------ stairwell mouth (see addStairsUp)
+/**
+ * Build a small NearestFilter RGBA texture. Small + nearest keeps the pixel grain of the rest of the
+ * world instead of a smooth vector gradient, and the per-texel alpha is what removes the hard
+ * rectangle edge these quads used to show.
+ * @param {number} w @param {number} h
+ * @param {(u:number, v:number, rnd:number) => number[]} fn v = 0 at the TOP; returns [r,g,b,a] 0-1
+ */
+function grainTexture(key, w, h, fn) {
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(w, h);
+  const r = createRng(key);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const p = fn(x / (w - 1), y / (h - 1), r.float(0, 1));
+    const i = (y * w + x) * 4;
+    img.data[i] = p[0] * 255; img.data[i + 1] = p[1] * 255; img.data[i + 2] = p[2] * 255; img.data[i + 3] = p[3] * 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearMipmapLinearFilter;
+  return t;
+}
+/** Feather a rectangle to nothing over `fx`/`fy` of its half-size (never a visible border). */
+const feather = (u, v, fx, fy) => Math.min(1, Math.min(u, 1 - u) / fx) * Math.min(1, Math.min(v, 1 - v) / fy);
+
+let _mouthTex = null, _mouthMat = null, _spillTex = null;
+/** The dark of the passage: blackest at the treads, thinning toward the light above. */
+function stairMouthTexture() {
+  if (!_mouthTex) {
+    _mouthTex = grainTexture('stair-mouth', 22, 30, (u, v, rnd) => {
+      const m = Math.pow(feather(u, v, 0.26, 0.2), 0.85);
+      const deep = 0.55 + 0.45 * v * v;                   // v = 0 at the top of the opening
+      const l = 0.045 + 0.05 * (1 - v) + rnd * 0.012;
+      return [l, l * 0.94, l * 1.18, Math.min(1, m * deep * (0.92 + rnd * 0.16))];
+    });
+  }
+  return _mouthTex;
+}
+function stairMouthMaterial() {
+  if (!_mouthMat) _mouthMat = new THREE.MeshBasicMaterial({ map: stairMouthTexture(), transparent: true, depthWrite: false });
+  return _mouthMat;
+}
+/** The light spilling out of it: a soft vertical bloom with no edges at all. */
+function stairSpillTexture() {
+  if (!_spillTex) {
+    _spillTex = grainTexture('stair-spill', 20, 28, (u, v, rnd) => {
+      const dx = (u - 0.5) * 2, dy = (v - 0.28) * 1.6;
+      const r = Math.sqrt(dx * dx + dy * dy);
+      const a = Math.pow(Math.max(0, 1 - r), 2.2) * (0.9 + rnd * 0.2);
+      return [1, 1, 1, Math.min(1, a)];
+    });
+  }
+  return _spillTex;
+}
 
 export class DungeonView {
   /**
@@ -404,24 +462,47 @@ export class DungeonView {
     this.root.add(shaft);
   }
 
+  /**
+   * Up-staircase: a worn flight climbing to a landing under the "III" arch.
+   *
+   * This used to draw two untextured PlaneGeometry quads — a black `dark` rectangle with a slightly
+   * smaller additive pale-blue one on top of it — pinned to where the wall face *would* be. On a
+   * stairs tile with no wall neighbour (the tile the game opens on) there is nothing behind them, so
+   * the pair hung in mid-air as a hard-edged, black-bordered light-blue rectangle right behind the
+   * hero in the opening frame. Now: the mouth is only drawn when a wall really is there, both layers
+   * are feathered textures with pixel grain (no rectangle edge anywhere), and the passage always
+   * reads through geometry — treads, a landing, the arch — plus a soft radial glow that has no edges
+   * to show.
+   */
   addStairsUp(x, y, rng) {
     const d = this.wallSide(x, y, this.level);
+    const hasWall = this.tileAt(x + d.dx, y + d.dy) === TILE.WALL;
     const frame = this.frameFor(x, y, d);
-    const cell = cellUV(CELLS.marble);
+    const cell = cellUV(rng.pick(CELLS.plain));   // flagstone grain, not the flat marble cell
     for (let i = 0; i < 4; i++) {
       const m = new THREE.Matrix4().makeTranslation(0, 0.12 + i * 0.15, 0.34 - i * 0.2).premultiply(frame);
-      pushWornStep(this.detail, m, 0.96, 0.22 + (i === 3 ? 0.14 : 0), 0.12 + i * 0.15 + 0.06, cell, 1.05, 0.02);
+      pushWornStep(this.detail, m, 0.96, 0.22 + (i === 3 ? 0.14 : 0), 0.12 + i * 0.15 + 0.06, cell, 1.06, 0.03);
     }
+    // landing at the top of the flight, so the climb arrives somewhere solid
+    pushWornStep(this.detail, new THREE.Matrix4().makeTranslation(0, 0.57, -0.42).premultiply(frame), 0.96, 0.28, 0.63, cell, 1.02, 0.02);
     const g = new THREE.Group();
     g.applyMatrix4(frame);
-    // dark doorway recess cut into the wall face, with the light of the level above spilling out
-    const recess = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.62, 0.9)), this.mats.dark);
-    recess.position.set(0, 0.62 + 0.45, -0.485);
-    g.add(recess);
-    this.stairGlow = this.stairGlow || (() => { const m = this.mats.holyGlow.clone(); m.opacity = 0.22; return m; })();
-    const glow = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.58, 0.8)), this.stairGlow);
-    glow.position.set(0, 1.05, -0.46);
-    g.add(glow);
+    if (hasWall) {
+      // the passage itself, painted on the wall face: feathered alpha, darkest at the treads,
+      // opening toward the light above — a recess, not a quad
+      const mouth = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.72, 1.05)), stairMouthMaterial());
+      mouth.position.set(0, 1.02, -0.487);
+      mouth.renderOrder = 2;
+      g.add(mouth);
+      const spill = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.9, 1.3)), flatGlowMaterial(stairSpillTexture(), 0xcfe2ff, { opacity: 0.5, intensity: 0.9 }));
+      spill.position.set(0, 1.12, -0.455);
+      spill.renderOrder = 3;
+      g.add(spill);
+    }
+    // light of the level above falling down the flight (soft radial; nothing with a border)
+    const halo = billboard(glowTexture(), 0xd8e6ff, 1.15, { intensity: 0.45 });
+    halo.position.set(0, 1.0, -0.28);
+    g.add(halo);
     const shaft = new THREE.Mesh(this.own(new THREE.CylinderGeometry(0.22, 0.42, 1.6, 12, 1, true)), this.shaftMats.stair);
     shaft.position.set(0, 1.3, -0.25); shaft.rotation.x = 0.35;
     g.add(shaft);

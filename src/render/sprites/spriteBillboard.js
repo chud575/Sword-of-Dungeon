@@ -227,29 +227,34 @@ function makeSpriteMaterial(texture, fog) {
 
 /**
  * Contact shadow. Two lobes on one quad:
- *  - a tight, dark CORE inside `uCore` (the frame's real foot span) with a fast exponential falloff,
- *    darkest right under the boots — this is the bit that welds the character to the floor;
- *  - a wide, faint ambient-occlusion HALO out to the quad's edge that just dirties the tile.
+ *  - a small, NEAR-OPAQUE CORE ellipse no wider than the stance, flat across its middle and falling
+ *    off over three or four screen pixels — this is the only bit that welds a character to the
+ *    floor, and it has to be a hole in the tile, not a tint on it. A Gaussian is the wrong curve
+ *    here: it has no plateau, so its darkest value is one texel wide and everything else is a
+ *    smudge. This is a flat disc with a smoothstep rim instead;
+ *  - a wide, very faint ambient-occlusion HALO out to the quad's edge that just dirties the tile.
  * The core drifts a little away from the key light so the grounding agrees with the cast shadow.
  */
 function makeBlobMaterial(fog) {
   return new THREE.ShaderMaterial({
     uniforms: {
-      uStrength: { value: 1 }, uCore: { value: 0.42 }, uOffset: { value: new THREE.Vector2(0, 0) },
+      uStrength: { value: 1 }, uCore: { value: 0.3 }, uOffset: { value: new THREE.Vector2(0, 0) },
+      // width of the core's falloff as a fraction of its radius: set per frame from the real
+      // pixels-per-world so the rim is ~3-4 device pixels at any zoom
+      uEdge: { value: 0.12 },
       fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint,
     },
     transparent: true, depthWrite: false,
     vertexShader: `varying vec2 vUv; varying vec2 vFogXZ; void main() { vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vFogXZ = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }`,
-    fragmentShader: `uniform float uStrength, uCore; uniform vec2 uOffset; varying vec2 vUv; varying vec2 vFogXZ; ${fog.glsl()}
+    fragmentShader: `uniform float uStrength, uCore, uEdge; uniform vec2 uOffset; varying vec2 vUv; varying vec2 vFogXZ; ${fog.glsl()}
       void main() {
         vec2 p = (vUv - 0.5) * 2.0;
-        float rc = length((p - uOffset) / max(0.08, uCore));
-        float core = exp(-rc * rc * 2.0);          // near-opaque right under the boots
-        float mid = exp(-rc * rc * 0.45);          // fast but not abrupt shoulder
-        float halo = pow(max(0.0, 1.0 - length(p)), 2.4);   // faint ambient-occlusion skirt
-        float a = clamp(core * 0.78 + mid * 0.22 + halo * 0.14, 0.0, 1.0) * uStrength;
+        float rc = length((p - uOffset) / max(0.05, uCore));
+        float core = 1.0 - smoothstep(1.0 - uEdge, 1.0 + uEdge, rc);   // flat plateau, hard rim
+        float halo = pow(max(0.0, 1.0 - length(p)), 3.0);              // faint ambient-occlusion skirt
+        float a = clamp(core * 0.9 + halo * 0.13, 0.0, 1.0) * uStrength;
         vec2 f = fogMask(vFogXZ); a *= smoothstep(0.0, 1.0, f.r);
-        gl_FragColor = vec4(0.018, 0.014, 0.022, a);
+        gl_FragColor = vec4(0.014, 0.011, 0.018, a);
       }`,
   });
 }
@@ -501,7 +506,7 @@ export class SpriteBillboard {
     this._footCx += (foot.cx - this._footCx) * k;
     this._footLift += (Math.max(0, -foot.drop) - this._footLift) * k; // rows the feet are off the floor
     const footW = Math.max(0.12, this._footW * this.texelWorld * sq); // world width of the boots
-    const halo = footW * 2.1;                                    // quad half-width: core + AO halo
+    const halo = footW * 1.9;                                    // quad half-width: core + AO halo
     // lay flat (x = camera right), then yaw with the billboard
     this.blob.quaternion.setFromAxisAngle(this._xAxis, -Math.PI / 2).premultiply(this._q.setFromAxisAngle(this._up, yaw));
     this.blob.scale.set(halo * 2, halo * 1.3, 1);
@@ -514,7 +519,13 @@ export class SpriteBillboard {
     // read as a vague smudge instead of contact.
     this.blob.position.set(rx * offx + this.mesh.position.x, 0.012, rz * offx + this.mesh.position.z);
     const uB = this.blobMat.uniforms;
-    uB.uCore.value = Math.min(0.85, (footW * 0.95) / halo);
+    // The core is an ellipse HALF the stance across, so it never spills past the boots; the falloff
+    // is pinned to ~3.5 device pixels whatever the zoom, which is what makes it read as contact
+    // rather than as a soft pool of dirt.
+    const coreWorld = footW * 0.5;
+    uB.uCore.value = Math.min(0.85, coreWorld / halo);
+    const pxPerWorld = this.texelPx / Math.max(1e-4, this.texelWorld);
+    uB.uEdge.value = Math.min(0.5, Math.max(0.06, 1.75 / (pxPerWorld * coreWorld)));
     // the core sits a hair away from the key light, so it agrees with the stretched cast shadow
     uB.uOffset.value.set(-(lx * rx + lz * rz) * 0.05, -(lx * fx + lz * fz) * 0.05);
     uB.uStrength.value = this.opacity / (1 + this._footLift * 0.55); // a lifted boot casts less contact

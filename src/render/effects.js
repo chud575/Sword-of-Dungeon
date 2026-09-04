@@ -195,8 +195,8 @@ export class Effects {
     on('item:picked', (p) => this.onPicked(p));
     on('temple:sacrifice', () => { const v = this.playerPos; this.burst(v.x, v.z, { color: [0xffd866, 0xbfe6ff], count: 80, speed: 0.8, up: 3, life: 1.6, size: 0.1, gravity: 0.6, drag: 0.5, kind: 2 }); this.pillar(v.x, v.z, 0xbfe6ff, 1.6, 0.3); this.lights.pulse({ x: v.x, z: v.z, color: 0xbfe6ff, intensity: 10, dur: 0.8 }); });
     on('trap:triggered', (p) => { if (p.type === 'teleport') { this.castCore(p.x, p.y, 0x4ee1ff, 0.9); this.burst(p.x, p.y, { color: [0x4ee1ff, 0xffffff], count: 40, speed: 2, up: 2, life: 0.7, size: 0.1 }); } });
-    on('monster:stole', (p) => { const v = this.resolve(p.entity); this.coinFountain(v.x, v.z, 14); this.numbers.spawn(v.x, v.z, `-${p.gold} gold`, { style: 'gold', size: 0.9 }); });
-    on('player:hp', (p) => { if (p.delta > 0 && p.source !== 'regen' && p.delta >= 5) { const v = this.playerPos; this.numbers.spawn(v.x, v.z, `+${p.delta}`, { style: 'heal', size: 0.9 }); this.burst(v.x, v.z, { color: [0x69db7c, 0xd0ffd8], count: 30, speed: 0.6, up: 2, life: 1.2, size: 0.08, gravity: 0.3, drag: 0.8, y: 0.3, kind: 2 }); this.flashes.play({ x: v.x, y: 0.5, z: v.z, color: 0x69db7c, size0: 0.4, size1: 1.4, dur: 0.35, intensity: 1 }); } });
+    on('monster:stole', (p) => { const v = this.resolve(p.entity); this.coinFountain(v.x, v.z, 14); this.numbers.spawn(v.x, v.z, `-${p.gold} gold`, { style: 'gold' }); });
+    on('player:hp', (p) => { if (p.delta > 0 && p.source !== 'regen' && p.delta >= 5) { const v = this.playerPos; this.numbers.spawn(v.x, v.z, `+${p.delta}`, { style: 'heal' }); this.burst(v.x, v.z, { color: [0x69db7c, 0xd0ffd8], count: 30, speed: 0.6, up: 2, life: 1.2, size: 0.08, gravity: 0.3, drag: 0.8, y: 0.3, kind: 2 }); this.flashes.play({ x: v.x, y: 0.5, z: v.z, color: 0x69db7c, size0: 0.4, size1: 1.4, dur: 0.35, intensity: 1 }); } });
     on('level:enter', () => this.clearAll());
     on('fx:descend', () => { const v = this.playerPos; this.vortex(v.x, v.z, -1); });
     on('fx:ascend', () => { const v = this.playerPos; this.vortex(v.x, v.z, 1); });
@@ -210,7 +210,7 @@ export class Effects {
     this.particles.life.fill(0); this.particles.alpha.fill(0); this.particles.geometry.setDrawRange(0, 0);
     this.matter.life.fill(0); this.matter.alpha.fill(0); this.matter.geometry.setDrawRange(0, 0);
     for (const s of this.numbers.active) { this.scene.remove(s); this.numbers.pool.push(s); }
-    this.numbers.active.length = 0; this.numbers.recent.length = 0;
+    this.numbers.active.length = 0;
     for (const pool of [this.rings, this.runes, this.arcs, this.decals]) for (const it of pool.items) { it.on = false; it.m.visible = false; }
     for (const it of this.flashes.items) { it.on = false; it.s.visible = false; }
     for (const it of this.lights.items) { it.on = false; it.l.intensity = 0; }
@@ -263,7 +263,7 @@ export class Effects {
         this.decals.play({ x: d.x + dir.x * 0.25 + this.rng.float(-0.15, 0.15), z: d.z + dir.z * 0.25 + this.rng.float(-0.15, 0.15), color: 0x2a0606, intensity: 1, dur: 8, fn: (m, k) => { m.rotation.set(-Math.PI / 2, 0, rot); m.scale.setScalar(size * 1.2 * (0.6 + 0.4 * easeOut(Math.min(1, k * 20)))); m.material.opacity = 0.85 * (1 - k * k); } });
       } else this.burst(d.x, d.z, { color: [0x9a9088, 0xd0c8c0], count: 8, speed: 1.4, up: 1.2, life: 0.5, size: 0.06, y: 0.5, gravity: -5 });
       this.lights.pulse({ x: d.x, z: d.z, color: steel ? 0xffd090 : 0xff6040, intensity: crit ? 14 : 6, dur: crit ? 0.3 : 0.14, distance: 4 });
-      this.numbers.spawn(d.x, d.z, crit ? `${damage}!` : `${damage}`, { style: isPlayer ? 'player' : crit ? 'crit' : 'normal', size: crit ? 1.35 : isPlayer ? 1.05 : 0.92 });
+      this.numbers.spawn(d.x, d.z, crit ? `${damage}!` : `${damage}`, { style: isPlayer ? 'player' : crit ? 'crit' : 'normal' });
       this.shakeRequest += isPlayer ? Math.min(0.55, 0.14 + damage * 0.012) : crit ? 0.18 : 0.05;
       if (crit) { this.rings.play({ x: d.x, z: d.z, y: 0.03, color: 0xffffff, dur: 0.32, fn: (m, k) => { m.scale.setScalar(0.2 + easeOut(k) * 1.1); m.material.opacity = 0.9 * (1 - k); } }); this.flash.color.set(0.6, 0.55, 0.45); this.flash.amount = Math.max(this.flash.amount, 0.22); }
       if (isPlayer && damage >= 5) { this.flash.color.set(0.5, 0.05, 0.02); this.flash.amount = Math.min(0.6, 0.2 + damage * 0.02); }
@@ -274,7 +274,7 @@ export class Effects {
       this.flashes.play({ x: d.x - dir.x * 0.5, y: 0.6, z: d.z - dir.z * 0.5, color: 0xffe680, size0: 0.3, size1: 1.1, dur: 0.2 });
       this.rings.play({ x: d.x, z: d.z, y: 0.04, color: 0xffd43b, dur: 0.35, fn: (m, k) => { m.scale.setScalar(0.5 + easeOut(k) * 0.7); m.material.opacity = 0.8 * (1 - k); } });
       this.lights.pulse({ x: d.x, z: d.z, color: 0xffd43b, intensity: 8, dur: 0.2 });
-      this.numbers.spawn(d.x, d.z, 'BLOCKED', { style: 'blocked', size: 0.8 });
+      this.numbers.spawn(d.x, d.z, 'BLOCKED', { style: 'blocked' });
     }
     if (killed && !isPlayer) this.shakeRequest += 0.15;
   }
@@ -405,7 +405,7 @@ export class Effects {
     this.flash.color.set(1, 0.85, 0.4); this.flash.amount = 0.4;
     this.lights.pulse({ x, y: 1.2, z, color: 0xffd866, intensity: 14, dur: 1.2, distance: 7 });
     this.shakeRequest += 0.25;
-    this.numbers.spawn(x, z, 'LEVEL UP!', { style: 'banner', size: 1.3, y: 1.3, life: 2.2, rise: 0.7 });
+    this.numbers.spawn(x, z, 'LEVEL UP!', { style: 'banner', y: 1.35, life: 2.2 });
   }
 
   /** Vertical glowing pillar that fades out. */
@@ -479,14 +479,15 @@ export class Effects {
       // the player stands on the chest tile: show the opened chest at their feet on the camera side
       // (+z), lid thrown back away from the viewer so the gold inside is on display
       g.position.set(x, 0, z + 0.45);
-      const lid = g.userData.lid, inner = g.userData.inner;
+      const inner = g.userData.inner;
       g.rotation.y = 0;
       this.scene.add(g);
       this.transients.push({ obj: g, t: 0, dur: 3.4, fn: (o, k, t) => {
+        // the lid is painted open in the art, so the "spring" is a squash on the whole prop
         const open = easeOutBack(Math.min(1, t / 0.32));
-        lid.rotation.x = -1.9 * open; lid.position.z = -0.18 * open;
+        o.scale.set(1 + 0.10 * (1 - open), 0.82 + 0.18 * open, 1);
         const s = 0.9 * (0.6 + 0.4 * Math.sin(t * 5)) * (1 - k * k); inner.scale.set(s, s, 1);
-        if (k > 0.78) { const f = (k - 0.78) / 0.22; o.position.y = -f * 0.5; o.scale.setScalar(1 - f * 0.9); }
+        if (k > 0.78) { const f = (k - 0.78) / 0.22; o.position.y = -f * 0.5; o.scale.multiplyScalar(1 - f * 0.9); }
       } });
     }
     this.coinFountain(x, z, 60);
@@ -498,7 +499,7 @@ export class Effects {
   onPicked({ item, entity }) {
     if (!item) return;
     const x = item.x ?? entity.x, z = item.y ?? entity.y;
-    if (item.type === 'gold') { this.coinFountain(x, z, item.gold || 20); if (item.gold) this.numbers.spawn(x, z, `+${item.gold} gold`, { style: 'gold', size: 1.0, y: 0.8, life: 2.3, rise: 0.8 }); }
+    if (item.type === 'gold') { this.coinFountain(x, z, item.gold || 20); if (item.gold) this.numbers.spawn(x, z, `+${item.gold} gold`, { style: 'gold', y: 0.85, life: 2.0 }); }
     else if (item.type === 'sword') return;
     else {
       const col = COLORS.spells[item.type] ? new THREE.Color(COLORS.spells[item.type]).getHex() : item.type === 'potion' ? 0xff5a48 : 0x9fd0ff;
