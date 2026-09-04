@@ -981,7 +981,6 @@ function dressRoom(level, room, space) {
   // ---- density (§8.3): drop scatter, newest first, until the room reads as walkable floor.
   // The clear floor must stay as connected as the bare room was — a room whose floor is already
   // split (water, pillars, a bitten outline) is judged component by component, not as one blob.
-  const base = components(floor);
   const clearOk = () => {
     const taken = new Set();
     for (const d of out.furniture.concat(out.scatter)) {
@@ -991,7 +990,7 @@ function dressRoom(level, room, space) {
     if (taken.size > maxAny) return false;
     const clear = floor.filter((t) => !taken.has(key(t.x, t.y)));
     if (clear.length < Math.ceil(0.55 * floor.length)) return false;
-    for (const comp of base) {
+    for (const comp of baseComps) {
       const keep = comp.filter((t) => !taken.has(key(t.x, t.y)));
       if (!keep.length) return false;
       if (components(keep).length !== 1) return false;
