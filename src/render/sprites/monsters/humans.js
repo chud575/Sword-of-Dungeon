@@ -1828,7 +1828,15 @@ const DWG_TORSO_N = keyed(`
 
 const DWARVEN_GUARD = {
   G: MAN,
-  palette: humanPalette({ skin: '#c08b62', cloth: '#7c3330', leather: '#5b3f28', metal: '#8f96a2', accent: '#a8722e', eye: '#ffe6b0', picks: { metal: [1, 3, 5, 6] } }),
+  // THE DARKEST HUMAN IN THE GAME, AND HE WAS THE ONLY ONE WITH A PRIVATE SLICE OF THE CURVE.
+  // His iron took steps 1/3/5/6 where every other man's takes 2/4/5/6, so his mail sat a whole step
+  // under the Swordsman's plate; his beard took the accent at step 2. Between them that put a third
+  // of his body area in a band at 0.39-0.41 straddling his own median, and he measured 0.117 on
+  // screen in a LIT hall — under the floor, the darkest thing in the bestiary, while his atlas
+  // passed every rule there is. The iron is back on the house pick and the beard has come up a step
+  // to the copper it always wanted to be; nothing about the drawing, the form or the light plane
+  // changed, only which part of each material's own curve it is painted on.
+  palette: humanPalette({ skin: '#c08b62', cloth: '#7c3330', leather: '#5b3f28', metal: '#8f96a2', accent: '#a8722e', eye: '#ffe6b0', picks: { metal: [2, 4, 5, 6], accent: [3, 4, 6] } }),
   legs: { S: LEGS_S, E: LEGS_E },
   head: { S: DWG_HEAD_S, E: DWG_HEAD_E, N: DWG_HEAD_N }, headX: { S: 12, E: 12, N: 12 }, headY: 11,
   torso: { S: DWG_TORSO_S, E: DWG_TORSO_E, N: DWG_TORSO_N }, torsoX: { S: 12, E: 12, N: 12 }, torsoY: 18,

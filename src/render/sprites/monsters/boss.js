@@ -125,7 +125,7 @@ export const BOSS_PALETTE = new HousePalette()
   .set('D', '#977a86').set('O', '#ac9ba0').set('P', '#cbc6c4')
   .band('GHIQV', '#655648', { steps: 6, pick: [1, 2, 3, 4, 5] })  // horn, hoof, tooth — dark keratin
   .band('JKL', '#544268', { steps: 6, pick: [1, 2, 3] })      // wing membrane: plum-black
-  .set('M', '#ffb347').set('S', '#d8571c').set('N', INK_DEEP)   // furnace core / furnace bleed / char
+  .set('M', '#ffb347').set('S', '#c94a12').set('N', INK_DEEP)   // furnace core / furnace bleed / char
   // ('N' is the lip of the furnace — a hole you are looking INTO, so it takes the house void tone
   //  like every other hollow in the cast, not a tenth private near-black of its own.)
   // shared
@@ -369,11 +369,17 @@ function crest(p, pts, height, keys, { flip = false, tip = null } = {}) {
  * @param {{a:number, r:number}[]} fingers leading edge first, angles in screen space (y down)
  * @param {number} dir +1 = the wing reaches to the right
  * @param {string} keys trailing / mid / leading membrane tones + the bone tone
- * @param {{tatter?:number, scallop?:number}} [o] tatter = bites taken out of the hem
+ * @param {{tatter?:number, scallop?:number, lift?:number}} [o] tatter = bites taken out of the hem;
+ *   `lift` is where this wing sits on the FIGURE's own light plane (see `gl`), in ramp fractions —
+ *   a wing hanging on the creature's left, i.e. the key-light side, is a whole step up the membrane
+ *   ramp from the twin hanging on its right, which is the difference between a pair of wings lit by
+ *   one lamp and two identical dark flags that ring the body in shadow from both sides.
  */
 function wingFan(p, cx, cy, fingers, dir, keys, o = {}) {
   cx = S(cx); cy = S(cy); fingers = fingers.map((f) => ({ a: f.a, r: S(f.r) }));
   const n = fingers.length - 1;
+  const lift = o.lift ?? 0;
+  const nm = keys.length - 1;                            // membrane steps; the last key is the bone
   const scallop = S(o.scallop ?? 3.1), tatter = S(o.tatter ?? 0);
   const rmax = Math.max(...fingers.map((f) => f.r));
   const bx0 = Math.max(0, Math.floor(cx - rmax) - 1), bx1 = Math.min(p.w - 1, Math.ceil(cx + rmax) + 1);
@@ -390,11 +396,25 @@ function wingFan(p, cx, cy, fingers, dir, keys, o = {}) {
     let reach = fingers[i].r * (1 - fr) + fingers[i + 1].r * fr - scallop * Math.sin(fr * Math.PI);
     if (tatter && (i * 3 + ((fr * 7) | 0)) % 4 === 1) reach -= tatter;   // bites out of the hem
     if (rr > reach) continue;
-    // the membrane is shaded twice: across the fan (which panel) and along it (root light, hem dark)
+    // THE MEMBRANE IS ONE SHEET UNDER ONE LIGHT.
+    //
+    // It used to be shaded RADIALLY — bright at the root, dark at the hem — on top of a per-panel
+    // step, and that is a pillow by construction: a fan is centred on its own shoulder, so a
+    // HORIZONTAL row across it runs hem -> root -> hem, i.e. dark, light, dark with the two ends
+    // within a hair of each other. It measured 4773 texels of the Wyvern's east facings alone, and
+    // it is why the wyvern read 0.169 of its body centre-lit at the play camera against a ceiling
+    // of 0.15 — the wing was ringing its own outline in shadow.
+    //
+    // The membrane now takes the house key light as ONE PLANE across the whole fan: `u` is how far
+    // a pixel lies UP AND LEFT of the wing root, in units of the fan's own reach, so the tone falls
+    // monotonically from the top-left rim of the membrane to the bottom-right one however the fan
+    // is turned. The panel index survives as a HALF-STEP of structure — enough that the folds still
+    // read against the finger bones laid over them, never enough to reverse the plane — and the
+    // hem keeps a step of falloff (`rad`) in the same direction as the light rather than around it.
     const k = (a - fingers[0].a) / (fingers[n].a - fingers[0].a), rad = rr / Math.max(1, reach);
-    let ki = k < 0.30 ? 2 : k < 0.68 ? 1 : 0;
-    if (rad > 0.80) ki = Math.max(0, ki - 1);
-    else if (rad < 0.34) ki = Math.min(2, ki + 1);
+    const u = (-(x + 0.5 - cx) * 0.70 - (y + 0.5 - cy) * 0.72) / Math.max(1, rmax);
+    const t = 0.5 + lift + 0.66 * u + 0.15 * (0.5 - k) - 0.08 * rad;
+    const ki = t < 0 ? 0 : t > 0.999 ? nm - 1 : (t * nm) | 0;
     putPx(p, x, y, keys[ki]);
   }
   for (let i = 0; i <= n; i++) {
@@ -404,11 +424,18 @@ function wingFan(p, cx, cy, fingers, dir, keys, o = {}) {
       const t = (s / steps) * len;
       const x = Math.round(cx + Math.cos(a) * t * dir), y = Math.round(cy + Math.sin(a) * t);
       if (!getPx(p, x, y)) continue;                       // a bone only shows where membrane is
-      putPx(p, x, y, keys[3]);
+      // A BONE IS A RIDGE, NOT A STRIPE. Painted flat in `keys[nm]` it was a fixed tone laid across
+      // a membrane that has a light plane on it, so on the lit half of a fan the finger bones came
+      // back DARKER than the sheet they stand on — a dark line down the light side of a form, which
+      // is half of what the pillow rule measures. A bone now takes ONE STEP UP the membrane's own
+      // ramp from whatever it is crossing, so it reads as raised everywhere and its own tone
+      // (`keys[nm]`) is kept for the wing's leading arm, where there is no membrane under it.
+      let mi; for (let q = 0; q < nm; q++) if (keys.charCodeAt(q) === getPx(p, x, y)) mi = q;
+      putPx(p, x, y, mi === undefined ? keys[nm] : keys[Math.min(nm - 1, mi + 1)]);
     }
   }
   // the wing's own arm: root to the leading finger, two pixels thick
-  limbRaw(p, cx, cy, cx + Math.cos(fingers[0].a) * fingers[0].r * 0.55 * dir, cy + Math.sin(fingers[0].a) * fingers[0].r * 0.55, S(2.2), S(1.4), keys[3] + keys[3] + keys[3]);
+  limbRaw(p, cx, cy, cx + Math.cos(fingers[0].a) * fingers[0].r * 0.55 * dir, cy + Math.sin(fingers[0].a) * fingers[0].r * 0.55, S(2.2), S(1.4), keys[nm] + keys[nm] + keys[nm]);
   return p;
 }
 
@@ -1099,7 +1126,7 @@ function deSeat(back, body, front) {
  * this section is offset by it. That is the whole difference between a lit figure and a sticker.
  */
 const DE_TB = 0.24;
-const gl = (x, y) => DE_TB + 0.18 * ((30 - x) / 26) + 0.30 * ((38 - y) / 38);
+const gl = (x, y) => DE_TB + 0.18 * ((30 - x) / 26) + 0.18 * ((38 - y) / 38);
 const DM = (p, cx, cy, rx, ry, keys, o = {}) => mass(p, cx, cy, rx, ry, keys, { ...o, bias: (o.bias || 0) + gl(cx, cy) });
 const DC = (p, pts, r0, r1, keys, bias = 0) => {
   let sx = 0, sy = 0;
@@ -1319,7 +1346,13 @@ function demonWing(p, cx, cy, k, dir) {
     { a: lerp(1.51, 0.60, s), r: lerp(34, 24, s) },
     { a: lerp(1.58, 1.05, s), r: lerp(29, 18, s) },
   ];
-  wingFan(p, wx, wy, fingers, dir, WING + 'H', { scallop: 2.2, tatter: 2.0 });
+  // THE PAIR IS NOT A MIRROR. Two identical black flags, one either side of the ribs, put a band of
+  // shadow round BOTH edges of the demon with the lit chest between them — the row reads dark,
+  // light, dark, which is a pillow whatever the chest is doing, and it is what held the demon at
+  // 0.17 of its body centre-lit at the play camera. The wing on the key side (the creature's left,
+  // dir = -1) now hangs a full step up its own membrane ramp and its twin a step down it, which is
+  // the figure's one light plane (`gl`) reaching the one part of it `tone()` never touched.
+  wingFan(p, wx, wy, fingers, dir, WING + 'H', { scallop: 2.2, tatter: 2.0, lift: 0 });
   // the leading-edge arm running shoulder -> wrist, and the hooked claw at the crown of it
   if (s < 0.55) limb(p, cx, cy, wx, wy, 2.6, 1.5, WING, -0.02);
   const hx = Math.round(wx + dir), hy = Math.round(wy - 2);

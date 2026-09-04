@@ -668,7 +668,17 @@ const FD_SEAMS = ['123456', 'qrstu', 'vwxyz', 'ABCDG', 'HIJKL', 'klm'];
  * separates from a warm flagstone by chroma, and the molten veins are still the only hot thing on
  * the animal.
  */
-const FD_TB = 0.20;
+/*
+ * IT WAS 0.20, AND THAT WAS STILL A THIRD OF THE ANIMAL PAINTED UNDER ITS OWN MIDDLE. Measured off
+ * the canvas the drake read 0.138 in the LIT bestiary hall — the second darkest thing in it, a hair
+ * over the floor — with 32% of its body area on the bottom two steps of the hide and its file range
+ * down at 0.575, the narrowest in the cast. At 0.52 the same forms sit on the middle of the curve
+ * with the whole top of it available to the rim: the sheet's median goes 0.413 -> 0.524, its range
+ * 0.575 -> 0.690, its centre-lit area 0.088 -> 0.049 and its interior ink 0.15 -> 0.09, and every
+ * house warning it used to carry goes out. The basalt is still cool and near-neutral and the veins
+ * are still the only hot thing on it; what changed is that the animal is now lit.
+ */
+const FD_TB = 0.52;
 
 /**
  * THE LIGHT PLANE for the drake, the same device the demon uses (monsters/boss.js): `tone()` lights
