@@ -136,7 +136,7 @@ const GRID = {
  * @returns {number} K, world texels per world unit
  */
 export function syncWorldGrid(renderer, camera) {
-  if (!renderer || !camera || !camera.isPerspectiveCamera) return GRID.uWorldTexels.value;
+  if (!renderer || !camera || !(camera.isPerspectiveCamera || camera.isOrthographicCamera)) return GRID.uWorldTexels.value;
   const S = frameTexelSize(renderer, camera, PX_PER_TILE); // idempotent: the cast reads the same S
   const g = texelGrid();
   // one world texel = S device pixels = one sprite texel, at the depth the camera is looking at

@@ -130,6 +130,18 @@ const _gFwd = new THREE.Vector3(), _gVp = new THREE.Vector2();
  * @returns {number} device pixels per texel (>= 1)
  */
 export function frameTexelSize(renderer, camera, pxPerTile = PX_PER_TILE) {
+  // Orthographic: scale does not vary with depth, so the grid is exact with no rounding at all.
+  // The rig sizes its frustum from a chosen integer texel size, so we can read it straight back —
+  // which is why an ortho camera has none of the hysteresis/path-dependence a perspective one needs.
+  if (camera && camera.isOrthographicCamera) {
+    const vp = renderer.getDrawingBufferSize(_gVp);
+    const worldH = (camera.top - camera.bottom) / (camera.zoom || 1);
+    const pxPerWorld = vp.y / Math.max(1e-6, worldH);
+    const want = pxPerWorld / pxPerTile;
+    GRID.want = want; GRID.pxPerWorld = pxPerWorld; GRID.depth = 0;
+    GRID.init = true; GRID.S = Math.max(1, Math.round(want));
+    return GRID.S;
+  }
   if (!camera || !camera.isPerspectiveCamera) return GRID.S;
   const vp = renderer.getDrawingBufferSize(_gVp);
   const fwd = _gFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
@@ -628,7 +640,11 @@ export class SpriteBillboard {
     const ay = wp.y - camera.position.y;
     const az = wp.z + this.mesh.position.z - camera.position.z;
     const depth = Math.max(0.05, ax * fwd.x + ay * fwd.y + az * fwd.z); // view-space depth of the pivot
-    const pxPerWorld = (vp.y * 0.5 * (camera.zoom || 1)) / (Math.tan(camera.fov * Math.PI / 360) * depth);
+    // Orthographic has no field of view and no falloff with depth: the scale is one constant for
+    // the whole frame, which is exactly why the pixel grid comes out exact.
+    const pxPerWorld = camera.isOrthographicCamera
+      ? vp.y / Math.max(1e-6, (camera.top - camera.bottom) / (camera.zoom || 1))
+      : (vp.y * 0.5 * (camera.zoom || 1)) / (Math.tan(camera.fov * Math.PI / 360) * depth);
     const pitch = Math.asin(Math.max(-1, Math.min(1, -fwd.y)));
     u.uZLift.value = 1 / Math.max(0.35, Math.cos(pitch)); // depth-only: see the vertex shader
     // ONE TEXEL SIZE FOR THE WHOLE SCREEN (see the header): the grid comes from the camera, so every

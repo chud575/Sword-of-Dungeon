@@ -18,11 +18,22 @@ const BASE_DIST = 12.5;
 // isometric/angled diorama. High elevation + zero yaw keeps corridors reading as clean rows and
 // columns the way the 1983 original did, while the few degrees off vertical keep wall faces and
 // character sprites visible.
-const BASE_ELEV = 72 * DEG;
+// Straight down, then tilted 17 degrees off vertical: the original's plan view, with just enough
+// lean to show wall faces and keep character sprites facing the player.
+const BASE_ELEV = (90 - 17) * DEG;
 const BASE_YAW = 0;
+// Orthographic: apparent size is set purely by how much world the frustum covers, independent of
+// distance, so one world unit is the same number of screen pixels everywhere in the frame. That is
+// what makes an exact pixel grid possible - see viewHeightFor().
+// Chosen so the viewport height divides into a whole number of sprite texels: at a 900px buffer
+// this lands on 3 device pixels per texel, which is the size the cast is drawn to read at.
+const BASE_TILES_TALL = 9.4; // world tiles visible top-to-bottom at zoom 1
 /** Zoom stops: each wheel notch moves to the neighbouring stop. */
 export const ZOOM_STOPS = [0.72, 0.85, 1, 1.18, 1.4];
 const DEAD_ZONE = { x: 0.42, z: 0.32 }; // half extents, tiles
+// Camera sway is off: the rig no longer leads the player or drifts while idle. Deliberate motion
+// (hit shake, stairs dive, pit fall) still plays; only the continuous sway is gone.
+const LOOKAHEAD_TILES = 0;
 const FRAME_BIAS = new THREE.Vector3(0, 0, -0.3); // player sits a hair below centre (diorama framing)
 const FOLLOW_OMEGA = 7.5, OVERVIEW_OMEGA = 3.5, LOOKAHEAD_OMEGA = 3.2;
 
@@ -42,7 +53,12 @@ export class CameraRig {
    * @param {{bus?:import('../core/events.js').EventBus}} [opts]
    */
   constructor(aspect = 16 / 9, { bus = globalBus } = {}) {
-    this.camera = new THREE.PerspectiveCamera(BASE_FOV, aspect, 0.3, 120);
+    this.aspect = aspect || 1;
+    this.viewportPx = 900;      // drawing-buffer height; renderer keeps this current
+    this.texelSize = 3;         // device pixels per sprite texel - always an integer
+    // Near/far span the whole rig: the camera sits ~13 units out and must never clip the dungeon.
+    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -60, 200);
+    this.applyFrustum();
     this.bus = bus;
     // follow state
     this.target = new THREE.Vector3(); // raw followed position
@@ -58,6 +74,7 @@ export class CameraRig {
     this.distance = BASE_DIST;
     this.zoom = 1;
     this.currentZoom = 1;
+    this._lastFrustumZoom = -1;
     this.currentDistance = this.distance;
     this.currentElevation = this.elevation;
     this.currentYaw = this._yaw;
@@ -121,7 +138,36 @@ export class CameraRig {
 
   dispose() { for (const off of this.unsub) if (typeof off === 'function') off(); this.unsub.length = 0; }
 
-  setAspect(aspect) { this.camera.aspect = aspect; this.camera.updateProjectionMatrix(); }
+  /**
+   * Size the orthographic frustum so one sprite texel is an exact whole number of device pixels.
+   * Choosing the integer FIRST and deriving the world height from it (rather than rounding a
+   * world-derived value) means the pixel grid is exact by construction: no rounding drift, no
+   * hysteresis, and no dependence on how the camera arrived at this zoom.
+   * @param {number} pxPerTile sprite texels per world tile
+   */
+  applyFrustum(pxPerTile = 32) {
+    const ov = this.overview;
+    const wantTiles = ov ? ov.viewHeight : BASE_TILES_TALL / Math.max(0.01, this.currentZoom || 1);
+    // Overview must not crop, so round DOWN to the texel size (a larger view); normal play rounds to
+    // the nearest, which keeps the intended framing.
+    const raw = this.viewportPx / (wantTiles * pxPerTile);
+    const S = Math.max(1, ov ? Math.floor(raw) : Math.round(raw));
+    this.texelSize = S;
+    const h = this.viewportPx / (S * pxPerTile); // world units tall
+    this.viewHeight = h;
+    const w = h * this.aspect;
+    const c = this.camera;
+    c.left = -w / 2; c.right = w / 2; c.top = h / 2; c.bottom = -h / 2;
+    c.updateProjectionMatrix();
+  }
+
+  /** Apply the frustum for a transient zoom value (used by the punch effects in place()). */
+  applyFrustumForZoom(z) { const prev = this.currentZoom; this.currentZoom = z; this.applyFrustum(); this.currentZoom = prev; }
+
+  setAspect(aspect) { this.aspect = aspect; this.applyFrustum(); }
+
+  /** Renderer tells the rig the drawing-buffer height so the texel size can stay exact. */
+  setViewportHeight(px) { if (px > 0 && px !== this.viewportPx) { this.viewportPx = px; this.applyFrustum(); } }
 
   /** Follow a world position with a look-ahead direction (world-space, scaled). */
   follow(pos, dir = null) {
@@ -130,19 +176,24 @@ export class CameraRig {
     const ax = clamp(this.anchor.x, pos.x - DEAD_ZONE.x, pos.x + DEAD_ZONE.x);
     const az = clamp(this.anchor.z, pos.z - DEAD_ZONE.z, pos.z + DEAD_ZONE.z);
     this.anchor.set(ax, 0, az);
-    if (dir) this.lookAheadTarget.set(dir.x * 0.9, 0, dir.z * 0.9);
-    if (this.overview) { this.overview = null; this.cineTime = 0; }
+    if (dir) this.lookAheadTarget.set(dir.x * LOOKAHEAD_TILES, 0, dir.z * LOOKAHEAD_TILES);
+    if (this.overview) { this.overview = null; this.cineTime = 0; this.applyFrustum(); }
   }
 
   /** Frame an entire level (or a rectangle) from above. */
+  /**
+   * Frame a whole region (used by the map overview and the bestiary plates).
+   * Orthographic framing is set by the frustum, not by pulling the camera back, so this records the
+   * world height the view must cover; applyFrustum() turns that into a whole texel size.
+   */
   setOverview(cx, cz, w, h, { elevation = 76 } = {}) {
-    const fov = BASE_FOV * DEG;
-    const aspect = this.camera.aspect;
     const el = elevation * DEG;
-    const distH = (h * 0.5 * Math.sin(el) + 1.5) / Math.tan(fov / 2) * 0.98;
-    const distW = (w * 0.5 + 1) / (Math.tan(fov / 2) * aspect) * 0.98;
-    this.overview = { center: new THREE.Vector3(cx, 0, cz), distance: Math.max(distH, distW, 6), elevation: el };
+    // A tilted plan view foreshortens depth by sin(elevation); width is unaffected.
+    const needTall = h * Math.sin(el) + 3;
+    const needWide = (w + 3) / Math.max(0.2, this.aspect);
+    this.overview = { center: new THREE.Vector3(cx, 0, cz), distance: BASE_DIST, elevation: el, viewHeight: Math.max(needTall, needWide, 6) };
     this.cineTime = 0; this.orbitTouched = false;
+    this.applyFrustum();
   }
 
   /** Wheel / bracket zoom: steps to the neighbouring tasteful stop in the direction of change. */
@@ -231,7 +282,7 @@ export class CameraRig {
     }
     const z = this.currentZoom;
     const s = this.sanctum;
-    const elev = clamp(this.elevation - (z - 1) * 8 * DEG, 64 * DEG, 80 * DEG) - s * 5 * DEG;
+    const elev = this.elevation; // fixed plan-view tilt; zoom and sanctum no longer swing it
     const dist = (this.distance / z) * (1 - s * 0.14);
     const yaw = this._yaw + this.depthYaw + s * Math.sin(this.time * 0.35) * 3.5 * DEG;
     return { distance: dist, elevation: elev, yaw, lookHeight: 0.3 + s * 0.35 };
@@ -344,7 +395,10 @@ export class CameraRig {
     if (sh.amount > 0) { c.translateX(sh.x); c.translateY(sh.y); }
     const roll = sh.roll + (this._trRoll || 0);
     if (roll) c.rotateZ(roll);
-    const fov = BASE_FOV + this.fovOffset + (this._trFov || 0) + (this.currentZoom - 1) * -2;
-    if (Math.abs(fov - c.fov) > 1e-3) { c.fov = fov; c.updateProjectionMatrix(); }
+    // An orthographic camera has no field of view: zoom changes how much world the frustum covers.
+    // Transient "fov punch" effects become a small zoom nudge so hits and stairs still read.
+    const punch = (this.fovOffset + (this._trFov || 0)) * -0.006;
+    const z = this.currentZoom * (1 + punch);
+    if (Math.abs(z - this._lastFrustumZoom) > 1e-4) { this._lastFrustumZoom = z; this._frustumZoom = z; this.applyFrustumForZoom(z); }
   }
 }

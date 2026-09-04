@@ -92,7 +92,7 @@ function makeGridProbe() {
   const probe = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false }));
   probe.name = 'world-grid-probe';
   probe.frustumCulled = false; probe.renderOrder = -2000; probe.castShadow = false; probe.receiveShadow = false;
-  probe.onBeforeRender = (renderer, scene, camera) => { if (scene && camera && camera.isPerspectiveCamera) syncWorldGrid(renderer, camera); };
+  probe.onBeforeRender = (renderer, scene, camera) => { if (scene && camera && (camera.isPerspectiveCamera || camera.isOrthographicCamera)) syncWorldGrid(renderer, camera); };
   return probe;
 }
 

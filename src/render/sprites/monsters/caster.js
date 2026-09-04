@@ -69,9 +69,15 @@ const edge = (p) => outline(p, '#', { lit: LIT, litKey: '@' });
 // magic high because it is light rather than paint. Per-species `clothStep`/`magicStep` knobs are
 // gone; a species that genuinely needs a different slice passes `picks` instead.
 const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
+// AND EVERY SLICE SAT A STEP TOO LOW (the same correction as humans.js and humanoid.js, because
+// the three groups share one law): a robe's deepest crease took step 0 — the tone `ramp()` pins at
+// luminance 0.15 whatever the dye — and its lit fold stopped at step 5, so the biggest cloth mass
+// in the game had no light plane on it and the mage read 0.098 on screen in a lit hall. Each
+// material now starts a step above the floor of its own ramp and reaches the top where a highlight
+// belongs; magic and shimmer are light rather than paint and already lived up there.
 const RAMP_PICK = {
-  cloth: [0, 2, 4, 5], trim: [1, 4], metal: [1, 3, 5, 6],
-  accent: [1, 3, 5], magic: [2, 4, 6], shimmer: [2, 4, 6],
+  cloth: [1, 3, 5, 6], trim: [2, 5], metal: [2, 4, 5, 6],
+  accent: [2, 4, 6], magic: [2, 4, 6], shimmer: [2, 4, 6],
 };
 
 /**
@@ -89,7 +95,7 @@ const RAMP_PICK = {
 const SKIN_OPTS = { hueShift: 0.012, satShift: -0.05 };
 /** The flesh keys, darkest first: feature shadow, shadow, core, light, feature highlight. */
 const SKIN_KEYS = 'j123k';
-const SKIN_PICK = [1, 2, 3, 4, 5];
+const SKIN_PICK = [2, 3, 4, 5, 6];
 
 const SEAM_RAMPS = ['4567', SKIN_KEYS, '89', 'abcd', 'efg', 'mno', 'stu'];
 
@@ -729,7 +735,7 @@ const MAGE = {
     accent: '#d8d3c6', magic: '#57c8ff', eye: '#bdefff', spark: '#f2fbff',
     // the robe is most of the sprite, so it may not sit on the floor of its own ramp: lift the
     // whole column a step and take the lit fold from the top of the curve instead of the middle
-    picks: { cloth: [1, 3, 4, 6] },
+    picks: { cloth: [2, 4, 5, 6] },
   }),
   head: { S: MAGE_HEAD_S, E: MAGE_HEAD_E, N: MAGE_HEAD_N },
   headAt: { S: [7, 3], E: [7, 3], N: [7, 3] },   // NOT 0: at 0 the hat peak overran the cell and lost its outline (the cast beat lifts the head another 2 rows)
@@ -775,7 +781,7 @@ const WARLOCK = {
   ragged: true,
   split: 0.13,
   palette: casterPalette({
-    skin: '#9d8f9c', cloth: '#4c2a63', trim: '#3a2136', metal: '#8b7f96',
+    skin: '#b0a2ae', cloth: '#6b4187', trim: '#5b3a52', metal: '#9f93aa',
     accent: '#cfc3a6', magic: '#b98cff', eye: '#ff7a3c', spark: '#f0dcff',
   }),
   head: { S: WAR_HEAD_S, E: WAR_HEAD_E, N: WAR_HEAD_N },
@@ -887,7 +893,7 @@ const SPRITE_PALETTE = casterPalette({
   skin: '#a9c8da', cloth: '#7fa3bd', trim: '#4f7fa8', metal: '#9fc4d8',
   accent: '#c6d8e2', magic: '#7fc8de', eye: '#c9ff7a', spark: '#ffffff',
   shimmer: '#93b6c8', voidCol: '#26394f',
-  picks: { shimmer: [1, 3, 5], cloth: [0, 2, 3, 4], magic: [1, 3, 5] },
+  picks: { shimmer: [2, 4, 6], cloth: [1, 3, 5, 6], magic: [2, 4, 6] },
 });
 
 /** The pixie's body, solid — never drawn, only hollowed. */

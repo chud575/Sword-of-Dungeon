@@ -543,17 +543,33 @@ export function readLift(median) {
 }
 
 /**
- * The gamma for a packed sheet, measured once and memoised on the sheet object (the character
- * factory caches one sheet per type, but builds a billboard per entity).
+ * THE RESCUE IS SWITCHED OFF AT THE RENDERER, AND THIS IS THE SWITCH.
+ *
+ * `readLiftFor` is the ONE door the rescue reached the screen through: `spriteBillboard` calls it
+ * per sheet and hands the result to the fragment shader as `uReadLift`. It now returns 1 for
+ * everything, always — no sprite in the game is brightened by the renderer any more.
+ *
+ * WHY, in one measurement. Twelve of the twenty-two shipping sheets used to land on EXACTLY 0.1426
+ * of predicted screen value, which is `sceneValue(READ_LIFT_TARGET)` — not twelve independent
+ * pieces of art that happened to agree, but twelve pieces of art painted too dark and pulled up to
+ * one number by a gamma. A rescue that every dark sheet lands on is not a safety net, it is the
+ * paint: it flattens twelve species onto one value, it hides the fault from anyone reading the
+ * atlas, and it made the sheets that needed repainting the hardest ones to find. So the cast was
+ * repainted instead — every material's ramp now starts a step above the floor of its own curve and
+ * reaches the top of it, and `tone()`/`keyShade()` put a real light plane over each figure — and
+ * with that done not one shipping sheet's median falls under `READ_LIFT_TARGET` any more, so
+ * switching the door shut changes nothing on screen except that nothing is being carried.
+ *
+ * `readLift()` above survives as the MODEL `lint()` judges with: it is what says how far a sheet
+ * WOULD have to be rescued, which is the number that names a sheet as painted too dark. What it no
+ * longer does is make that true of the frame.
  * @param {import('./spriteSheet.js').Sheet} sheet
- * @returns {number}
+ * @returns {number} 1, always
  */
 export function readLiftFor(sheet) {
   if (typeof sheet.readLift === 'number') return sheet.readLift;
-  const a = analyseSheet(sheet);
-  const g = a ? readLift(a.median) : 1;
-  Object.defineProperty(sheet, 'readLift', { value: g, enumerable: false, writable: true });
-  return g;
+  Object.defineProperty(sheet, 'readLift', { value: 1, enumerable: false, writable: true });
+  return 1;
 }
 
 /**

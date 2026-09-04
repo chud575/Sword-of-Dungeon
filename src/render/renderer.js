@@ -142,6 +142,8 @@ export class Renderer {
     this.composer.setSize(w, h);
     this.bloom.setSize(w, h);
     this.grading.uniforms.uRes.value.set(w * this.gl.getPixelRatio(), h * this.gl.getPixelRatio());
+    // resize() also runs during construction, before the WebGL renderer exists
+    if (this.renderer) this.cameraRig.setViewportHeight(this.renderer.getDrawingBufferSize(new THREE.Vector2()).y);
     this.cameraRig.setAspect(w / h);
   }
 

@@ -66,11 +66,11 @@ function band(keys, base, { steps = Math.max(5, keys.length), pick = null } = {}
   return keys;
 }
 
-const FUR = band('12345', '#6f6152');                             // dire wolf: ash-brown wolf pelt
+const FUR = band('12345', '#6f6152', { steps: 6, pick: [1, 2, 3, 4, 5] });   // dire wolf: ash-brown wolf pelt
 const PELT = band('abcde', '#54402e');                            // werebear: dark umber shag
 const MUZZLE = band('fg', '#8a6f52', { steps: 5, pick: [1, 3] }); // wolf / bear snout leather
-const STONE = band('hijkl', '#5f6d80');                           // gargoyle: cold slate vs warm walls
-const HIDE = band('nopqr', '#6d7550');                            // troll: sickly bog green
+const STONE = band('hijkl', '#5f6d80', { steps: 6, pick: [1, 2, 3, 4, 5] }); // gargoyle: cold slate vs warm walls
+const HIDE = band('nopqr', '#6d7550', { steps: 6, pick: [1, 2, 3, 4, 5] });  // troll: sickly bog green
 const MATTED = band('tu', '#553a2a', { steps: 5, pick: [1, 3] }); // troll's matted hair
 const BONE = band('BCD', '#cfc4a6', { steps: 5, pick: [2, 3, 4] }); // fangs, claws, horn tips
 BEAST_PALETTE
@@ -82,6 +82,13 @@ BEAST_PALETTE
   .set('E', INK_DEEP).set('W', '#fff3e2')                         // eye socket / catch-light
   .set('Y', '#e8a33a').set('R', '#c9503c')                        // ember iris / blood iris
   .set('F', '#fff4f0');                                           // hurt flash
+
+// THE THREE PICKS ABOVE ARE THE ONLY EDIT THIS FILE TOOK from the repaint-dark pass, and they are
+// one idea: a `band()` whose default pick starts at step 0 puts its darkest key on the tone
+// `ramp()` pins at luminance 0.15 whatever the base colour, so the wolf, the gargoyle and the troll
+// each had a quarter of their coat nailed to the floor of their own ramp and needed the renderer's
+// read-lift to be visible at all. Six steps picked 1-5 starts the shadow one step above that floor
+// and hands the coat a light step at the top; nothing else about these hides changes.
 
 /**
  * THE SEAM VOCABULARY (pixelPainter `seamInk`): every material of this group, DARKEST FIRST.

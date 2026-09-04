@@ -148,7 +148,9 @@ function syncPixelSprite(m, renderer, camera) {
   const size = renderer.getDrawingBufferSize(_bufSize);
   _fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
   const d = Math.max(0.5, (_wp.x - camera.position.x) * _fwd.x + (_wp.y - camera.position.y) * _fwd.y + (_wp.z - camera.position.z) * _fwd.z);
-  const pxPerWorld = (size.y * 0.5 * (camera.zoom || 1)) / (Math.tan((camera.fov || 45) * Math.PI / 360) * d);
+  const pxPerWorld = camera.isOrthographicCamera
+    ? size.y / Math.max(1e-6, (camera.top - camera.bottom) / (camera.zoom || 1))
+    : (size.y * 0.5 * (camera.zoom || 1)) / (Math.tan((camera.fov || 45) * Math.PI / 360) * d);
   const w = frameTexelSize(renderer, camera, PX_PER_TILE) / pxPerWorld;
   const t = m.userData.tex;
   m.scale.set(t.w * w, t.h * w, 1);

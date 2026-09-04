@@ -103,7 +103,7 @@ const ro = (v) => Math.round(v * CUR.k);
  * @returns {Pix} a new Pix
  */
 function relight(p, keys, o = {}) {
-  return keyShade(p, keys, { lit: LIT, ...o });
+  return keyShade(p, keys, { lit: LIT, local: PILLOW_LOCAL, dome: PILLOW_DOME, ...o });
 }
 // `local` and `dome` are the two knobs here that DO NOT point at the key light: `local` mixes in
 // each ROW's own centre line and `dome` adds a bump that peaks in the middle of the block, so a
@@ -112,6 +112,15 @@ function relight(p, keys, o = {}) {
 // call below now runs them at a fraction of that (0.14-0.16 / 0.02-0.03): enough that a limb still
 // turns as a cylinder, not enough to outvote the terminator. `style.js lint()` fails a sheet whose
 // forms measure centre-lit, and the barbarian's bare torso was the loudest of them.
+//
+// AND THE FRACTION HAS TO BE THE DEFAULT, OR IT IS NOT A LAW. Only the barbarian and the ranger
+// (`keyed()`, which spells every pass out) were passing it: the hobgoblin, the rogue and the
+// assassin call `relight()` with a bias and nothing else, so all three took `keyShade`'s own
+// defaults — local 0.3, dome 0.10, i.e. exactly the setting the paragraph above says makes a
+// pillow. The hobgoblin duly measured 15% of its visible body centre-lit at the play camera, over
+// the style.js ceiling, while its SHEET measured 6% and passed. These are those knobs, once, so a
+// call that says nothing gets the house figure rather than the library's.
+const PILLOW_LOCAL = 0.15, PILLOW_DOME = 0.025;
 
 /**
  * Re-shade several materials of one hand-drawn block to the house key light in one call:
@@ -133,7 +142,12 @@ const keyed = (rows, passes) => passes.reduce((q, [keys, o]) => relight(q, keys,
 // gone: five species each inventing their own contrast is exactly what made the cast look sampled
 // from five different games.
 const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
-const RAMP_PICK = { cloth: [0, 2, 3, 4], leather: [1, 3, 4], metal: [1, 3, 5, 6], accent: [1, 3, 5] };
+// AND EVERY SLICE SAT A STEP TOO LOW ON THE CURVE (the same correction as humans.js, because the
+// two groups share this law): cloth ran 0-4 of seven, so its darkest crease was the tone `ramp()`
+// pins at luminance 0.15 whatever the dye, and its LIT fold stopped at the middle of the curve —
+// a garment with no light plane on it. Each material now starts one step above the floor of the
+// ramp and reaches the top two steps, where a highlight belongs.
+const RAMP_PICK = { cloth: [1, 3, 4, 5], leather: [2, 4, 5], metal: [2, 4, 5, 6], accent: [2, 4, 6] };
 
 /**
  * THE FLESH RAMP IS NOT A CLOTH RAMP. `RAMP_PICK` above cools a shadow by walking it toward violet
@@ -150,7 +164,7 @@ const RAMP_PICK = { cloth: [0, 2, 3, 4], leather: [1, 3, 4], metal: [1, 3, 5, 6]
 const SKIN_OPTS = { hueShift: 0.012, satShift: -0.05 };
 /** The flesh keys, darkest first: feature shadow, shadow, core, light, feature highlight. */
 const SKIN_KEYS = 'j123k';
-const SKIN_PICK = [1, 2, 3, 4, 5];
+const SKIN_PICK = [2, 3, 4, 5, 6];
 
 /**
  * One species palette over the shared key vocabulary.
@@ -1014,7 +1028,7 @@ const ROGUE = {
     accent: '#d8a42e', eye: '#bff2ff',
     // his cloak IS his silhouette, so it takes the top of the curve as well as the bottom: on the
     // group default ([0,2,3,4]) the lit fold never got past mid grey and he read as one flat shape
-    picks: { cloth: [0, 2, 3, 6] },
+    picks: { cloth: [1, 3, 5, 6] },
   }),
   head: { S: ROG_HEAD_S, E: ROG_HEAD_E, N: ROG_HEAD_N },
   headX: { S: 12, E: 12, N: 12 },
@@ -1400,7 +1414,7 @@ const BARBARIAN = {
     // clothed fighter's face does: a shadow two steps up from the bottom, not one. The mane takes
     // the BOTTOM of its curve for the opposite reason — at the middle it landed on the same value
     // as the lit chest and the two merged into one beige mass that read as a hooded tunic.
-    picks: { skin: [2, 3, 5], accent: [0, 1, 3] },
+    picks: { skin: [3, 4, 6], accent: [1, 2, 4] },
   }),
   head: { S: BAR_HEAD_S, E: BAR_HEAD_E, N: BAR_HEAD_N },
   headX: { S: 16, E: 16, N: 16 },
@@ -1539,7 +1553,7 @@ const RANGER = {
     // A figure dressed head to foot in forest green has almost nothing to be light or dark WITH:
     // his fletchings take the top of the curve and his belt and boots the very bottom, which is
     // what stops the whole silhouette flattening into the wall behind him.
-    picks: { accent: [2, 4, 6], leather: [0, 3, 5] },
+    picks: { accent: [3, 5, 6], leather: [1, 4, 6] },
   }),
   head: { S: RAN_HEAD_S, E: RAN_HEAD_E, N: RAN_HEAD_N },
   headX: { S: 12, E: 12, N: 12 },
@@ -1689,7 +1703,7 @@ const SCARF = [
 const ASSASSIN = {
   scale: 1.12,
   palette: humanoidPalette({
-    skin: '#8f7c9a', cloth: '#4e4b80', leather: '#332f52', metal: '#aab2c2',
+    skin: '#a2909c', cloth: '#645f96', leather: '#4c4770', metal: '#aab2c2',
     accent: '#a8283c', eye: '#ff5a4a',
   }),
   head: { S: ASS_HEAD_S, E: ASS_HEAD_E, N: ASS_HEAD_N },

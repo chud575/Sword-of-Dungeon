@@ -89,9 +89,32 @@ const pad = (w, h, dx, dy) => (q) => ink(blit(makePix(w, h), q, dx, dy));
  * is painted in the middle of its ramp with room to go lighter AND darker.
  */
 let TB = 0;
-const M = (p, cx, cy, rx, ry, keys, o = {}) => mass(p, cx, cy, rx, ry, keys, { ...o, bias: (o.bias || 0) + TB });
-const C = (p, pts, r0, r1, keys, bias = 0) => curve(p, pts, r0, r1, keys, bias + TB);
-const LB = (p, x0, y0, x1, y1, r0, r1, keys, bias = 0) => limb(p, x0, y0, x1, y1, r0, r1, keys, bias + TB);
+
+/**
+ * AND `TB` ALONE IS FIFTEEN LITTLE LIGHTS. `tone()` gives every mass its own terminator about its
+ * own centre, which is right for a form and wrong for a FIGURE: a drake built out of twenty
+ * capsules and superellipses comes back with twenty separate lamps in it, each one bright in the
+ * middle of its own solid, and a row of those across a body is a pillow however honestly each one
+ * was shaded. The fyre drake and the demon already carried the cure (`fgl` below, `gl` in
+ * monsters/boss.js): ONE plane over the whole animal saying how far up its ramp a form sitting at
+ * (x, y) starts — brighter toward the top-left of the figure, darker toward the bottom-right — so
+ * the twenty lamps become one. The wyvern, the shadow dragon and the spider had none of it, and
+ * measured 0.18 / 0.11 / 0.08 of their body area centre-lit at the play camera.
+ *
+ * `PLANE` is that plane, in AUTHORED coordinates, set once at the top of each frame function beside
+ * `TB`. Species that roll their own (the fyre drake) set it to zero and add theirs downstream.
+ */
+let PLANE = () => 0;
+/** Build one: `amount` up the ramp across the figure, from (x0,y0) toward the top-left. */
+const lightPlane = (x0, y0, w, h, ax, ay) => (x, y) => ax * ((x0 - x) / w) + ay * ((y0 - y) / h);
+const M = (p, cx, cy, rx, ry, keys, o = {}) => mass(p, cx, cy, rx, ry, keys, { ...o, bias: (o.bias || 0) + TB + PLANE(cx, cy) });
+const C = (p, pts, r0, r1, keys, bias = 0) => {
+  let sx = 0, sy = 0;
+  for (const q of pts) { sx += q[0]; sy += q[1]; }
+  return curve(p, pts, r0, r1, keys, bias + TB + PLANE(sx / pts.length, sy / pts.length));
+};
+const LB = (p, x0, y0, x1, y1, r0, r1, keys, bias = 0) =>
+  limb(p, x0, y0, x1, y1, r0, r1, keys, bias + TB + PLANE((x0 + x1) / 2, (y0 + y1) / 2));
 
 /**
  * A palette holding only house ramps: `set('keys', base)` registers one `ramp()` (5-7 steps,
@@ -148,15 +171,22 @@ const WY_W = WY_SW + R(10, WY_S), WY_H = WY_SH + R(3, WY_S);
 const WY_PIV = { x: R(30, WY_S) + WY_DX, y: R(66, WY_S) + WY_DY };
 const wyvDone = pad(WY_W, WY_H, WY_DX, WY_DY);
 const WY = drakePalette()
-  .band('123456', '#7a6d3e', HUE)   // dry olive-tan hide
-  .band('qrstu', '#93553a', HUE)    // rust wing membrane
+  .band('123456', '#988a5c', HUE)   // dry olive-tan hide
+  .band('qrstu', '#a86a4a', HUE)    // rust wing membrane
   .band('vwxyz', '#a09684', BONE)   // horn, beak plate, talon
   .set('E', INK_DEEP).set('Y', '#ffc45a');   // eye socket, the amber eye (emissive)
 const WY_HIDE = '123456', WY_MEM = 'qrstu', WY_HORN = 'vwxy';
 /** Seam vocabulary (pixelPainter `seamInk`), darkest first: hide, membrane, horn. */
 const WY_SEAMS = ['123456', 'qrstu', 'vwxyz'];
-/** Sun-dried leather sits low on its ramp: this is the dusty drake, not a chalk one. */
-const WY_TB = -0.09;
+/**
+ * Sun-dried leather sits a little UNDER the middle of its ramp — this is the dusty drake, not a
+ * chalk one — but it was at -0.09 with no figure plane over it, which put a two-metre animal's
+ * whole body in the bottom third of its own curve: 0.111 on screen in a lit hall against the
+ * hero's 0.310. The species reads by hue (olive hide, rust membrane), not by being dark.
+ */
+const WY_TB = 0.06;
+/** The figure's own light plane: the shoulders and the near wing catch it, the tail loses it. */
+const WY_PLANE = lightPlane(30, 40, 34, 34, 0.16, 0.27);
 
 /** One wing, held as an ARM: `k` 0 = folded hook at the shoulder, 1 = full reach. */
 function wyvWing(p, cx, cy, k, dir, droop = 0) {
@@ -220,7 +250,7 @@ function wyvHead(p, hx, hy, dir, both = false) {
 function wyvFrame(f, o = {}) {
   drawAt(WY_S);
   const p = makePix(WY_SW, WY_SH);
-  TB = WY_TB;
+  TB = WY_TB; PLANE = WY_PLANE;
   const b = o.bob || 0, s = o.stride || 0, c = o.crouch || 0, k = o.wing ?? 0.24;
   const neck = o.neck || 0, lunge = o.lunge || 0, droop = o.droop || 0;
   const sw = [0, -4, 4][(o.tail || 0) % 3];
@@ -327,16 +357,25 @@ const SD_W = SD_SW + R(14, SD_S), SD_H = SD_SH + R(8, SD_S);
 const SD_PIV = { x: R(38, SD_S) + SD_DX, y: R(70, SD_S) + SD_DY };
 const sdDone = pad(SD_W, SD_H, SD_DX, SD_DY);
 const SD = drakePalette()
-  .band('123456', '#3a3157', HUE)   // violet-black scale
-  .band('qrstu', '#4e3568', HUE)    // plum membrane: thin enough that the light behind it comes through
+  .band('123456', '#605684', HUE)   // violet scale
+  .band('qrstu', '#7a5793', HUE)    // plum membrane: thin enough that the light behind it comes through
   .band('vwxyz', '#8f8a80', BONE)   // bone horn and claw
   .set('G', '#7fd8ff').set('H', '#c9f0ff').set('I', '#4a86b8')  // the inner glow: core, flare, bleed
   .set('E', INK_DEEP);
 const SD_SCL = '123456', SD_MEM = 'qrstu', SD_HORN = 'vwxy';
 /** Seam vocabulary (pixelPainter `seamInk`), darkest first: scale, membrane, horn, inner glow. */
 const SD_SEAMS = ['123456', 'qrstu', 'vwxyz', 'IGH'];
-/** The darkest body in the game: it is read by the light LEAKING OUT of it, not falling on it. */
-const SD_TB = -0.26;
+/**
+ * The darkest body in the game: it is read by the light LEAKING OUT of it, not falling on it — but
+ * "darkest in the game" is a RELATIVE claim and it had been drawn as an absolute one. At -0.26 on a
+ * scale ramp based on '#3a3157' the tallest silhouette in the game read 0.117 on screen with a P10
+ * of 0.003: not a dark dragon, a dragon-shaped hole. The violet is lighter and the body sits at the
+ * middle of its ramp; what keeps it the darkest thing in the room is that its ramp is the coolest
+ * and its glow is the only warm light on it.
+ */
+const SD_TB = 0.04;
+/** The figure's own light plane: the lyre of horns and the near wing catch it, the far haunch does not. */
+const SD_PLANE = lightPlane(38, 40, 40, 38, 0.16, 0.26);
 
 /** A wing at spread `k`: the span is the read, so even furled it reaches past the shoulder. */
 function sdWing(p, cx, cy, k, dir, droop = 0) {
@@ -381,7 +420,7 @@ function sdHead(p, hx, hy, dir, glow) {
 function sdFrame(f, o = {}) {
   drawAt(SD_S);
   const p = makePix(SD_SW, SD_SH);
-  TB = SD_TB;
+  TB = SD_TB; PLANE = SD_PLANE;
   const b = o.bob || 0, k = o.wing ?? 0.66, s = o.stride || 0, c = o.crouch || 0;
   const neck = o.neck || 0, lunge = o.lunge || 0, droop = o.droop || 0, heat = o.heat ?? 0.6;
   const ground = 67;
@@ -598,12 +637,13 @@ function fdSeat(body, front) {
 const FD = drakePalette()
   // basalt, not brick: the old '#5e3128' hide was the colour of the floor the drake stands on, so
   // at gameplay distance a three-tile creature vanished into the flagstones. This is cooler and
-  // darker, and it makes the veins in it the only warm thing on the animal.
-  .band('123456', '#4a332f', HUE)   // cooled basalt hide
-  .band('qrstu', '#66452c', HUE)    // dark ochre belly and jaw plate: the fire under it is what glows, not the plate
+  // LIGHTER — darker was the other half of that same bug — and near enough to neutral that the
+  // veins in it stay the only warm thing on the animal.
+  .band('123456', '#7b6a78', HUE)   // cooled basalt hide, repainted into the light
+  .band('qrstu', '#8a6a4a', HUE)    // ochre belly and jaw plate: the fire under it is what glows, not the plate
   .band('vwxyz', '#9b9082', BONE)   // tooth, claw, horn
-  .band('ABCDG', '#3d3243', { satShift: 0.02 })   // the folded wing: cold slate, darker than the hide
-  .band('HIJKL', '#4a3f36', BONE)   // HORN — dark keratin. 'vwxyz' is polished bone, and a horn
+  .band('ABCDG', '#635670', { satShift: 0.02 })   // the folded wing: cold slate, a step under the hide
+  .band('HIJKL', '#7d6e5e', BONE)   // HORN — dark keratin. 'vwxyz' is polished bone, and a horn
                                     // painted out of it swept back over the neck like a pale
                                     // hadrosaur crest: the brightest shape on a creature whose
                                     // brightest thing is supposed to be the fire inside it.
@@ -618,16 +658,24 @@ const FD_SEAMS = ['123456', 'qrstu', 'vwxyz', 'ABCDG', 'HIJKL', 'klm'];
  * whose interior sits low on the ramp; repainted at 1.34x the interior grows with the square while
  * the rim grows with the side, so the old -0.34 took the sheet's median value from 0.25 down to
  * 0.15 — under style.js VALUE_FLOOR, which is a creature collapsed into the bottom of its own ramp.
- * -0.26 puts the basalt back where it read at the size the ladder now asks for.
+ *
+ * AND -0.26 WAS STILL THE SAME MISTAKE, ONE NOTCH SMALLER. Measured off the canvas instead of off
+ * the atlas, the biggest creature in the bestiary read 0.039 in a lit hall — the darkest thing on
+ * screen by a factor of two, three times darker than the Troll standing next to it, against the
+ * hero's 0.310. `capRim` below keeps the LIT PLANE on the rim where it belongs, so the body can sit
+ * at the middle of its ramp without the drake coming back wearing a cream saddle. The identity is
+ * carried by hue and by the veins, not by the value: the hide is a cool near-neutral basalt that
+ * separates from a warm flagstone by chroma, and the molten veins are still the only hot thing on
+ * the animal.
  */
-const FD_TB = -0.26;
+const FD_TB = 0.20;
 
 /**
  * THE LIGHT PLANE for the drake, the same device the demon uses (monsters/boss.js): `tone()` lights
  * every mass about its own centre, which models a form and leaves the ANIMAL unlit. This is how far
  * up its ramp a form sitting at (x, y) starts — brighter toward the top-left of the figure.
  */
-const fgl = (x, y) => FD_TB + 0.08 * ((40 - x) / 38) + 0.15 * ((44 - y) / 36);
+const fgl = (x, y) => FD_TB + 0.17 * ((40 - x) / 38) + 0.30 * ((44 - y) / 36);
 const FM = (p, cx, cy, rx, ry, keys, o = {}) => mass(p, cx, cy, rx, ry, keys, { ...o, bias: (o.bias || 0) + fgl(cx, cy) - TB });
 const FC = (p, pts, r0, r1, keys, bias = 0) => {
   let sx = 0, sy = 0;
@@ -868,7 +916,7 @@ function fdFrame(f, o = {}) {
   drawAt(FD_S);
   const p = makePix(FD_SW, FD_SH);
   const fx = o.breath ? makePix(FD_W, FD_H) : null;
-  TB = FD_TB;
+  TB = FD_TB; PLANE = () => 0;
   const b = (o.bob || 0) + (o.crouch || 0), g = o.gait || 0, heat = o.heat ?? 0.5;
   const rear = o.rear || 0, sw = [0, -4, 4][(o.tail || 0) % 3];
 
@@ -1005,16 +1053,23 @@ const DS_W = DS_SW + R(8, DSP_S), DS_H = DS_SH + R(5, DSP_S);
 const DS_PIV = { x: R(26, DSP_S) + DS_DX, y: R(44, DSP_S) + DS_DY };
 const dsDone = pad(DS_W, DS_H, DS_DX, DS_DY);
 const DS = drakePalette()
-  .band('123456', '#3c4a68', HUE)   // cold slate carapace: violet-navy in shadow, teal in the light
-  .band('qrstu', '#5d5078', HUE)    // violet underside and joints
+  .band('123456', '#5d6e91', HUE)   // cold slate carapace: violet-navy in shadow, teal in the light
+  .band('qrstu', '#7d6f9a', HUE)    // violet underside and joints
   .set('v', '#5b4a80')              // the echo: the half of it that is elsewhere
   .set('x', '#a8ecff').set('y', '#e8f8ff')                      // shimmer, glint (emissive)
   .set('E', INK_DEEP).set('Y', '#c8f0ff');                     // eye socket, eye (emissive)
 const DS_SHELL = '123456', DS_JOINT = 'qrstu';
 /** Seam vocabulary (pixelPainter `seamInk`), darkest first: carapace, joints. */
 const DS_SEAMS = ['123456', 'qrstu'];
-/** Cold chitin: the shell sits below its own highlights so the shimmer and the eyes stay the bright notes. */
-const DS_TB = -0.13;
+/**
+ * Cold chitin: the shell sits below its own highlights so the shimmer and the eyes stay the bright
+ * notes — below them, not at the bottom of the ramp. At -0.13 on a '#3c4a68' carapace the depth-8
+ * horror measured 0.111 on screen and its violet echo, the whole point of the creature, was two
+ * near-blacks against each other.
+ */
+const DS_TB = 0.02;
+/** The figure's own light plane: the near knees catch it, the far legs and the abdomen do not. */
+const DS_PLANE = lightPlane(26, 26, 26, 24, 0.14, 0.22);
 
 /**
  * One jointed leg: femur up-and-out to a knee ABOVE the body, tibia down-and-out, tarsus to the
@@ -1068,7 +1123,7 @@ function shimmer(p, cx, cy, phase) {
 function dsFrame(f, o = {}) {
   drawAt(DSP_S);
   const p = makePix(DS_SW, DS_SH);
-  TB = DS_TB;
+  TB = DS_TB; PLANE = DS_PLANE;
   const b = (o.bob || 0) + (o.drop || 0), g = o.gait || 0, rear = o.rear || 0;
   const floor = 42;
   const cx = 26, cy = 28 + b - rear;

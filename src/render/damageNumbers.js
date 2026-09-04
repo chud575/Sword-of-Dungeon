@@ -458,7 +458,7 @@ export class DamageNumbers {
     this._cam = camera; this._gl = renderer;
     const size = renderer.getDrawingBufferSize(_v2);
     this._vpH = size.y; this._vpW = size.x;
-    if (camera && camera.isPerspectiveCamera) this._S = frameTexelSize(renderer, camera, PX_PER_TILE);
+    if (camera && (camera.isPerspectiveCamera || camera.isOrthographicCamera)) this._S = frameTexelSize(renderer, camera, PX_PER_TILE);
   }
 
   /** Per-frame, per-number: hand the shader the viewport, the quad's exact pixel size and its nudge. */

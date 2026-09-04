@@ -115,10 +115,16 @@ export const BOSS_PALETTE = new HousePalette()
   // wine base keeps drifting its highlights back toward rose (#a55d73, #b08d90), which is the exact
   // tone the old "pink man" was made of; these six are set by hand so the shadows still gain
   // saturation and drift violet while the lights lose ALL of it.
-  .set('A', '#2b1226').set('B', '#48203a').set('C', '#66354a')
-  .set('D', '#87626a').set('O', '#9c817c').set('P', '#bcaca1')
-  .band('GHIQV', '#3f342f', { steps: 6, pick: [0, 1, 2, 3, 4] })  // horn, hoof, tooth — dark keratin
-  .band('JKL', '#2a1c33', { steps: 6, pick: [0, 1, 2] })      // wing membrane: plum-black
+  // AND THE WHOLE CURVE WAS PAINTED A STOP TOO LOW. The six steps below used to run 0.11 · 0.18 ·
+  // 0.28 · 0.43 · 0.54 · 0.69, with the body sitting in the bottom half of them BY DESIGN — which
+  // is a fine idea on a sheet and a black cut-out on screen: the demon measured 0.034 at the play
+  // camera against the hero's 0.266, its own P10 at 0.000. Same six-step shape, same wine-to-ash
+  // drift, lifted one whole step so the shadow end is a colour instead of a hole and the lit plane
+  // has somewhere to go.
+  .set('A', '#4a2440').set('B', '#6b3958').set('C', '#87566a')
+  .set('D', '#977a86').set('O', '#ac9ba0').set('P', '#cbc6c4')
+  .band('GHIQV', '#655648', { steps: 6, pick: [1, 2, 3, 4, 5] })  // horn, hoof, tooth — dark keratin
+  .band('JKL', '#544268', { steps: 6, pick: [1, 2, 3] })      // wing membrane: plum-black
   .set('M', '#ffb347').set('S', '#d8571c').set('N', INK_DEEP)   // furnace core / furnace bleed / char
   // ('N' is the lip of the furnace — a hole you are looking INTO, so it takes the house void tone
   //  like every other hollow in the cast, not a tenth private near-black of its own.)
@@ -252,10 +258,32 @@ const LX = -0.66, LY = -0.70, LZ = 0.18;
  * and in monsters/drakes.js still means what it meant; what changes is the middle, which now falls
  * to the terminator instead of sitting up near the highlight.
  */
+/**
+ * THE ROOM IS NOT A VACUUM, AND THAT IS WHY THIS CAST WAS A ROW OF HOLES.
+ *
+ * `t = lam * 0.66 + 0.46` is a lambert with NO bounce term: the half of every form turned away from
+ * the key light fell straight through the bottom of its ramp, so a mass twenty texels across came
+ * back with a quarter of its area on step 0 — the tone `ramp()` pins at luminance 0.15 whatever the
+ * base colour is. Raising a species' base colour could not fix that, because raising the base only
+ * moves the TOP of a house ramp; the bottom step is nailed to `RAMP_FLOOR_L`. It is why the fyre
+ * drake read 0.039 on screen against the hero's 0.310 while its palette looked perfectly healthy.
+ *
+ * So the mapping now models the room a creature is standing in. `TONE_GAIN` is the spread of the
+ * key across a form (still a real directional terminator — brightest at the top-left rim, darkest
+ * at the bottom-right, one clean crossing between them, no bright core), `TONE_MID` puts the
+ * terminator in the MIDDLE of the ramp instead of a third of the way up it, and `TONE_BOUNCE` is
+ * the torchlit floor and walls throwing a little light back into the shadow side: below it the
+ * response compresses to a third rather than continuing to fall, so a turned-away plane reads DARK
+ * and still reads as the creature's own colour. Every hand-tuned `bias` in this file and in
+ * monsters/drakes.js keeps its meaning — a form pushed a step back is still a step back — and a
+ * bias steep enough (below about -0.4) can still reach step 0 where a real void is wanted.
+ */
+const TONE_GAIN = 0.42, TONE_MID = 0.58, TONE_BOUNCE = 0.21;
 function tone(nx, ny, keys, bias = 0) {
   const r2 = Math.min(1, nx * nx + ny * ny);
   const lam = nx * LX + ny * LY + Math.sqrt(1 - r2) * LZ;
-  let t = lam * 0.66 + 0.46 + bias;
+  let t = lam * TONE_GAIN + TONE_MID + bias;
+  if (t < TONE_BOUNCE) t = TONE_BOUNCE + (t - TONE_BOUNCE) * 0.34;
   t = t < 0 ? 0 : t > 0.999 ? 0.999 : t;
   return keys[(t * keys.length) | 0];
 }
@@ -1070,8 +1098,8 @@ function deSeat(back, body, front) {
  * top-left corner of the figure, darker toward the bottom-right — and every mass, limb and curve in
  * this section is offset by it. That is the whole difference between a lit figure and a sticker.
  */
-const DE_TB = -0.20;
-const gl = (x, y) => DE_TB + 0.09 * ((30 - x) / 26) + 0.15 * ((38 - y) / 38);
+const DE_TB = 0.24;
+const gl = (x, y) => DE_TB + 0.18 * ((30 - x) / 26) + 0.30 * ((38 - y) / 38);
 const DM = (p, cx, cy, rx, ry, keys, o = {}) => mass(p, cx, cy, rx, ry, keys, { ...o, bias: (o.bias || 0) + gl(cx, cy) });
 const DC = (p, pts, r0, r1, keys, bias = 0) => {
   let sx = 0, sy = 0;

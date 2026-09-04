@@ -124,7 +124,14 @@ const rigPt = (G, x, y) => [Math.round(G.px + (x - 20) * G.k), Math.round(G.py +
 // in the middle (they are dyed and pigmented, not polished), metal reaches the top because a
 // specular highlight is the whole point of steel, and leather sits between them.
 const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
-const RAMP_PICK = { cloth: [0, 2, 3, 4], leather: [1, 3, 4], metal: [1, 3, 5, 6], accent: [1, 3, 5] };
+// AND EVERY ONE OF THESE SLICES SAT A STEP TOO LOW ON THE CURVE. Cloth took steps 0-4 of seven,
+// so a tunic's darkest crease was step 0 — the tone `ramp()` pins at luminance 0.15 whatever the
+// dye — and its LIT fold never got past step 4, the middle of the curve. That is a garment with no
+// light plane on it, and it is why six ordinary men in a torchlit hall measured 0.09-0.16 on screen
+// against the hero's 0.31. Each material now takes the slice its surface really occupies WITH the
+// key on it: the shadow end starts one step above the floor of the ramp, and the lit end reaches
+// the top two steps, where a highlight belongs.
+const RAMP_PICK = { cloth: [1, 3, 4, 5], leather: [2, 4, 5], metal: [2, 4, 5, 6], accent: [2, 4, 6] };
 
 /**
  * THE FLESH RAMP IS NOT A CLOTH RAMP — and the difference is what made two of these six look
@@ -163,7 +170,7 @@ const RAMP_PICK = { cloth: [0, 2, 3, 4], leather: [1, 3, 4], metal: [1, 3, 5, 6]
 const SKIN_OPTS = { hueShift: 0.012, satShift: -0.05 };
 /** The flesh keys, darkest first: feature shadow, shadow, core, light, feature highlight. */
 export const SKIN_KEYS = 'j123k';
-const SKIN_PICK = [1, 2, 3, 4, 5];
+const SKIN_PICK = [2, 3, 4, 5, 6];
 
 /**
  * One species palette over the shared key vocabulary. `picks` overrides which steps of the
@@ -786,6 +793,11 @@ function capePix(G, cx, cy, o = {}) {
       const cut = hemAt(u);
       if (y > h - 1 - cut) continue;
       // FORM FIRST, FOLDS SECOND — and this is where the biggest cloak in the game used to pillow.
+      // (The across-the-cloth fall was 0.55 of the cloth's ramp and the fold ripple 0.09 of it,
+      //  which on screen — where the room's light and the grade compress a body's ramp to about a
+      //  third of what the atlas holds — left the folds nearly as loud as the form and the War Lord
+      //  measuring 16% of his visible body centre-lit at the play camera. 0.70 against 0.06 puts
+      //  the form back in charge of the value and leaves the folds as texture on top of it.)
       // It was shaded by `cos(u * 5.6)` alone: a value that depends only on the fold phase is the
       // SAME on both sides of the cloth, so the cape came out light down its middle with '7' pinned
       // to both edges, and the key light had no say in it at all. The value now falls across the
@@ -793,7 +805,7 @@ function capePix(G, cx, cy, o = {}) {
       // ride on top as a fraction of a step. Then the three things a form needs and this had none
       // of: the terminator, ONE core-shadow band just inside the shadow edge, and ONE step of
       // reflected light on the edge itself.
-      const shade = 0.80 - 0.55 * (u * 0.5 + 0.5) - 0.26 * t + 0.09 * Math.cos(u * 5.6 + 0.7);
+      const shade = 0.86 - 0.70 * (u * 0.5 + 0.5) - 0.26 * t + 0.06 * Math.cos(u * 5.6 + 0.7);
       let key = shade > 0.62 ? '6' : shade > 0.40 ? '5' : shade > 0.18 ? '4' : '7';
       if (u < -0.86) key = '6';                         // rim of key light down the lit edge
       else if (u > 0.88) key = '4';                     // reflected light off the wall behind him
@@ -1315,7 +1327,7 @@ const SWD_TORSO_N = keyed(`
 
 const SWORDSMAN = {
   G: MAN,
-  palette: humanPalette({ skin: '#d8ab80', cloth: '#46628a', leather: '#6b5138', metal: '#aab2c0', accent: '#a8742c', eye: '#dff2ff', picks: { cloth: [0, 2, 4, 5] } }),
+  palette: humanPalette({ skin: '#d8ab80', cloth: '#46628a', leather: '#6b5138', metal: '#aab2c0', accent: '#a8742c', eye: '#dff2ff', picks: { cloth: [1, 3, 5, 6] } }),
   legs: { S: LEGS_S, E: LEGS_E },
   head: { S: SWD_HEAD_S, E: SWD_HEAD_E, N: SWD_HEAD_N }, headX: { S: 14, E: 14, N: 14 }, headY: 4,
   torso: { S: SWD_TORSO_S, E: SWD_TORSO_E, N: SWD_TORSO_N }, torsoX: { S: 12, E: 12, N: 12 }, torsoY: 17,
@@ -1499,7 +1511,7 @@ const MONK = {
   G: MAN,
   // his robe takes one step higher off the house ramp than the armoured five: undyed hemp in
   // torchlight is the lightest cloth in the cast, and it is what keeps his value spread open
-  palette: humanPalette({ skin: '#c99a72', cloth: '#8a7247', leather: '#6a5030', metal: '#9aa0a8', accent: '#9c5b36', eye: '#f0e4c8', picks: { cloth: [1, 3, 4, 5] } }),
+  palette: humanPalette({ skin: '#c99a72', cloth: '#8a7247', leather: '#6a5030', metal: '#9aa0a8', accent: '#9c5b36', eye: '#f0e4c8', picks: { cloth: [2, 4, 5, 6] } }),
   legs: { S: barefoot(LEGS_S), E: barefoot(LEGS_E) },
   head: { S: MNK_HEAD_S, E: MNK_HEAD_E, N: MNK_HEAD_N }, headX: { S: 14, E: 14, N: 14 }, headY: 6,
   torso: { S: MNK_TORSO_S, E: MNK_TORSO_E, N: MNK_TORSO_N }, torsoX: { S: 12, E: 12, N: 12 }, torsoY: 17,
@@ -1665,7 +1677,7 @@ const DKW_CAPE_N = capePix(MAN, 24, 19, { w: 10, h: 24, back: true });
 
 const DARK_WARRIOR = {
   G: MAN,
-  palette: humanPalette({ skin: '#5f5a70', cloth: '#33374c', leather: '#3c3448', metal: '#3b4054', accent: '#8e2f34', eye: '#ff5a3a', picks: { metal: [0, 2, 3, 5] } }),
+  palette: humanPalette({ skin: '#7a7490', cloth: '#5e6690', leather: '#61557a', metal: '#646c88', accent: '#a8404a', eye: '#ff5a3a', picks: { metal: [2, 3, 5, 6], cloth: [2, 4, 5, 6] } }),
   legs: { S: LEGS_S_PLATE, E: LEGS_E_PLATE },
   head: { S: DKW_HEAD_S, E: DKW_HEAD_E, N: DKW_HEAD_N }, headX: { S: 14, E: 14, N: 14 }, headY: 2,
   torso: { S: DKW_TORSO_S, E: DKW_TORSO_E, N: DKW_TORSO_N }, torsoX: { S: 12, E: 12, N: 12 }, torsoY: 16,
@@ -1859,7 +1871,7 @@ const WLD_HEAD_S = tilted(`
 .......abbccccccccbaa.......
 .......abbccccccccbaa.......
 ........abbccccccbaa........
-.........abbccccbaa.........`, 'abcd', { across: 2.6, down: 0.8 });
+.........abbccccbaa.........`, 'abcd', { across: 3.6, down: 1.5 });
 const WLD_HEAD_E = tilted(`
 ........65554444............
 ........65554444............
@@ -1877,7 +1889,7 @@ const WLD_HEAD_E = tilted(`
 ......abbccccccccccbaa......
 ......abbccccccccccbaa......
 .......abbccccccccbaa.......
-........abbccccccbaa........`, 'abcd', { across: 2.6, down: 0.8 });
+........abbccccccbaa........`, 'abcd', { across: 3.6, down: 1.5 });
 const WLD_HEAD_N = tilted(`
 ..........65554444..........
 ..........65554444..........
@@ -1895,7 +1907,7 @@ const WLD_HEAD_N = tilted(`
 .......abbccccccccbaa.......
 .......abbccccccccbaa.......
 ........abbccccccbaa........
-.........abbccccbaa.........`, 'abcd', { across: 2.6, down: 0.8 });
+.........abbccccbaa.........`, 'abcd', { across: 3.6, down: 1.5 });
 const WLD_TORSO_S = tilted(`
 ..................................
 ..........ggffffffffffee..........
@@ -1928,7 +1940,7 @@ const WLD_TORSO_S = tilted(`
 ......aabbbbbbbbbbbbbbbbbbaa......
 .......aaaaaaaaaaaaaaaaaaaa.......
 ..................................
-..................................`, 'abcd', { across: 2.5, down: 1.0 });
+..................................`, 'abcd', { across: 3.6, down: 1.5 });
 const WLD_TORSO_E = tilted(`
 ..................................
 .........ggffffffffffee...........
@@ -1961,13 +1973,13 @@ const WLD_TORSO_E = tilted(`
 ........aabbbbbbbbbbbbbbbbbbaa....
 .........aaaaaaaaaaaaaaaaaaaa.....
 ..................................
-..................................`, 'abcd', { across: 2.5, down: 1.0 });
+..................................`, 'abcd', { across: 3.6, down: 1.5 });
 const WLD_CAPE_S = capePix(LORD, 32, 31, { w: 18, h: 34 });
 const WLD_CAPE_N = capePix(LORD, 32, 33, { w: 15, h: 31, back: true });
 
 const WAR_LORD = {
   G: LORD,
-  palette: humanPalette({ skin: '#6a6152', cloth: '#8e2230', leather: '#4a3a2e', metal: '#666b86', accent: '#c09440', eye: '#ffb24a', picks: { metal: [0, 2, 4, 6] } }),
+  palette: humanPalette({ skin: '#8a806c', cloth: '#a83240', leather: '#66513f', metal: '#828aa8', accent: '#c09440', eye: '#ffb24a', picks: { metal: [2, 3, 5, 6], cloth: [2, 4, 5, 6] } }),
   legs: { S: LORD_LEGS_S, E: LORD_LEGS_E },
   head: { S: WLD_HEAD_S, E: WLD_HEAD_E, N: WLD_HEAD_N }, headX: { S: 18, E: 18, N: 18 }, headY: 9,
   torso: { S: WLD_TORSO_S, E: WLD_TORSO_E, N: WLD_TORSO_S }, torsoX: { S: 15, E: 15, N: 15 }, torsoY: 26,
