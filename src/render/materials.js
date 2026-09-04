@@ -2,17 +2,39 @@
 // generated in code from a seeded RNG; no assets are loaded. Materials are fog-of-war patched
 // by lighting.js (see patchFog) so darkness is applied in the shader.
 //
-// Dungeon surfaces use three procedural texture sets:
-//  - the flagstone ATLAS (4x4 unique slabs: plain, cracked, mossy, wet, mosaic, marble) with
-//    albedo + tangent-space normal + roughness maps; each floor instance / wall cap picks a cell
-//    through the per-instance `aTile` attribute (see patchAtlas), so no two neighbours repeat;
-//  - a continuous masonry strip (4 tiles wide, 1 tile-height tall) mapped in WORLD units along
-//    wall runs so brick courses flow around corners instead of restarting on every block;
-//  - a tileable world-space grunge map (moss / dirt / soot) multiplied over everything at two
-//    incommensurate scales, which kills visible tiling at overview zoom.
+// ---------------------------------------------------------------------------------------------
+// THE WORLD IS PIXEL-AUTHORED, ON THE SPRITE TEXEL GRID
+// ---------------------------------------------------------------------------------------------
+// The cast is hand-pixelled at `PX_PER_TILE` = 32 texels per world tile and drawn with NEAREST
+// filtering on a whole-pixel grid (sprites/spriteBillboard.js). The floor used to be authored at
+// 128 texels per tile with trilinear filtering, so at the default camera — where one sprite texel
+// covers exactly 4 device pixels — the hero was square texels standing on bilinear mush. One screen
+// at two resolutions is the one thing HD-2D cannot survive.
+//
+// So every dungeon surface texture is now authored at `TEXELS_PER_TILE` (32) texels per world unit
+// and uploaded with NearestFilter and a crisp base level:
+//  - the flagstone ATLAS is 8x4 cells of 32x32 TEXELS (256x128 in all). Every texel is placed by
+//    hand-style rules — a grout ring, a one-texel bevel, mottle quantised to a seven-step house
+//    ramp (sprites/style.js `ramp`), then two or three WEAR MARKS drawn from nine families
+//    (crack, chip, spall, pits, scuff, stain, chisel, hollow, inset) with seeded parameters. The
+//    old atlas had ONE crack generator and two cracked cells, so the same worm-shaped decal landed
+//    on the floor fourteen times a screen. Nine families x 30 slabs x four quarter turns does not
+//    repeat inside a room.
+//  - a continuous masonry strip, 128x32 texels = 4 tiles wide and exactly one world unit tall,
+//    mapped in WORLD units along wall runs so brick courses flow around corners.
+//  - a tileable world-space grunge map, sampled on the same 1/32-world texel grid (see
+//    patchSurface) so macro variation stays blocky instead of smearing a soft gradient over the
+//    pixel structure.
+//
+// COLOUR IS ONE FAMILY PER DEPTH, NOT PER SLAB. Slabs used to carry an independent random hue tint
+// (+-8% red, +-10% blue) so neighbours read olive / pink / tan / blue-grey: noise, not stone. Now
+// every slab comes off ONE seven-step ramp with value-only variation, and `stoneFamily(depth)`
+// gives the whole level one gentle family multiplier. The colour interest is the torchlight.
 import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
 import { patchFog } from './lighting.js';
+import { ramp } from './sprites/style.js';
+import { toRgb } from './sprites/pixelPainter.js';
 
 /** Palette used by the renderer (linear-space friendly hex values). */
 export const PALETTE = {
@@ -22,11 +44,23 @@ export const PALETTE = {
   blood: 0x8a1c1c, bone: 0xe6dcc6, iron: 0x9aa0a8, leather: 0x5a3b23, cloth: 0x7a3f2e,
 };
 
-/** Atlas layout shared by materials.js (texture) and dungeon.js (cell choice). */
-export const ATLAS = { cols: 4, rows: 4, cell: 128 };
-/** Named atlas cells (index = row * cols + col). */
+/**
+ * TEXELS PER WORLD TILE — the one grid the whole game is drawn on. Sprites are hand-pixelled at
+ * this density (`PX_PER_TILE` in sprites/spriteBillboard.js) and snapped to whole device pixels;
+ * every world texture is authored at the same number so a floor texel and a hero texel cover the
+ * same screen pixels at the default camera (4 device pixels each at 1600x900).
+ */
+export const TEXELS_PER_TILE = 32;
+
+/** Atlas layout shared by materials.js (texture) and dungeon.js (cell choice). 8x4 cells of 32x32 texels. */
+export const ATLAS = { cols: 8, rows: 4, cell: TEXELS_PER_TILE };
+/**
+ * Named atlas cells (index = row * cols + col). Eighteen plain slabs, each carrying its own
+ * seeded pick of wear marks, is what keeps a room from reading as one decal stamped over and over.
+ */
 export const CELLS = {
-  plain: [0, 1, 2, 3, 4, 5, 6, 7], cracked: [8, 9], mossy: [10, 11], wet: [12, 13], mosaic: 14, marble: 15,
+  plain: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+  cracked: [18, 19, 20, 21], mossy: [22, 23, 24, 25], wet: [26, 27, 28, 29], mosaic: 30, marble: 31,
 };
 /** UV offset of an atlas cell. */
 export function cellUV(i) { return [(i % ATLAS.cols) / ATLAS.cols, 1 - (Math.floor(i / ATLAS.cols) + 1) / ATLAS.rows]; } // canvas textures are Y-flipped on upload
@@ -75,15 +109,15 @@ const N = makeNoise(rng.fork('noise'));
  * @param {number} size
  * @param {(u:number,v:number,x:number,y:number)=>number[]} fn
  */
-export function makeTexture(size, fn, { repeat = 1 } = {}) {
-  return rgbTexture(size, size, (x, y) => fn(x / size, y / size, x, y), { repeat, srgb: true });
+export function makeTexture(size, fn, { repeat = 1, pixel = false } = {}) {
+  return rgbTexture(size, size, (x, y) => fn(x / size, y / size, x, y), { repeat, srgb: true, pixel });
 }
 
 /**
  * Texture from a per-pixel RGB callback (x, y in pixels). Non-colour data (normals, roughness,
  * grunge) is stored linear (`srgb: false`).
  */
-export function rgbTexture(w, h, fn, { repeat = 1, srgb = true, anisotropy = 4 } = {}) {
+export function rgbTexture(w, h, fn, { repeat = 1, srgb = true, anisotropy = 4, pixel = false } = {}) {
   const canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
@@ -100,11 +134,28 @@ export function rgbTexture(w, h, fn, { repeat = 1, srgb = true, anisotropy = 4 }
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(repeat, repeat);
   tex.anisotropy = anisotropy;
+  if (pixel) pixelate(tex);
+  return tex;
+}
+
+/**
+ * Upload a texture the way the sprite atlas is uploaded: NEAREST magnification, and a NEAREST
+ * mip chain for minification. The base level stays exactly as painted — at play distance one
+ * texel is ~4 device pixels, so level 0 is what the floor is sampled from and the pixel structure
+ * survives; the mips only exist so a far-zoom overview does not sparkle.
+ * @param {THREE.Texture} tex
+ */
+export function pixelate(tex) {
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestMipmapNearestFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 1;
+  tex.needsUpdate = true;
   return tex;
 }
 
 /** Tangent-space normal map from a height array (w*h floats, 0..1). `strength` in texels of slope. */
-function normalFromHeight(hgt, w, h, strength, { wrap = true } = {}) {
+function normalFromHeight(hgt, w, h, strength, { wrap = true, pixel = true } = {}) {
   const at = (x, y) => {
     if (wrap) { x = (x + w) % w; y = (y + h) % h; } else { x = Math.max(0, Math.min(w - 1, x)); y = Math.max(0, Math.min(h - 1, y)); }
     return hgt[y * w + x];
@@ -116,7 +167,7 @@ function normalFromHeight(hgt, w, h, strength, { wrap = true } = {}) {
     const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
     // three's tangent frame: +x right, +y up in texture space; canvas y grows downward so flip green
     return [nx * 0.5 + 0.5, -ny * 0.5 + 0.5, nz * 0.5 + 0.5];
-  }, { srgb: false });
+  }, { srgb: false, pixel });
 }
 
 function hexToRgb(hex) { return [((hex >> 16) & 255) / 255, ((hex >> 8) & 255) / 255, (hex & 255) / 255]; }
@@ -125,219 +176,387 @@ function scale(a, s) { return [a[0] * s, a[1] * s, a[2] * s]; }
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
 
-/** A random crack polyline (list of [x,y] in 0..1 cell space) with optional branch. */
-function makeCrack(r, len, step = 0.014) {
-  let x = r.float(0.15, 0.85), y = r.float(0.15, 0.85), a = r.float(0, Math.PI * 2);
-  const pts = [];
-  for (let i = 0; i < len; i++) { pts.push([x, y]); a += r.float(-0.55, 0.55); x += Math.cos(a) * step; y += Math.sin(a) * step; if (x < 0.02 || x > 0.98 || y < 0.02 || y > 0.98) break; }
-  return pts;
-}
-function crackMask(cracks, u, v, width) {
-  let m = 0;
-  for (const c of cracks) {
-    const w = c.width || width;
-    for (const [px, py] of c.pts) { const d = Math.hypot(px - u, py - v); if (d < w) m = Math.max(m, 1 - d / w); }
-  }
-  return m;
+// -------------------------------------------------------------------------------- the stone palette
+/** hex -> [r,g,b] in 0..1. */
+const unit = (h) => toRgb(h).map((c) => c / 255);
+
+/**
+ * THE dungeon stone: seven house-law steps (sprites/style.js `ramp`), darkest first. A floor is not
+ * allowed the sprites' full value range — it would compete with the cast — so the band is narrowed
+ * and the hue drift softened: shadows cool a little, they never go violet. Every flagstone in the
+ * game is painted out of THIS array and nothing else, which is what makes a room read as one
+ * quarry instead of a random tint per slab.
+ */
+const STONE = ramp('#8b8274', 7, { range: 0.34, step: 0.05, hueShift: 0.018, satShift: 0.012 }).map(unit);
+/** The ramp step a clean slab face sits on; wear pulls down from here, polish pushes up. */
+const STONE_MID = 4;
+/** Wall stone: the same family, a shade cooler and darker so walls sit behind the floor. */
+const WALLSTONE = ramp('#7c7a76', 7, { range: 0.36, step: 0.05, hueShift: 0.02, satShift: 0.012 }).map(unit);
+/** The obsidian re-skin for the sword level: same relief, violet-black glass. */
+const GLASSSTONE = ramp('#544a63', 7, { range: 0.4, step: 0.05, hueShift: 0.02, satShift: 0.03 }).map(unit);
+/** The dark between the slabs. Never pure black — the same law the sprite ink obeys. */
+const GROUT = unit('#2b2529');
+/** Damp growth in the hollows, five steps. */
+const MOSS = ramp('#5d7a3a', 5, { range: 0.3, step: 0.05, hueShift: 0.02, satShift: 0.03 }).map(unit);
+/** Pale cut marble for the temple slabs. */
+const MARBLE = ramp('#c9c3b4', 7, { range: 0.3, step: 0.05, hueShift: 0.02, satShift: 0.01 }).map(unit);
+
+/**
+ * NINE FAMILIES OF WEAR. The old atlas had exactly one crack generator and two cracked cells, so a
+ * single worm-shaped decal landed on the floor a dozen-plus times a screen and the eye counted it
+ * instantly. Every slab now takes two or three DIFFERENT families with seeded parameters, and there
+ * are thirty slabs; with the quarter-turn each instance also gets, a repeat is not findable.
+ */
+const WEAR_MARKS = ['crack', 'chip', 'spall', 'pits', 'scuff', 'stain', 'chisel', 'hollow', 'inset'];
+
+/**
+ * Paint the wear on ONE slab, in texels. `dv` is a shift in RAMP STEPS (negative = darker), `dh` a
+ * relief delta; nothing here writes a colour, so every mark lands on the same seven-step ramp and
+ * the normal map agrees with the albedo by construction.
+ * @param {import('../core/rng.js').Rng} r
+ * @param {number} S cell size in texels
+ * @param {string[]} marks which families this slab carries (may repeat)
+ */
+function paintWear(r, S, marks) {
+  const dv = new Float32Array(S * S), dh = new Float32Array(S * S);
+  const inside = (x, y) => x >= 1 && y >= 1 && x < S - 1 && y < S - 1;
+  const put = (x, y, v, h) => { if (!inside(x, y)) return; const i = y * S + x; dv[i] += v; dh[i] += h; };
+  const DIR8 = (a) => { const k = Math.round(a / (Math.PI / 4)) * (Math.PI / 4); return [Math.round(Math.cos(k)), Math.round(Math.sin(k))]; };
+
+  /** A hairline fracture: an eight-direction WALK, one texel wide, so it is a drawn line and not a resampled curve. */
+  const crack = (len) => {
+    let x = r.int(3, S - 4), y = r.int(3, S - 4), a = r.float(0, Math.PI * 2);
+    for (let i = 0; i < len; i++) {
+      put(x, y, -2.4, -0.55);
+      if (r.chance(0.17)) put(x + (r.chance(0.5) ? 1 : -1), y, -0.8, -0.15);
+      if (r.chance(0.08)) {                                  // a short branch off the main run
+        let bx = x, by = y, ba = a + (r.chance(0.5) ? 1.15 : -1.15);
+        for (let j = r.int(3, 7); j > 0; j--) {
+          put(bx, by, -1.7, -0.32);
+          const [sx, sy] = DIR8(ba); bx += sx; by += sy; ba += r.float(-0.6, 0.6);
+          if (!inside(bx, by)) break;
+        }
+      }
+      a += r.float(-0.85, 0.85);
+      const [sx, sy] = DIR8(a); x += sx; y += sy;
+      if (!inside(x, y)) break;
+    }
+  };
+
+  /** A corner bitten clean off, with a jagged fracture line. */
+  const chip = () => {
+    const cx = r.chance(0.5) ? 0 : S - 1, cy = r.chance(0.5) ? 0 : S - 1, rad = r.float(4, 8.5), seed = r.float(0, 30);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const jag = rad * (0.76 + 0.4 * N.noise(x * 0.62 + seed, y * 0.62 + seed));
+      if (Math.hypot(x - cx, y - cy) < jag) { const i = y * S + x; dv[i] -= 2.8; dh[i] -= 0.85; }
+    }
+  };
+
+  /** A spall: a shallow bite out of the middle of one edge. */
+  const spall = () => {
+    const side = r.int(0, 3), run = r.int(5, 10), t0 = r.int(2, Math.max(3, S - 3 - run)), amp = r.float(1.4, 3.6);
+    for (let t = t0; t < Math.min(S - 2, t0 + run); t++) {
+      const deep = 1 + Math.round(Math.sin(((t - t0 + 0.5) / run) * Math.PI) * amp);
+      for (let d = 0; d < deep; d++) {
+        const x = side === 2 ? d : side === 3 ? S - 1 - d : t;
+        const y = side === 0 ? d : side === 1 ? S - 1 - d : t;
+        if (x < 0 || y < 0 || x >= S || y >= S) continue;
+        const i = y * S + x; dv[i] -= 2.3; dh[i] -= 0.7;
+      }
+    }
+  };
+
+  /** Pocks: a shower of single dark texels where the face has crumbled. */
+  const pits = () => {
+    const cx = r.int(6, S - 7), cy = r.int(6, S - 7), spread = r.float(3, 7.5);
+    for (let i = r.int(4, 10); i > 0; i--) {
+      const x = cx + Math.round(r.float(-spread, spread)), y = cy + Math.round(r.float(-spread, spread));
+      put(x, y, -1.9, -0.4);
+      if (r.chance(0.35)) put(x + 1, y, -1.4, -0.28);
+      if (r.chance(0.2)) put(x, y + 1, -1.1, -0.22);
+    }
+  };
+
+  /** Drag marks: parallel pale streaks where boots and dragged crates polished the stone. */
+  const scuff = () => {
+    const dir = r.int(0, 3), dx = [1, 1, 1, 0][dir], dy = [0, 1, -1, 1][dir];
+    const x0 = r.int(4, S - 13), y0 = r.int(6, S - 13);
+    for (let k = r.int(2, 4); k > 0; k--) {
+      const ox = x0 + (dir === 3 ? k * 2 : 0), oy = y0 + (dir === 3 ? 0 : k * 2);
+      for (let i = r.int(4, 11); i > 0; i--) put(ox + dx * i, oy + dy * i, 1.15, 0.06);
+    }
+  };
+
+  /** A damp shadow, DITHERED at the rim: a pixel-art edge, never a soft gradient. */
+  const stain = () => {
+    const cx = r.int(6, S - 7), cy = r.int(6, S - 7), rad = r.float(3.5, 7.5), depth = r.float(0.7, 1.5), seed = r.float(0, 30);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const d = Math.hypot(x - cx, y - cy) / (rad * (0.8 + 0.45 * N.noise(x * 0.3 + seed, y * 0.3 + seed)));
+      if (d < 0.78) put(x, y, -depth, 0);
+      else if (d < 1 && ((x + y) & 1) === 0) put(x, y, -depth * 0.7, 0);
+    }
+  };
+
+  /** The mason's claw: parallel tool ridges, a lit texel with an ink texel behind it. */
+  const chisel = () => {
+    const along = r.chance(0.5), gap = r.int(3, 5), o0 = r.int(3, 8), a = r.int(2, 6);
+    for (let k = r.int(3, 6); k > 0; k--) {
+      const o = o0 + k * gap; if (o >= S - 3) continue;
+      const b = Math.min(S - 2, a + r.int(10, S - 8));
+      for (let t = a; t < b; t++) {
+        put(along ? t : o, along ? o : t, 0.75, 0.05);
+        put(along ? t : o + 1, along ? o + 1 : t, -0.6, -0.05);
+      }
+    }
+  };
+
+  /** A dish worn pale in the middle of the slab by a century of feet. */
+  const hollow = () => {
+    const cx = r.float(10, S - 10), cy = r.float(10, S - 10), rad = r.float(7, 12);
+    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+      const d = Math.hypot(x - cx, y - cy) / rad;
+      if (d < 1) put(x, y, (1 - d) * 1.3, (1 - d) * 0.1);
+    }
+  };
+
+  /** Pebbles set into the slab: a lit block with the ink tucked under its lower-right, house key light. */
+  const inset = () => {
+    for (let k = r.int(2, 4); k > 0; k--) {
+      const x = r.int(3, S - 7), y = r.int(3, S - 7), w = r.int(2, 3), h = r.int(2, 3);
+      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, 1.25, 0.28);
+      for (let i = 0; i < w; i++) put(x + i, y + h, -1.7, -0.1);
+      for (let j = 0; j < h; j++) put(x + w, y + j, -1.4, -0.1);
+    }
+  };
+
+  const draw = { crack: () => crack(r.int(9, 20)), chip, spall, pits, scuff, stain, chisel, hollow, inset };
+  for (const m of marks) draw[m]();
+  return { dv, dh };
 }
 
 /**
- * The flagstone atlas: 16 unique slabs sharing one height field so albedo, normal and roughness agree.
+ * THE FLAGSTONE ATLAS, painted texel by texel: 32 slabs of 32x32 texels (256x128 in all), which is
+ * exactly `TEXELS_PER_TILE` across a world tile — the sprite grid. Albedo, normal and roughness all
+ * come off one height/step field so they agree, and every colour is a step of `STONE` (or `MOSS`,
+ * `MARBLE`) so the floor cannot drift out of the family.
  * Returns { albedo, normal, rough, obsidian } textures.
  */
 function flagstoneAtlas() {
-  const S = ATLAS.cell, W = S * ATLAS.cols, H = S * ATLAS.rows;
+  const S = ATLAS.cell, W = S * ATLAS.cols, H = S * ATLAS.rows, N_CELLS = ATLAS.cols * ATLAS.rows;
   const r = rng.fork('atlas');
-  const kinds = [];
-  for (let i = 0; i < 16; i++) {
-    const kind = i < 8 ? 'plain' : i < 10 ? 'cracked' : i < 12 ? 'mossy' : i < 14 ? 'wet' : i === 14 ? 'mosaic' : 'marble';
-    const cracks = [];
-    const nCr = kind === 'cracked' ? r.int(2, 3) : kind === 'mosaic' || kind === 'marble' ? 0 : r.int(0, 2);
-    for (let c = 0; c < nCr; c++) cracks.push({ pts: makeCrack(r, kind === 'cracked' ? 70 : 34), width: kind === 'cracked' ? r.float(0.012, 0.02) : r.float(0.007, 0.011) });
-    // chips: blobs bitten out of the edge; a cracked slab may lose a corner
-    const chips = [];
-    const nCh = kind === 'mosaic' || kind === 'marble' ? 0 : r.int(1, 3);
-    for (let c = 0; c < nCh; c++) {
-      const side = r.int(0, 3), t = r.float(0.1, 0.9), rad = r.float(0.03, 0.07);
-      chips.push(side === 0 ? [t, 0, rad] : side === 1 ? [t, 1, rad] : side === 2 ? [0, t, rad] : [1, t, rad]);
-    }
-    if (kind === 'cracked') chips.push([r.int(0, 1), r.int(0, 1), r.float(0.14, 0.22)]);
-    const tint = [1 + r.float(-0.08, 0.08), 1 + r.float(-0.06, 0.05), 1 + r.float(-0.1, 0.08)];
-    const lift = r.float(0.82, 1.08);
-    const mossSeed = r.float(0, 40);
-    kinds.push({ kind, cracks, chips, tint, lift, mossSeed, id: i });
-  }
   const hgt = new Float32Array(W * H);
   const alb = new Float32Array(W * H * 3);
   const rgh = new Float32Array(W * H);
   const obs = new Float32Array(W * H * 3);
-  const base = [0.72, 0.64, 0.52], grout = [0.16, 0.145, 0.13], mossC = hexToRgb(PALETTE.moss);
-  const obsBase = hexToRgb(PALETTE.obsidian);
-  for (let cy = 0; cy < ATLAS.rows; cy++) for (let cx = 0; cx < ATLAS.cols; cx++) {
-    const K = kinds[cy * ATLAS.cols + cx];
+  const kindOf = (i) => CELLS.plain.includes(i) ? 'plain' : CELLS.cracked.includes(i) ? 'cracked'
+    : CELLS.mossy.includes(i) ? 'mossy' : CELLS.wet.includes(i) ? 'wet' : i === CELLS.mosaic ? 'mosaic' : 'marble';
+
+  for (let idx = 0; idx < N_CELLS; idx++) {
+    const kind = kindOf(idx);
+    const cx0 = (idx % ATLAS.cols) * S, cy0 = Math.floor(idx / ATLAS.cols) * S;
+    const seed = r.float(0, 90);
+    // this slab's own value (never hue) offset, and its own pick of wear
+    const lift = r.float(-0.4, 0.4);
+    const pool = [...WEAR_MARKS]; r.shuffle(pool);
+    const marks = pool.slice(0, r.int(2, 3));
+    if (kind === 'cracked') marks.splice(0, marks.length, 'crack', 'crack', r.chance(0.5) ? 'chip' : 'spall', 'pits');
+    else if (kind === 'plain' && r.chance(0.34)) marks[0] = 'crack';
+    const wear = kind === 'mosaic' || kind === 'marble' ? null : paintWear(r, S, marks);
+    const mossSeed = r.float(0, 40);
+
     for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
-      const u = (px + 0.5) / S, v = (py + 0.5) / S;
-      const gx = cx * S + px, gy = cy * S + py, gi = gy * W + gx;
-      const ox = K.id * 3.7, oy = K.id * 1.9;
-      let h, col, rough;
-      if (K.kind === 'mosaic') {
-        // 10x10 tesserae, radial pattern: white centre cross, gold ring, lapis field, gold border
-        const n = 10, tu = u * n, tv = v * n, iu = Math.floor(tu), iv = Math.floor(tv);
-        const fu = tu - iu, fv = tv - iv;
-        const e = Math.min(fu, 1 - fu, fv, 1 - fv);
-        const inT = sstep(0.04, 0.16, e);
-        const dc = Math.hypot(iu + 0.5 - n / 2, iv + 0.5 - n / 2);
-        const jitter = N.noise(iu * 13.1 + ox, iv * 7.7 + oy);
+      const i = py * S + px, gi = (cy0 + py) * W + cx0 + px;
+      let col, h, rough, ti = STONE_MID;
+      if (kind === 'mosaic') {
+        // 8x8 tesserae of 4 texels with a one-texel grout line between them: a radial medallion
+        const iu = px >> 2, iv = py >> 2, grout = (px & 3) === 3 || (py & 3) === 3;
+        const dc = Math.hypot(iu + 0.5 - 4, iv + 0.5 - 4);
+        const cross = Math.abs(iu + 0.5 - 4) < 1 || Math.abs(iv + 0.5 - 4) < 1;
+        const jit = Math.round(N.noise(iu * 13.1 + seed, iv * 7.7 + seed) * 2) - 1;
         let tc;
-        const cross = Math.abs(iu + 0.5 - n / 2) < 1 || Math.abs(iv + 0.5 - n / 2) < 1;
-        if (dc < 1.6) tc = [0.9, 0.86, 0.78];
-        else if (dc < 3.0) tc = cross ? [0.9, 0.86, 0.78] : [0.78, 0.6, 0.22];
-        else if (iu === 0 || iv === 0 || iu === n - 1 || iv === n - 1) tc = [0.72, 0.56, 0.2];
-        else tc = cross ? [0.85, 0.78, 0.6] : [0.14, 0.24, 0.5];
-        tc = scale(tc, 0.85 + jitter * 0.3);
-        h = 0.55 + inT * 0.45 + (N.noise(u * 90 + ox, v * 90) - 0.5) * 0.06;
-        col = mix(grout, tc, inT);
-        rough = 0.62 - inT * 0.22;
-      } else if (K.kind === 'marble') {
-        const edge = Math.min(u, 1 - u, v, 1 - v);
-        const bev = sstep(0, 0.045, edge);
-        const vein = Math.abs(Math.sin((u * 2.6 + N.fbm(u * 4 + ox, v * 4 + oy, 4) * 2.8) * Math.PI));
-        h = bev * (0.92 + N.fbm(u * 6 + ox, v * 6, 3) * 0.08);
-        col = scale([0.84, 0.82, 0.76], 0.9 + N.fbm(u * 8 + ox, v * 8, 3) * 0.16);
-        col = mix(col, [0.5, 0.5, 0.56], Math.pow(1 - vein, 9) * 0.85);
-        col = mix(grout, col, sstep(0.0, 0.5, h));
-        rough = 0.38 + (1 - bev) * 0.4;
+        if (dc < 1.3) tc = unit('#ddd3ba');
+        else if (dc < 2.4) tc = cross ? unit('#ddd3ba') : unit('#b98a2c');
+        else if (iu === 0 || iv === 0 || iu === 7 || iv === 7) tc = unit('#a87c26');
+        else tc = cross ? unit('#cfc4a6') : unit('#2c447f');
+        const k = 1 + jit * 0.08;
+        col = grout ? GROUT : [tc[0] * k, tc[1] * k, tc[2] * k];
+        h = grout ? 0.15 : 0.85; rough = grout ? 0.9 : 0.42;
+      } else if (kind === 'marble') {
+        const e = Math.min(px, py, S - 1 - px, S - 1 - py);
+        const vein = Math.abs(Math.sin((px / S * 2.6 + N.fbm(px / 6 + seed, py / 6 + seed, 3) * 2.6) * Math.PI));
+        const grain = Math.round((N.fbm(px / 5 + seed, py / 5 + seed, 3) - 0.5) * 2);
+        ti = e < 1 ? 0 : vein > 0.94 ? 2 : vein > 0.84 ? 3 : Math.max(4, Math.min(6, 5 + grain));
+        col = e < 1 ? GROUT : MARBLE[ti];
+        h = e < 1 ? 0.05 : e === 1 ? 0.72 : 0.9; rough = 0.4 + (e < 1 ? 0.4 : 0);
       } else {
-        // --- flagstone height: bevel + chips + surface + cracks
-        let edge = Math.min(u, 1 - u, v, 1 - v);
-        edge -= 0.012 * (N.noise(u * 9 + ox, v * 9 + oy) - 0.5); // ragged outline
-        let hh = sstep(0, 0.06, edge);
-        for (const [chx, chy, rad] of K.chips) { const d = Math.hypot(u - chx, v - chy); hh *= 1 - sstep(rad, rad * 0.55, d) * (0.9 + 0.1 * N.noise(u * 50, v * 50)); }
-        const surf = (N.fbm(u * 5 + ox, v * 5 + oy, 4) - 0.5) * 0.22 + (N.noise(u * 44 + ox, v * 44) - 0.5) * 0.07;
-        hh = hh * (0.85 + surf);
-        const cm = crackMask(K.cracks, u, v, 0.012);
-        hh -= cm * 0.45 * hh;
-        h = clamp01(hh);
-        // --- albedo
-        const grain = 0.86 + N.fbm(u * 7 + ox, v * 7 + oy, 3) * 0.3;
-        const speck = 0.92 + N.noise(u * 70 + ox, v * 70 + oy) * 0.16;
-        col = scale([base[0] * K.tint[0], base[1] * K.tint[1], base[2] * K.tint[2]], K.lift * grain * speck);
-        col = scale(col, 1 - cm * 0.38);
-        col = mix(grout, col, sstep(0.05, 0.45, h));
-        rough = 0.9 + cm * 0.08 - (h - 0.5) * 0.08;
-        if (K.kind === 'mossy') {
-          const m = sstep(0.42, 0.7, N.fbm(u * 3.5 + K.mossSeed, v * 3.5 + K.mossSeed, 4)) * (1 - sstep(0.7, 1, h) * 0.6);
-          col = mix(col, scale(mossC, 0.75 + N.noise(u * 30, v * 30) * 0.5), m * 0.85);
-          rough = rough - m * 0.15;
-        } else if (K.kind === 'wet') {
-          const puddle = sstep(0.55, 0.9, 1 - h) * 0.7 + 0.3;
-          col = scale([col[0] * 0.66, col[1] * 0.68, col[2] * 0.72], 0.85);
-          rough = 0.22 + (1 - puddle) * 0.35;
+        const e = Math.min(px, py, S - 1 - px, S - 1 - py);
+        // ragged one-texel outline: the slab's edge is chewed, not ruled
+        const rag = N.noise(px * 1.55 + seed, py * 1.55 + seed) < 0.3;
+        const inGrout = e < 1 || (e < 2 && rag);
+        // mottle: a low band of grain plus a fine per-texel speckle — both quantised with the tone
+        const mot = (N.fbm(px / 6.5 + seed, py / 6.5 + seed, 3) - 0.5) * 1.9
+          + (N.noise(px * 1.7 + seed, py * 1.7 + seed) - 0.5) * 0.45;
+        if (inGrout) {
+          col = GROUT; h = 0.04; rough = 0.95; ti = 0;
+        } else {
+          ti = Math.max(0, Math.min(STONE.length - 1, Math.round(STONE_MID + lift + mot + wear.dv[i])));
+          col = STONE[ti];
+          h = clamp01(0.68 + wear.dh[i] + (e === 1 ? -0.16 : e === 2 ? -0.05 : 0) + mot * 0.05);
+          rough = 0.9 - (ti - STONE_MID) * 0.02;
+          if (kind === 'mossy') {
+            const mv = N.fbm(px / 7 + mossSeed, py / 7 + mossSeed, 3);
+            if (mv > 0.58 || (mv > 0.51 && ((px + py) & 1) === 0)) {
+              col = MOSS[Math.max(0, Math.min(MOSS.length - 1, 1 + Math.round(mot * 0.9)))];
+              rough = 0.78;
+            }
+          } else if (kind === 'wet') {
+            col = mix(col, [0.26, 0.31, 0.35], 0.45);
+            rough = 0.24 + (1 - h) * 0.3;
+          }
         }
       }
       hgt[gi] = h;
       alb[gi * 3] = col[0]; alb[gi * 3 + 1] = col[1]; alb[gi * 3 + 2] = col[2];
       rgh[gi] = clamp01(rough);
-      // obsidian look for the sword level: same relief, glassy violet-black with lighter veins
-      const vein = N.fbm(u * 5 + ox, v * 5 + oy, 4);
-      let oc = mix(obsBase, [0.38, 0.3, 0.5], vein * 0.55);
-      oc = scale(oc, 0.35 + h * 0.75);
-      if (K.kind === 'mosaic') oc = mix(oc, [0.55, 0.42, 0.2], sstep(0.7, 1, h) * 0.5);
+      // the sword level's obsidian re-skin: the same steps, read out of a violet-black glass ramp
+      const oc = kind === 'mosaic' ? mix(GLASSSTONE[5], [0.55, 0.42, 0.2], 0.45) : GLASSSTONE[ti];
       obs[gi * 3] = oc[0]; obs[gi * 3 + 1] = oc[1]; obs[gi * 3 + 2] = oc[2];
     }
   }
-  const albedo = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [alb[i], alb[i + 1], alb[i + 2]]; });
-  const obsidian = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [obs[i], obs[i + 1], obs[i + 2]]; });
-  const rough = rgbTexture(W, H, (x, y) => { const v = rgh[y * W + x]; return [v, v, v]; }, { srgb: false });
-  const normal = normalFromHeight(hgt, W, H, 2.6, { wrap: false });
+  const albedo = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [alb[i], alb[i + 1], alb[i + 2]]; }, { pixel: true });
+  const obsidian = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [obs[i], obs[i + 1], obs[i + 2]]; }, { pixel: true });
+  const rough = rgbTexture(W, H, (x, y) => { const v = rgh[y * W + x]; return [v, v, v]; }, { srgb: false, pixel: true });
+  const normal = normalFromHeight(hgt, W, H, 1.5, { wrap: false });
   for (const t of [albedo, obsidian, rough, normal]) { t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; }
   return { albedo, normal, rough, obsidian };
 }
 
 /**
- * Continuous masonry strip: u spans 4 tiles (repeat), v spans one wall height. Running bond with
- * courses of varied height, bricks of varied length, chipped corners, proud/recessed stones.
- * Returns { albedo, normal, rough, obsidian }.
+ * THE MASONRY STRIP, painted texel by texel: 128x32 texels = four world tiles wide by exactly ONE
+ * world unit tall, so u and v can be world coordinates (dungeon.js MASONRY_U / MASONRY_V) and every
+ * brick lands on the same 32-texels-per-tile grid as the floor and the cast. Five running-bond
+ * courses of whole-texel height that sum to 32, so the strip wraps with no seam.
+ *
+ * Each brick face is one step of `WALLSTONE` with a value-only variation, a LIT texel along its top
+ * edge and an ink texel along its bottom — the house key light, baked as form, not as hue — plus
+ * seeded chipped corners and the odd hairline crack. Returns { albedo, normal, rough, obsidian }.
  */
 function masonryStrip() {
-  const W = 1024, H = 256;
+  const W = TEXELS_PER_TILE * 4, H = TEXELS_PER_TILE;
   const r = rng.fork('masonry');
-  // courses (bottom to top), heights sum to 1
-  const nRows = 5;
-  let hs = Array.from({ length: nRows }, () => r.float(0.75, 1.25));
-  const hsum = hs.reduce((a, b) => a + b, 0); hs = hs.map((v) => v / hsum);
+  const MID = 4;
+  // per-texel wear overlay, indexed from the BOTTOM row up (y = 0 is the foot of the course stack)
+  const dv = new Float32Array(W * H), dh = new Float32Array(W * H);
+  const put = (x, y, v, h) => {
+    if (y < 0 || y >= H) return;
+    const i = y * W + (((x % W) + W) % W); dv[i] += v; dh[i] += h;
+  };
+  // courses, bottom-up: whole texel heights summing to H
+  const courseH = [7, 6, 7, 6, 6];
   const rows = [];
-  let v0 = 0;
-  for (let i = 0; i < nRows; i++) {
-    // bricks along u (period 1 = 4 tiles); lengths vary 0.28..0.55 tiles
+  let base = 0;
+  for (const ch of courseH) {
     const bricks = [];
-    let u = r.float(0, 0.12), guard = 0;
-    while (u < 1 && guard++ < 40) { const len = r.float(0.07, 0.135); bricks.push({ u0: u, u1: Math.min(1, u + len), tint: r.float(0.72, 1.18), hue: r.float(-0.05, 0.05), red: r.chance(0.12) ? r.float(0.1, 0.3) : 0, proud: r.float(-0.12, 0.12), chips: [r.chance(0.6) ? r.float(0.02, 0.05) : 0, r.chance(0.6) ? r.float(0.02, 0.05) : 0, r.chance(0.35) ? r.float(0.02, 0.05) : 0, r.chance(0.35) ? r.float(0.02, 0.05) : 0] }); u += len; }
-    // last brick wraps to close the period
-    bricks[bricks.length - 1].u1 = 1 + bricks[0].u0;
-    rows.push({ v0, v1: v0 + hs[i], bricks });
-    v0 += hs[i];
+    let x = -r.int(0, 9);
+    while (x < W) {
+      const len = r.int(9, 19);
+      bricks.push({ x0: x, x1: x + len, v: r.int(-2, 2), proud: r.float(-0.1, 0.12) });
+      x += len;
+    }
+    rows.push({ y0: base, y1: base + ch, bricks });
+    base += ch;
   }
-  const hgt = new Float32Array(W * H);
-  const alb = new Float32Array(W * H * 3);
-  const rgh = new Float32Array(W * H);
-  const obs = new Float32Array(W * H * 3);
-  const base = [0.5, 0.465, 0.43], mortar = [0.2, 0.185, 0.165], obsBase = hexToRgb(PALETTE.obsidian);
+  // wear, drawn on whole texels: chipped corners and the occasional hairline crack
+  for (const row of rows) for (const b of row.bricks) {
+    const fy0 = row.y0, fy1 = row.y1 - 1;            // face rows (the top row of a course is mortar)
+    if (r.chance(0.5)) { const n = r.int(1, 3); for (let k = 0; k < n; k++) put(b.x0 + 1 + k, fy1 - 1 - k, -2.2, -0.5); }
+    if (r.chance(0.5)) { const n = r.int(1, 3); for (let k = 0; k < n; k++) put(b.x1 - 2 - k, fy0 + k, -2.2, -0.5); }
+    if (r.chance(0.18)) {                            // a crack walking down the face
+      let x = r.int(b.x0 + 2, Math.max(b.x0 + 3, b.x1 - 3)), y = fy1 - 1, a = -Math.PI / 2 + r.float(-0.6, 0.6);
+      for (let i = fy1 - fy0; i > 0; i--) {
+        put(x, y, -2.1, -0.45);
+        const k = Math.round(a / (Math.PI / 4)) * (Math.PI / 4);
+        x += Math.round(Math.cos(k)); y += Math.round(Math.sin(k));
+        a += r.float(-0.7, 0.7);
+        if (y < fy0) break;
+      }
+    }
+    if (r.chance(0.3)) { const px = r.int(b.x0 + 2, Math.max(b.x0 + 3, b.x1 - 2)), py = r.int(fy0 + 1, Math.max(fy0 + 2, fy1 - 1)); put(px, py, -1.6, -0.3); put(px + 1, py, -1.1, -0.2); }
+  }
+
+  const hgt = new Float32Array(W * H), alb = new Float32Array(W * H * 3), rgh = new Float32Array(W * H), obs = new Float32Array(W * H * 3);
   for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
-    const u = (px + 0.5) / W, v = 1 - (py + 0.5) / H; // v = 0 at the bottom of the wall
-    const row = rows.find((rw) => v >= rw.v0 && v < rw.v1) || rows[nRows - 1];
-    let brick = row.bricks.find((b) => u >= b.u0 && u < b.u1);
-    let uu = u;
-    if (!brick) { brick = row.bricks[row.bricks.length - 1]; uu = u + 1; }
-    const bw = (brick.u1 - brick.u0) * 4, bh = (row.v1 - row.v0) * 0.85; // world sizes
-    const bu = (uu - brick.u0) / (brick.u1 - brick.u0), bv = (v - row.v0) / (row.v1 - row.v0);
-    // distance to brick edge in world units
-    const du = Math.min(bu, 1 - bu) * bw, dv = Math.min(bv, 1 - bv) * bh;
-    let edge = Math.min(du, dv) - 0.006 * (N.noise(u * 300, v * 60) - 0.5);
-    // chipped corners
-    const corners = [[0, 0], [1, 0], [0, 1], [1, 1]];
-    let chip = 0;
-    for (let c = 0; c < 4; c++) { const rad = brick.chips[c]; if (!rad) continue; const d = Math.hypot((bu - corners[c][0]) * bw, (bv - corners[c][1]) * bh); chip = Math.max(chip, sstep(rad, rad * 0.4, d)); }
-    const mortarW = 0.014;
-    const face = sstep(mortarW, mortarW + 0.035, edge) * (1 - chip * 0.85);
-    const bulge = (N.fbm(u * 24 + brick.u0 * 50, v * 6 + row.v0 * 9, 3) - 0.5) * 0.18 + (N.noise(u * 220, v * 55) - 0.5) * 0.05;
-    let h = 0.28 + face * (0.5 + brick.proud * 0.5 + bulge);
-    h = clamp01(h);
-    let col = scale([base[0] * (1 + brick.hue + brick.red), base[1] * (1 - Math.abs(brick.hue) * 0.5), base[2] * (1 - brick.hue - brick.red * 0.6)], brick.tint);
-    col = scale(col, 0.85 + N.fbm(u * 30 + brick.u0 * 20, v * 8, 3) * 0.3);
-    col = scale(col, 0.92 + N.noise(u * 400, v * 100) * 0.16);
-    col = mix(scale(mortar, 0.8 + N.noise(u * 150, v * 40) * 0.4), col, sstep(0.1, 0.7, face));
-    // soot near the top, dirt at the foot
-    col = scale(col, 1 - sstep(0.7, 1, v) * 0.15 - sstep(0.3, 0.0, v) * 0.2);
-    const gi = py * W + px;
+    const yb = H - 1 - py;                            // canvas rows run top-down; the strip is built bottom-up
+    const gi = py * W + px, fi = yb * W + px;
+    const row = rows.find((rw) => yb >= rw.y0 && yb < rw.y1) || rows[rows.length - 1];
+    let brick = row.bricks.find((b) => px >= b.x0 && px < b.x1);
+    if (!brick) brick = row.bricks.find((b) => px + W >= b.x0 && px + W < b.x1) || row.bricks[0];
+    const mortar = yb === row.y1 - 1 || px === (((brick.x1 - 1) % W) + W) % W;
+    let col, h, rough, ti;
+    if (mortar) {
+      ti = 1;
+      col = mix(GROUT, WALLSTONE[1], 0.35 + N.noise(px * 1.3, yb * 1.3) * 0.3);
+      h = 0.22; rough = 0.96;
+    } else {
+      const grain = (N.fbm(px / 5.5 + brick.x0 * 0.7, yb / 5.5 + row.y0 * 1.3, 3) - 0.5) * 1.7
+        + (N.noise(px * 1.9, yb * 1.9) - 0.5) * 0.8;
+      // house key light, baked as FORM: the top course edge catches it, the bottom sits in its own shadow
+      const lit = yb === row.y1 - 2 ? 1.0 : yb === row.y0 ? -1.2 : 0;
+      const side = px === (((brick.x0 % W) + W) % W) ? 0.4 : px === (((brick.x1 - 2) % W) + W) % W ? -0.5 : 0;
+      ti = Math.max(0, Math.min(WALLSTONE.length - 1, Math.round(MID + brick.v * 0.5 + grain + lit + side + dv[fi])));
+      col = WALLSTONE[ti];
+      h = clamp01(0.74 + brick.proud + dh[fi] + grain * 0.05 + (lit > 0 ? 0.06 : lit < 0 ? -0.06 : 0));
+      rough = 0.9 - (ti - MID) * 0.02;
+    }
     hgt[gi] = h;
     alb[gi * 3] = col[0]; alb[gi * 3 + 1] = col[1]; alb[gi * 3 + 2] = col[2];
-    rgh[gi] = clamp01(0.86 + (1 - face) * 0.1 - brick.red * 0.2);
-    let oc = mix(obsBase, [0.42, 0.34, 0.55], N.fbm(u * 12, v * 4, 3) * 0.5);
-    oc = scale(oc, 0.3 + face * 0.7);
+    rgh[gi] = clamp01(rough);
+    const oc = GLASSSTONE[ti];
     obs[gi * 3] = oc[0]; obs[gi * 3 + 1] = oc[1]; obs[gi * 3 + 2] = oc[2];
   }
-  const albedo = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [alb[i], alb[i + 1], alb[i + 2]]; });
-  const obsidian = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [obs[i], obs[i + 1], obs[i + 2]]; });
-  const rough = rgbTexture(W, H, (x, y) => { const v = rgh[y * W + x]; return [v, v, v]; }, { srgb: false });
-  const normal = normalFromHeight(hgt, W, H, 3.2);
+  const albedo = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [alb[i], alb[i + 1], alb[i + 2]]; }, { pixel: true });
+  const obsidian = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [obs[i], obs[i + 1], obs[i + 2]]; }, { pixel: true });
+  const rough = rgbTexture(W, H, (x, y) => { const v = rgh[y * W + x]; return [v, v, v]; }, { srgb: false, pixel: true });
+  const normal = normalFromHeight(hgt, W, H, 1.8);
   return { albedo, normal, rough, obsidian };
 }
 
-/** Tileable world-space macro variation: moss in damp hollows, dirt, soot. Stored as multiplier / 1.4. */
+/**
+ * Tileable world-space macro variation: mostly VALUE (damp is darker, dust is lighter) with a
+ * whisper of moss and soot. The old map swung hard toward green and tan, which — sampled smoothly
+ * over the floor — was half the reason neighbouring slabs read as different-coloured stone. It is
+ * sampled on the 1/32-world texel grid in `patchSurface`, so what it adds is blocky, not a soft
+ * airbrush laid over the pixel structure. Stored as multiplier / 1.4.
+ */
 function grungeTexture() {
   const S = 256, P = 8;
-  const mossC = [0.72, 0.98, 0.55], dirt = [0.9, 0.78, 0.6], soot = [0.7, 0.68, 0.7];
+  const mossC = [0.7, 0.82, 0.6], dirt = [0.98, 0.94, 0.86], soot = [0.82, 0.82, 0.86];
   return rgbTexture(S, S, (x, y) => {
     const u = x / S * P, v = y / S * P;
     const a = N.pfbm(u, v, P, 4), b = N.pfbm(u + 3.3, v + 7.1, P, 3), c = N.pfbm(u * 2 + 11, v * 2 + 5, P * 2, 3);
     let m = [1, 1, 1];
-    m = scale(m, 0.86 + a * 0.3);
-    m = mix(m, mossC, sstep(0.58, 0.8, b) * 0.65);
-    m = mix(m, dirt, sstep(0.6, 0.85, c) * 0.4);
-    m = mix(m, soot, sstep(0.25, 0.05, a) * 0.5);
+    m = scale(m, 0.9 + a * 0.22);
+    m = mix(m, mossC, sstep(0.68, 0.9, b) * 0.28);
+    m = mix(m, dirt, sstep(0.62, 0.86, c) * 0.3);
+    m = mix(m, soot, sstep(0.25, 0.05, a) * 0.45);
     return scale(m, 1 / 1.4);
   }, { srgb: false, anisotropy: 2 });
+}
+
+/**
+ * ONE STONE FAMILY PER DEPTH. The dungeon's colour story is told by the depth bands (lighting.js
+ * `depthTint`) and the torches; the quarry the level was cut from moves with it, but only as a
+ * gentle family multiplier over the single `STONE` ramp — never as a per-slab hue, which is what
+ * made a room read as noise. dungeon.js folds this into the per-instance tint.
+ * @param {number} depth
+ * @returns {{name:string, tint:number[], moss:number}}
+ */
+export function stoneFamily(depth) {
+  if (depth <= 0) return { name: 'weathered court flags', tint: [1.06, 1.04, 0.98], moss: 1.15 };
+  if (depth <= 5) return { name: 'warm limestone', tint: [1.02, 0.98, 0.9], moss: 1 };
+  if (depth <= 12) return { name: 'cold granite', tint: [0.9, 0.94, 1.02], moss: 0.75 };
+  if (depth <= 18) return { name: 'green serpentine', tint: [0.88, 0.98, 0.9], moss: 1.25 };
+  return { name: 'violet basalt', tint: [0.96, 0.88, 1.02], moss: 0.45 };
 }
 
 /** Tileable caustic pattern (bright cell edges). */
@@ -359,46 +578,48 @@ function causticTexture() {
   }, { srgb: false, anisotropy: 2 });
 }
 
-/** Yellow/black checker homage for hidden treasure-or-trap squares. */
+/** Yellow/black checker homage for hidden treasure-or-trap squares. One tile, on the texel grid. */
 function checkerTexture() {
-  return makeTexture(64, (u, v, x, y) => {
-    const on = ((x >> 3) + (y >> 3)) & 1;
-    const n = N.noise(u * 20, v * 20);
-    return on ? [0.75 * (0.85 + n * 0.3), 0.7 * (0.85 + n * 0.3), 0.3] : [0.12, 0.1, 0.08];
-  });
+  return makeTexture(TEXELS_PER_TILE, (u, v, x, y) => {
+    const on = ((x >> 2) + (y >> 2)) & 1;
+    const n = Math.round(N.noise(u * 20, v * 20) * 2) / 2;
+    return on ? [0.75 * (0.86 + n * 0.28), 0.7 * (0.86 + n * 0.28), 0.3] : [0.12, 0.1, 0.08];
+  }, { pixel: true });
 }
 
-/** Veined marble for altars and pillars (kept for props). */
+/** Veined marble for altars and pillars: quantised to the MARBLE ramp so it is pixel art, not a gradient. */
 function marbleTexture() {
-  const base = [0.86, 0.84, 0.78];
-  return makeTexture(128, (u, v) => {
+  return makeTexture(32, (u, v) => {
     const vein = Math.abs(Math.sin((u * 3 + N.fbm(u * 4, v * 4, 4) * 2.5) * Math.PI));
-    let c = scale(base, 0.9 + N.fbm(u * 8, v * 8, 3) * 0.15);
-    c = mix(c, [0.55, 0.55, 0.6], Math.pow(1 - vein, 8) * 0.8);
-    return c;
-  });
+    const grain = (N.fbm(u * 8, v * 8, 3) - 0.5) * 1.6;
+    const ti = vein > 0.9 ? 3 : Math.max(0, Math.min(MARBLE.length - 1, Math.round(5 + grain)));
+    return MARBLE[ti];
+  }, { pixel: true });
 }
 
-/** Plain cut stone (arches, plinths): fine grain, faint tool marks. */
+/** Plain cut stone (arches, plinths): the wall ramp again, quantised, with faint claw marks. */
 function cutStoneTexture() {
-  return makeTexture(64, (u, v) => {
-    const n = N.pfbm(u * 6, v * 6, 6, 3);
-    const marks = 0.96 + 0.08 * Math.sin(v * 90 + N.pnoise(u * 3, v * 3, 3, 3) * 6);
-    return scale([0.6, 0.57, 0.53], (0.8 + n * 0.4) * marks);
-  });
+  return makeTexture(24, (u, v, x, y) => {
+    const n = (N.pfbm(u * 6, v * 6, 6, 3) - 0.5) * 2.4;
+    const marks = (y % 4 === 0 ? 0.5 : y % 4 === 2 ? -0.4 : 0);
+    return WALLSTONE[Math.max(0, Math.min(WALLSTONE.length - 1, Math.round(4 + n + marks)))];
+  }, { pixel: true });
 }
 
-/** Dirt / rubble ground (also the bed under the flagstones). */
+/**
+ * Dirt / rubble ground — the bed that shows in the gaps between the slabs. dungeon.js maps it at
+ * half a repeat per tile, so 64 texels is exactly TEXELS_PER_TILE across a world tile.
+ */
 function dirtTexture() {
-  return makeTexture(64, (u, v) => {
-    const n = N.pfbm(u * 5, v * 5, 5, 4);
-    return scale([0.36, 0.3, 0.23], 0.6 + n * 0.6);
-  });
+  return makeTexture(TEXELS_PER_TILE * 2, (u, v) => {
+    const n = Math.round(N.pfbm(u * 5, v * 5, 5, 4) * 6) / 6;
+    return scale([0.34, 0.29, 0.24], 0.62 + n * 0.55);
+  }, { pixel: true });
 }
 
 /** Mosaic medallion for the temple floor (planar, meant for a ring/disc decal). */
 function medallionTexture() {
-  const S = 256;
+  const S = 96;   // the medallion ring is 2.84 world units across: ~34 texels a tile, the sprite grid
   return makeTexture(S, (u, v) => {
     const dx = u - 0.5, dy = v - 0.5;
     const rad = Math.hypot(dx, dy) * 2, ang = Math.atan2(dy, dx);
@@ -412,9 +633,9 @@ function medallionTexture() {
     let tc;
     if (ring % 3 === 0) tc = [0.8, 0.62, 0.22]; else if (ring % 3 === 1) tc = [0.16, 0.26, 0.52]; else tc = [0.86, 0.82, 0.7];
     if (ring === 8 && (Math.floor(a) % 2)) tc = [0.5, 0.15, 0.15];
-    tc = scale(tc, 0.82 + jitter * 0.34);
-    return mix([0.16, 0.145, 0.13], tc, inT);
-  });
+    tc = scale(tc, 0.82 + Math.round(jitter * 3) / 3 * 0.34);
+    return inT > 0.5 ? tc : GROUT;
+  }, { pixel: true });
 }
 
 /** Lazily created texture set. */
@@ -451,9 +672,12 @@ export function patchSurface(m, fog, opts = {}) {
     if (opts.atlas) {
       shader.uniforms.uAtlas = { value: new THREE.Vector2(1 / ATLAS.cols, 1 / ATLAS.rows) };
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute vec2 aTile; uniform vec2 uAtlas;')
+        .replace('#include <common>', `#include <common>\nattribute vec2 aTile; uniform vec2 uAtlas;\nconst float CELL = ${ATLAS.cell.toFixed(1)};`)
+        // uv 0..1 across a slab maps to the CENTRES of the cell's first and last texel: with
+        // NearestFilter, uv == 1.0 would otherwise land on the first texel of the NEXT atlas cell
+        // and bleed a neighbour's stone around the rim.
         .replace('#include <uv_vertex>', `#include <uv_vertex>
-        { vec2 tuv = uv * uAtlas + aTile;
+        { vec2 tuv = (uv * (CELL - 1.0) + 0.5) / CELL * uAtlas + aTile;
           #ifdef USE_MAP
           vMapUv = tuv;
           #endif
@@ -470,9 +694,12 @@ export function patchSurface(m, fog, opts = {}) {
       shader.uniforms.uGrungeAmt = { value: opts.grunge };
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', '#include <common>\nuniform sampler2D uGrunge; uniform float uGrungeAmt;')
+        // sampled on the WORLD TEXEL GRID (1/32 of a tile, the sprite grid): macro wear that steps
+        // with the stone instead of airbrushing a soft gradient across the pixel structure
         .replace('#include <map_fragment>', `#include <map_fragment>
-        { vec3 g1 = texture2D(uGrunge, vFogXZ * 0.071 + 0.13).rgb * 1.5;
-          vec3 g2 = texture2D(uGrunge, vFogXZ * 0.0293 + 0.61).rgb * 1.5;
+        { vec2 gp = floor(vFogXZ * ${TEXELS_PER_TILE.toFixed(1)}) / ${TEXELS_PER_TILE.toFixed(1)};
+          vec3 g1 = texture2D(uGrunge, gp * 0.071 + 0.13).rgb * 1.5;
+          vec3 g2 = texture2D(uGrunge, gp * 0.0293 + 0.61).rgb * 1.5;
           diffuseColor.rgb *= mix(vec3(1.0), g1 * g2, uGrungeAmt); }`);
     }
   };
@@ -492,11 +719,11 @@ export function createMaterials(fog) {
   const normalScale = new THREE.Vector2(0.9, 0.9);
   const mats = {
     // instanced flagstones (aTile per instance, AO/tint via instanceColor)
-    floor: surf({ map: A.albedo, normalMap: A.normal, normalScale, roughnessMap: A.rough, roughness: 1, metalness: 0.02 }, { atlas: true, grunge: 0.8 }),
+    floor: surf({ map: A.albedo, normalMap: A.normal, normalScale, roughnessMap: A.rough, roughness: 1, metalness: 0.02 }, { atlas: true, grunge: 0.55 }),
     // merged wall caps: same atlas, per-vertex colour
-    floorCap: surf({ map: A.albedo, normalMap: A.normal, normalScale, roughnessMap: A.rough, roughness: 1, metalness: 0.02, vertexColors: true }, { atlas: true, grunge: 0.6 }),
+    floorCap: surf({ map: A.albedo, normalMap: A.normal, normalScale, roughnessMap: A.rough, roughness: 1, metalness: 0.02, vertexColors: true }, { atlas: true, grunge: 0.45 }),
     // merged wall bodies mapped in world units
-    wall: surf({ map: M.albedo, normalMap: M.normal, normalScale: new THREE.Vector2(1.0, 1.0), roughnessMap: M.rough, roughness: 1, metalness: 0, vertexColors: true }, { grunge: 0.7 }),
+    wall: surf({ map: M.albedo, normalMap: M.normal, normalScale: new THREE.Vector2(1.0, 1.0), roughnessMap: M.rough, roughness: 1, metalness: 0, vertexColors: true }, { grunge: 0.5 }),
     obsidianFloor: surf({ map: A.obsidian, normalMap: A.normal, normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.5, metalness: 0.12 }, { atlas: true, grunge: 0.35 }),
     obsidianCap: surf({ map: A.obsidian, normalMap: A.normal, normalScale: new THREE.Vector2(0.45, 0.45), roughness: 0.5, metalness: 0.12, vertexColors: true }, { atlas: true, grunge: 0.35 }),
     obsidianWall: surf({ map: M.obsidian, normalMap: M.normal, normalScale: new THREE.Vector2(0.6, 0.6), roughness: 0.5, metalness: 0.15, color: 0xcdbde0, vertexColors: true }, { grunge: 0.3 }),

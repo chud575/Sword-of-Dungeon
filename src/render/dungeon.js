@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import { TILE, DIRS8, DIRS4 } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
-import { createWaterMaterial, createShaftMaterial, CELLS, cellUV } from './materials.js';
+import { createWaterMaterial, createShaftMaterial, CELLS, cellUV, ATLAS, stoneFamily } from './materials.js';
 import { MeshBuilder, slabGeometry, pushWornStep, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
 import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
 
@@ -14,7 +14,7 @@ const WALL_H = 0.82;      // body top; caps sit on top
 const WALL_BOT = -0.3;    // buried below the floor so gaps never show through
 const CAP_OVER = 0.045;   // capstone overhang on exposed sides
 const MASONRY_U = 0.25;   // masonry strip spans 4 tiles
-const MASONRY_V = 1 / 0.85;
+const MASONRY_V = 1;      // the masonry strip is exactly one world unit tall (materials.js)
 const HOLE_TILES = new Set([TILE.PIT, TILE.TRAP_PIT, TILE.STAIRS_DOWN]);
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color(), _e = new THREE.Euler();
 
@@ -120,6 +120,12 @@ export class DungeonView {
     this.level = level;
     const rng = createRng(level.seed * 17 + 3);
     const W = level.width, H = level.height;
+    // ONE STONE FAMILY FOR THE WHOLE LEVEL (materials.js stoneFamily). Slabs used to carry an
+    // independent random hue each, so neighbours read olive / pink / tan / blue-grey — noise, not
+    // stone. Everything below varies VALUE only and multiplies by this one family tint; the colour
+    // interest in a room is the torchlight falling across it.
+    const fam = stoneFamily(level.depth);
+    this.family = fam;
     const sword = level.depth === this.swordDepth;
     const M = this.mats;
     const floorMat = sword ? M.obsidianFloor : M.floor;
@@ -173,18 +179,17 @@ export class DungeonView {
       else if (templeRoom) layout = 'full';
       else if (corridor) layout = lr < 0.3 ? 'quarter' : lr < 0.5 ? 'half' : 'full';
       else layout = lr < 0.05 ? 'quarter' : lr < 0.19 ? 'half' : 'full';
-      // base tint
-      let base = 0.9 + rng.float(-0.07, 0.07);
-      if (corridor) base *= 0.8;
-      if (rt === 'crypt') base *= 0.86; else if (rt === 'cistern') base *= 0.9; else if (rt === 'library') base *= 1.04; else if (rt === 'vault') base *= 1.08;
-      let r = base, g = base, b = base;
-      if (rt === 'cistern') { r *= 0.86; b *= 1.14; }
-      if (rt === 'crypt') { r *= 0.96; g *= 0.93; }
-      if (templeRoom) { r *= 1.08; g *= 1.08; b *= 1.12; }
-      if (nearWater) { r *= 0.7; g *= 0.78; b *= 0.86; }
-      if (f.t === TILE.TEMPLE) { r *= 1.1; g *= 1.1; b *= 1.1; }
-      const shade = (1 - Math.min(0.38, ao * 0.075)) * (nearHole ? 0.92 : 1);
-      const color = [r * shade, g * shade, b * shade];
+      // VALUE only, in readable steps — a slab is lighter or darker than its neighbour, never a
+      // different colour. Room character is carried by brightness (a crypt is dim, a vault is
+      // bright) and the level's stone family, not by a per-tile hue.
+      let base = 0.94 + (rng.int(0, 4) - 2) * 0.024;
+      if (corridor) base *= 0.86;
+      if (rt === 'crypt') base *= 0.89; else if (rt === 'cistern') base *= 0.93; else if (rt === 'library') base *= 1.03; else if (rt === 'vault') base *= 1.07;
+      if (templeRoom) base *= 1.05;
+      if (nearWater) base *= 0.82;          // the wet atlas cells already carry the cool cast
+      if (f.t === TILE.TEMPLE) base *= 1.08;
+      const shade = base * (1 - Math.min(0.38, ao * 0.075)) * (nearHole ? 0.92 : 1);
+      const color = [fam.tint[0] * shade, fam.tint[1] * shade, fam.tint[2] * shade];
       // cell choice
       const pickCell = () => {
         if (f.t === TILE.RUBBLE) return rng.pick(CELLS.cracked);
@@ -206,7 +211,9 @@ export class DungeonView {
       const cell = pickCell();
       const yJ = () => rng.float(-0.006, 0.004);
       const tilt = () => rng.float(-0.014, 0.014);
-      const push = (kind, x, z, rot, c) => pieces[kind].push({ x, y: yJ(), z, rot, tx: tilt(), tz: tilt(), cell: c, color });
+      // `sub` picks WHICH quarter of the atlas cell a half/quarter cobble reads, so the small
+      // pieces are not all the same corner of the same slab (see buildSlabs).
+      const push = (kind, x, z, rot, c) => pieces[kind].push({ x, y: yJ(), z, rot, tx: tilt(), tz: tilt(), cell: c, sub: rng.int(0, 3), color });
       if (layout === 'full') push('full', f.x, f.y, rng.int(0, 3) * Math.PI / 2, cell);
       else if (layout === 'half') {
         const along = rng.int(0, 1);
@@ -308,8 +315,22 @@ export class DungeonView {
       const list = this.pieces[kind];
       if (!list.length) continue;
       const geo = this.own(this.slabGeos[kind].clone());
+      // ONE TEXEL DENSITY ACROSS THE WHOLE FLOOR. A slab's uv spans 0..1 over its own size, so a
+      // half or quarter cobble would pack a full 32-texel atlas cell into half a tile and come out
+      // at twice the resolution of the slab beside it — the exact "one screen at two resolutions"
+      // fault this pass exists to kill. Scale its uv to the matching fraction of the cell instead.
+      const su = kind === 'quarter' ? 0.5 : 1, sv = kind === 'full' ? 1 : 0.5;
+      if (su < 1 || sv < 1) {
+        const a = geo.getAttribute('uv');
+        for (let i = 0; i < a.count; i++) a.setXY(i, a.getX(i) * su, a.getY(i) * sv);
+        a.needsUpdate = true;
+      }
       const tiles = new Float32Array(list.length * 2);
-      list.forEach((p, i) => { const [u, v] = cellUV(p.cell); tiles[i * 2] = u; tiles[i * 2 + 1] = v; });
+      list.forEach((p, i) => {
+        const [u, v] = cellUV(p.cell);
+        tiles[i * 2] = u + (su < 1 ? (p.sub & 1) * 0.5 / ATLAS.cols : 0);
+        tiles[i * 2 + 1] = v + (sv < 1 ? ((p.sub >> 1) & 1) * 0.5 / ATLAS.rows : 0);
+      });
       geo.setAttribute('aTile', new THREE.InstancedBufferAttribute(tiles, 2));
       const mesh = new THREE.InstancedMesh(geo, mat, list.length);
       list.forEach((p, i) => {
@@ -332,10 +353,12 @@ export class DungeonView {
     const b = new MeshBuilder({ color: true, tile: true });
     const T = (x, y) => this.tileAt(x, y);
     // body faces
+    const F = this.family.tint;
     for (const w of walls) {
-      const tint = 0.84 + rng.float(0, 0.26), warm = rng.float(-0.03, 0.03);
-      const col = (k) => [tint * k * (1 + warm), tint * k, tint * k * (1 - warm * 0.5)];
-      w.tint = tint; w.warm = warm;
+      // per-block variation is a VALUE step off the level's one stone family, never a hue
+      const tint = 0.86 + rng.int(0, 4) * 0.05;
+      const col = (k) => [tint * k * F[0], tint * k * F[1], tint * k * F[2]];
+      w.tint = tint;
       for (const d of DIRS4) {
         if (T(w.x + d.dx, w.y + d.dy) === TILE.WALL) continue;
         const cx = w.x + d.dx * 0.5, cz = w.y + d.dy * 0.5, px = -d.dy, pz = d.dx;
@@ -359,8 +382,8 @@ export class DungeonView {
       const capT = 0.06 + rng.float(0, 0.06), top = WALL_H + capT, bot = WALL_H - 0.02;
       const cellIdx = rng.chance(0.12) ? rng.pick(CELLS.cracked) : rng.chance(0.1) ? rng.pick(CELLS.mossy) : rng.pick(CELLS.plain);
       const cell = cellUV(cellIdx);
-      const t = w.tint * 0.8, warm = w.warm - 0.04;
-      const col = (k) => [t * k * (1 + warm), t * k, t * k * (1 - warm * 0.5)];
+      const t = w.tint * 0.82;
+      const col = (k) => [t * k * F[0], t * k * F[1], t * k * F[2]];
       const rot = rng.int(0, 3);
       const uvs = [[0, 0], [1, 0], [1, 1], [0, 1]];
       const ruv = uvs.map((_, i) => uvs[(i + rot) % 4]);
