@@ -110,17 +110,82 @@ function fitOverview(ctx, elevation = 62) {
   ctx.renderer.cameraRig.snap();
 }
 
-/** A lit rectangular hall registered at `depth` (used by the bestiary scenarios). */
-function bestiaryHall(g, W, H, depth) {
+/**
+ * A lit rectangular hall registered at `depth` (used by the bestiary scenarios). It is dressed with
+ * a staircase at each end and a temple in a corner, which is what makes it read as a room rather
+ * than a void — but a wide cast line-up needs its corners back (an altar's light shaft standing
+ * next to the front rank is a lamp pointed at the camera), so `dress: false` leaves the floor bare.
+ * @param {object} g @param {number} W @param {number} H @param {number} depth
+ * @param {{dress?:boolean}} [o]
+ */
+function bestiaryHall(g, W, H, depth, { dress = true } = {}) {
   const lv = new Level({ depth, width: W, height: H, seed: 7 });
   for (let y = 1; y < H - 1; y++) for (let x = 1; x < W - 1; x++) lv.set(x, y, TILE.FLOOR);
   lv.rooms.push({ x: 1, y: 1, w: W - 2, h: H - 2, type: 'hall', cx: W >> 1, cy: H >> 1 });
-  lv.set(1, 1, TILE.STAIRS_UP); lv.stairsUp = { x: 1, y: 1 };
-  lv.set(W - 2, 1, TILE.STAIRS_DOWN); lv.stairsDown = { x: W - 2, y: 1 }; lv.stairsDownAll = [{ x: W - 2, y: 1 }];
-  lv.set(1, H - 2, TILE.TEMPLE); lv.temples.push({ x: 1, y: H - 2 });
+  lv.stairsUp = { x: 1, y: 1 };
+  if (dress) {
+    lv.set(1, 1, TILE.STAIRS_UP);
+    lv.set(W - 2, 1, TILE.STAIRS_DOWN); lv.stairsDown = { x: W - 2, y: 1 }; lv.stairsDownAll = [{ x: W - 2, y: 1 }];
+    lv.set(1, H - 2, TILE.TEMPLE); lv.temples.push({ x: 1, y: H - 2 });
+  }
   lv.revealAll();
   g.levels.set(depth, lv);
   return lv;
+}
+
+/**
+ * Stand a rank of monsters in a hall, facing the camera, frozen and lit, and collect their
+ * nameplates.
+ *
+ * THE GUARD IS THE POINT. Every type it is given is checked against `MONSTER_TYPES` and it throws
+ * on anything else, which fails `npm run smoke` outright. Three of these scenarios shipped rows of
+ * giant rats, kobolds, ghouls, wraiths, vampires, sprites and illusionists — none of which the
+ * generator can roll — by spawning an ordinary monster and then REWRITING `entity.type` to pull
+ * dead art out of the sprite registry. This helper spawns the type itself and never touches
+ * `entity.type` afterwards, so a creature that cannot be met cannot be photographed.
+ * @param {object} g @param {Array<[string, string]>} types [type, label]
+ * @param {{y:number, x0:number, gap:number, depth:number}} row
+ * @param {Array<{label:string, x:number, y:number}>} placed collected nameplates
+ */
+function standRank(g, types, { y, x0, gap, depth }, placed) {
+  types.forEach(([t, label], i) => {
+    if (!MONSTER_TYPES.includes(t)) throw new Error(`standRank: '${t}' is not one of the ${MONSTER_TYPES.length} MONSTER_TABLE types`);
+    const x = Math.round(x0 + i * gap);   // fractional gaps are allowed: they land as 3, 4, 3, 4 ...
+    const m = g.spawnMonster(t, x, y, { depth, state: 'idle' });
+    if (!m) return;
+    freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
+    placed.push({ label, x, y });
+  });
+  return placed;
+}
+
+/**
+ * A FAMILY PLATE: one whole monster family in a bare hall, two ranks, every one of them named.
+ *
+ * The two family line-ups used to run through `lineup()` at the play camera, which cannot hold
+ * eleven creatures when four of them are drakes: the back rank's heads went under the character
+ * panel and the level banner and the shadow dragon left the top of the frame entirely. Eleven
+ * creatures with a 2.3x-hero silhouette among them need the plate camera, the same one the full
+ * bestiary uses — the play camera keeps the scenarios that were built for it ('beasts-in-play',
+ * 'drakes-in-play', 'bestiary-fighters-close'), which never show more than six at a time.
+ * @param {object} ctx @param {Array<[string,string]>} front @param {Array<[string,string]>} back
+ */
+function familyPlate(ctx, front, back) {
+  const g = ctx.reset();
+  const W = 26, H = 12, depth = 4;
+  bestiaryHall(g, W, H, depth, { dress: false });
+  g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 9 } });
+  const p = g.player; p.facing = { dx: 0, dy: 1 };
+  g.give('light', 1); g.castSpell('light');
+  const placed = [{ label: 'Hero', x: 3, y: 9 }];
+  standRank(g, front, { y: 9, x0: 6.5, gap: 3.3, depth: 8 }, placed);
+  standRank(g, back, { y: 4, x0: 4, gap: 4.4, depth: 12 }, placed);
+  ctx.renderer.fog.override = 'all';
+  ctx.renderer.rebuildLevel();
+  ctx.renderer.cameraRig.setOverview(13, 5.2, 25, 11, { elevation: 46 });
+  ctx.renderer.cameraRig.snap();
+  ctx.step(600);
+  nameplates(ctx, placed, { font: 14 });
 }
 
 /**
@@ -148,24 +213,33 @@ function drakeRank(ctx, types, gap = 3) {
   ctx.step(600);
 }
 
-/** Monsters in two ranks in front of the hero, seen from the ordinary gameplay camera. */
+/**
+ * Monsters in two ranks in front of the hero, seen from the ordinary gameplay camera.
+ *
+ * The ranks used to be packed on 1.5-tile centres two tiles apart with the camera at its play zoom,
+ * which put the back rank's heads under the character panel and the level banner and left the two
+ * rows treading on each other. Two tiles across, three tiles apart and a step back on the zoom fits
+ * eleven creatures between the HUD panels while still being the camera the game is played on.
+ */
 function lineup(ctx, types) {
   const g = ctx.reset();
-  const W = 18, H = 12, depth = 3;
-  bestiaryHall(g, W, H, depth);
-  const px = W >> 1, py = H - 3;
+  const W = 22, H = 21, depth = 3;
+  bestiaryHall(g, W, H, depth, { dress: false });
+  const px = W >> 1, py = H - 5;
   g.enterLevel(depth, 'teleport', { arrival: { x: px, y: py } });
   const p = g.player; p.facing = { dx: 0, dy: -1 };
+  g.give('light', 1); g.castSpell('light');
   const front = Math.ceil(types.length / 2), back = types.length - front;
   types.forEach((t, i) => {
     const row = i < front ? 0 : 1, col = i < front ? i : i - front, n = row === 0 ? front : back;
-    const x = px + Math.round((col - (n - 1) / 2) * 1.5), y = py - 2 - row * 2;
+    const x = px + Math.round((col - (n - 1) / 2) * 2) + (row ? 1 : 0), y = py - 2 - row * 2;
     const m = g.spawnMonster(t, x, y, { depth: 10, state: 'idle' });
     if (m) { freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false; }
   });
   ctx.renderer.fog.override = 'all';
   ctx.renderer.rebuildLevel();
-  ctx.renderer.cameraRig.follow(ctx.renderer.playerView.pos, { x: 0, z: -1.5 });
+  ctx.renderer.cameraRig.setZoomExact(0.74);
+  ctx.renderer.cameraRig.follow(ctx.renderer.playerView.pos, { x: 0, z: -1 });
   ctx.renderer.cameraRig.snap();
   ctx.step(500);
 }
@@ -635,27 +709,62 @@ export const scenarios = {
     ctx.step(500);
   },
 
-  /** Every monster type in a warm, lit hall facing the camera in ranks, the hero in front. */
+  /**
+   * THE WHOLE CAST — three ranks, ordered by the depth they are first met at, every one of them
+   * named, nothing hidden behind anything else.
+   *
+   * The old staging was a 6-column grid on 2-tile centres at elevation 40, and it failed at every
+   * job a cast shot has: the wyvern stood directly behind the shadow dragon and simply vanished,
+   * the whole back rank ran up under the character panel and the level banner, the troll was cut in
+   * half by the right edge of the frame, and not one of the twenty-two creatures was labelled — a
+   * bestiary you cannot read the names off is a crowd scene.
+   *
+   * What fixes it is spacing and order, not a wider lens:
+   *  · THREE RANKS, 4 tiles apart, dealt front to back in the order the dungeon serves them up —
+   *    the upper halls in front, the middle depths behind them, the bottom of the dungeon at the
+   *    back. That also sorts the cast by SIZE, because the dungeon does: the tall things end up at
+   *    the back, where they rise clear of everyone in front instead of eclipsing them. (The two
+   *    depth-1 loomers, the werebear and the ogre, stand in the middle rank for the same reason —
+   *    their height needs the room, and a player meets them looming either way.)
+   *  · COLUMNS ON 4-TILE CENTRES, with the middle rank offset half a column, so no creature is ever
+   *    directly in front of another and the widest silhouettes in the game — the fyre drake's
+   *    sprawl, the shadow dragon's wing arch — have air on both sides.
+   *  · A HIGH CAMERA (elevation 46) framing 33 tiles: the ranks separate vertically because the
+   *    billboards are screen-aligned, so raising the camera spreads the rows without foreshortening
+   *    a single creature. The frame is set so the front rank's feet clear the hotbar and the back
+   *    rank's horns clear the panels — nothing under the HUD, nothing off the edge.
+   *  · A NAMEPLATE UNDER EVERY ONE OF THEM, the hero included, so the shot reads as a bestiary.
+   * The hall is left undressed (no altar, no stairwell) so nothing but the cast is in the picture.
+   */
   async 'bestiary'(ctx) {
     const g = ctx.reset();
-    const W = 16, H = 14, depth = 3;
-    const lv = bestiaryHall(g, W, H, depth);
-    g.enterLevel(depth, 'teleport', { arrival: { x: W >> 1, y: H - 3 } });
+    const W = 30, H = 14, depth = 4;
+    bestiaryHall(g, W, H, depth, { dress: false });
+    g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 11 } });
     const p = g.player; p.facing = { dx: 0, dy: 1 };
-    const types = MONSTER_TYPES;
-    const cols = 6;
-    types.forEach((t, i) => {
-      const col = i % cols, row = Math.floor(i / cols);
-      const x = 3 + col * 2, y = 3 + row * 2;
-      const m = g.spawnMonster(t, x, y, { depth: 10, state: 'idle' });
-      if (m) { freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false; }
-    });
+    g.give('light', 1); g.castSpell('light');
+    const placed = [{ label: 'Hero', x: 3, y: 11 }];
+    // front rank — the upper halls (depthMin 1-2), the hero standing at the head of it
+    standRank(g, [['dire-wolf', 'Dire Wolf'], ['rogue', 'Rogue'], ['dwarven-guard', 'Dwarven Guard'],
+      ['hobgoblin', 'Hobgoblin'], ['elvin-ranger', 'Elvin Ranger'], ['barbarian', 'Barbarian'],
+      ['mercenary', 'Mercenary']], { y: 11, x0: 6, gap: 3, depth }, placed);
+    // middle rank — the middle depths, plus the two depth-1 loomers, offset half a column
+    standRank(g, [['gargoyle', 'Gargoyle'], ['werebear', 'Werebear'], ['ogre', 'Ogre'],
+      ['swordsman', 'Swordsman'], ['troll', 'Troll'], ['monk', 'Monk'], ['wyvern', 'Wyvern']],
+    { y: 7, x0: 4.6, gap: 3, depth: 8 }, placed);
+    // back rank — the bottom of the dungeon
+    // within a depth pair the order is free, and it is spent putting a slim silhouette either side
+    // of each of the three widest creatures in the game
+    standRank(g, [['dimension-spider', 'Dimension Spider'], ['dark-warrior', 'Dark Warrior'],
+      ['shadow-dragon', 'Shadow Dragon'], ['assassin', 'Assassin'], ['war-lord', 'War Lord'],
+      ['fyre-drake', 'Fyre Drake'], ['mage', 'Mage'], ['demon', 'Demon']],
+    { y: 3, x0: 1.6, gap: 3.7, depth: 14 }, placed);
     ctx.renderer.fog.override = 'all';
     ctx.renderer.rebuildLevel();
-    void lv;
-    ctx.renderer.cameraRig.setOverview(W / 2, H / 2 - 0.4, 13.5, 10.5, { elevation: 40 });
+    ctx.renderer.cameraRig.setOverview(14.2, 5.9, 29.5, 12, { elevation: 46 });
     ctx.renderer.cameraRig.snap();
-    ctx.step(500);
+    ctx.step(600);
+    nameplates(ctx, placed, { font: 13 });
   },
 
   /** A killing blow: the hero mid-swing, a hobgoblin buckling and toppling, another one flinching from a hit. */
@@ -677,43 +786,50 @@ export const scenarios = {
     ctx.step(160);
   },
 
-  /** The creature family up close at the gameplay camera: two ranks in front of the hero. */
+  /** The whole creature family, named: the six that walk in front, the five that loom behind. */
   async 'bestiary-beasts'(ctx) {
-    lineup(ctx, ['dire-wolf', 'ogre', 'hobgoblin', 'werebear', 'gargoyle', 'troll', 'wyvern', 'dimension-spider', 'shadow-dragon', 'fyre-drake', 'demon']);
+    familyPlate(ctx,
+      [['dire-wolf', 'Dire Wolf'], ['hobgoblin', 'Hobgoblin'], ['gargoyle', 'Gargoyle'], ['werebear', 'Werebear'], ['ogre', 'Ogre'], ['troll', 'Troll']],
+      [['dimension-spider', 'Dimension Spider'], ['wyvern', 'Wyvern'], ['shadow-dragon', 'Shadow Dragon'], ['fyre-drake', 'Fyre Drake'], ['demon', 'Demon']]);
   },
 
-  /** The human family up close at the gameplay camera: two ranks in front of the hero. */
+  /** The whole human family, named: no two of the eleven share a silhouette. */
   async 'bestiary-humans'(ctx) {
-    lineup(ctx, ['rogue', 'barbarian', 'elvin-ranger', 'dwarven-guard', 'mercenary', 'swordsman', 'monk', 'dark-warrior', 'assassin', 'war-lord', 'mage']);
+    familyPlate(ctx,
+      [['rogue', 'Rogue'], ['dwarven-guard', 'Dwarven Guard'], ['elvin-ranger', 'Elvin Ranger'], ['mercenary', 'Mercenary'], ['swordsman', 'Swordsman'], ['barbarian', 'Barbarian']],
+      [['monk', 'Monk'], ['assassin', 'Assassin'], ['dark-warrior', 'Dark Warrior'], ['war-lord', 'War Lord'], ['mage', 'Mage']]);
   },
 
   /**
-   * The upper-dungeon vermin as HD-2D pixel sprites: a labelled row in a lit hall, facing the
-   * camera, with the hero beside them for scale. The types are placed by overriding the entity type
-   * of ordinary spawns, so the row works whatever the bestiary currently rolls.
+   * THE UPPER HALLS — every type the generator can roll on depths 1-2, and nothing else.
+   *
+   * This scenario used to show a giant rat, a vampire bat, a spider, a green slime and a kobold.
+   * Not one of those exists: they are DEAD BUILDERS left in the sprite registry, types the roller
+   * can never produce, and a screenshot of them is a screenshot of a game nobody can play. The row
+   * is now the real depth-1/2 band — the eight the first floors actually serve up, plus the two
+   * depth-2 arrivals — spawned BY TYPE, so what is in the picture is what the player meets.
+   * Ten in two ranks of five, the hero at the head of the front one for scale.
    */
-  async 'bestiary-vermin'(ctx) {
+  async 'bestiary-shallow'(ctx) {
     const g = ctx.reset();
-    const W = 16, H = 11, depth = 2;
-    bestiaryHall(g, W, H, depth);
-    g.enterLevel(depth, 'teleport', { arrival: { x: 2, y: 6 } });
-    const p = g.player; p.facing = { dx: 1, dy: 0 };
-    const types = [['giant-rat', 'Giant Rat'], ['vampire-bat', 'Vampire Bat'], ['spider', 'Spider'], ['green-slime', 'Green Slime'], ['kobold', 'Kobold']];
-    const placed = [];
-    types.forEach(([t, label], i) => {
-      const x = 4 + i * 2, y = 5;
-      const m = g.spawnMonster('hobgoblin', x, y, { depth, state: 'idle' });
-      if (!m) return;
-      m.type = t; m.name = label;             // the sprite registry keys off entity.type
-      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
-      placed.push({ m, label, x, y });
-    });
+    const W = 26, H = 13, depth = 2;
+    bestiaryHall(g, W, H, depth, { dress: false });
+    g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 9 } });
+    const p = g.player; p.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');
+    const placed = [{ label: 'Hero', x: 3, y: 9 }];
+    // the rank starts a tile further in than it wants to: the hall's dust shaft falls on x = 7, and
+    // the dire wolf is the darkest sprite in the game to begin with
+    standRank(g, [['dire-wolf', 'Dire Wolf'], ['rogue', 'Rogue'], ['dwarven-guard', 'Dwarven Guard'],
+      ['hobgoblin', 'Hobgoblin'], ['elvin-ranger', 'Elvin Ranger']], { y: 9, x0: 8, gap: 4, depth }, placed);
+    standRank(g, [['barbarian', 'Barbarian'], ['mercenary', 'Mercenary'], ['gargoyle', 'Gargoyle'],
+      ['werebear', 'Werebear'], ['ogre', 'Ogre']], { y: 4, x0: 6, gap: 4, depth: 3 }, placed);
     ctx.renderer.fog.override = 'all';
     ctx.renderer.rebuildLevel();
-    ctx.renderer.cameraRig.setOverview(7.4, 5.6, 11.5, 6.6, { elevation: 30 });
+    ctx.renderer.cameraRig.setOverview(14, 6.4, 25, 11, { elevation: 44 });
     ctx.renderer.cameraRig.snap();
     ctx.step(600);
-    nameplates(ctx, placed.map((q) => ({ label: q.label, x: q.x, y: q.y })));
+    nameplates(ctx, placed);
   },
 
   /**
@@ -779,60 +895,63 @@ export const scenarios = {
   },
 
   /**
-   * The spellcasters and tricksters as HD-2D pixel sprites: a labelled row in a lit hall facing
-   * the camera, with the hero at the end of the rank for scale (sprites/monsters/caster.js).
-   * `sprite` and `wizard` are not rolled by the generator, so they are placed by overriding the
-   * entity type of an ordinary spawn — the sprite registry keys off entity.type.
+   * THE MIDDLE DEPTHS — the six types whose first floor is 4 to 8, and nothing else.
+   *
+   * The row this replaces was labelled "spellcasters and tricksters" and showed a Sprite and an
+   * Illusionist next to the Mage: two more dead builders, placed by OVERRIDING `entity.type` on an
+   * ordinary spawn, which is exactly the trick that lets art with no monster behind it reach a
+   * screenshot. Nothing here is overridden — every one is spawned by its own type.
    */
-  async 'bestiary-caster'(ctx) {
+  async 'bestiary-middle'(ctx) {
     const g = ctx.reset();
-    const W = 18, H = 12, depth = 14;
-    bestiaryHall(g, W, H, depth);
-    g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 5 } });
+    // The HALL sits at depth 4: the renderer's per-depth grade turns the whole frame green in the
+    // teens, and a rank you have to guess at through a colour cast is not a bestiary plate. The
+    // monsters are still rolled at their own depth, so their stats and their art are the real ones.
+    const W = 22, H = 11, depth = 8;
+    bestiaryHall(g, W, H, 4, { dress: false });
+    g.enterLevel(4, 'teleport', { arrival: { x: 3, y: 7 } });
     const p = g.player; p.facing = { dx: 0, dy: 1 };
-    const types = [['mage', 'Mage'], ['warlock', 'Warlock'], ['sprite', 'Sprite'], ['wizard', 'Illusionist']];
-    const placed = [{ label: 'Hero', x: 3, y: 5 }];
-    types.forEach(([t, label], i) => {
-      const x = 6 + i * 2, y = 5;
-      const m = g.spawnMonster('mage', x, y, { depth, state: 'idle' });
-      if (!m) return;
-      m.type = t; m.name = label;
-      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
-      placed.push({ label, x, y });
-    });
+    g.give('light', 1); g.castSpell('light');
+    const placed = [{ label: 'Hero', x: 3, y: 7 }];
+    standRank(g, [['swordsman', 'Swordsman'], ['monk', 'Monk'], ['dark-warrior', 'Dark Warrior']],
+      { y: 7, x0: 8, gap: 5, depth }, placed);
+    standRank(g, [['troll', 'Troll'], ['wyvern', 'Wyvern'], ['dimension-spider', 'Dimension Spider']],
+      { y: 3, x0: 5, gap: 6, depth }, placed);
     ctx.renderer.fog.override = 'all';
     ctx.renderer.rebuildLevel();
-    ctx.renderer.cameraRig.setOverview(7.9, 5.4, 11.0, 6.2, { elevation: 30 });
+    ctx.renderer.cameraRig.setOverview(11.5, 4.6, 21, 10, { elevation: 44 });
     ctx.renderer.cameraRig.snap();
     ctx.step(600);
     nameplates(ctx, placed);
   },
 
   /**
-   * The undead and horrors as HD-2D pixel sprites: a labelled row in a lit hall facing the camera,
-   * with the hero at the head of the rank for scale (sprites/monsters/undead.js). These are
-   * extended-bestiary types, so the row is placed by overriding the entity type of ordinary spawns
-   * — the sprite registry keys off `entity.type` and nothing else.
+   * THE BOTTOM OF THE DUNGEON — the six types whose first floor is 10 or deeper, and nothing else.
+   *
+   * What stood here was a Ghoul, a Wraith, a Vampire and a Werewolf, none of which the generator
+   * can produce: they were ordinary hobgoblin spawns with `entity.type` rewritten to pull dead art
+   * out of the sprite registry. The real deep band is an assassin you can barely see, a war lord, a
+   * mage — and the three things that end runs.
    */
-  async 'bestiary-undead'(ctx) {
+  async 'bestiary-deep'(ctx) {
     const g = ctx.reset();
-    const W = 18, H = 12, depth = 6;
-    bestiaryHall(g, W, H, depth);
-    g.enterLevel(depth, 'teleport', { arrival: { x: 3, y: 5 } });
+    // Depth 14 is "The Black Roots": the grade takes the whole frame green and the three biggest
+    // silhouettes in the game come out as flat shadows. The hall is therefore built at depth 4 and
+    // lit, while the monsters are still rolled at 14 — the plate is about the creatures, and the
+    // deep level's colour has its own scenarios ('deep-level', 'cavern-overview').
+    const W = 24, H = 11, depth = 14;
+    bestiaryHall(g, W, H, 4, { dress: false });
+    g.enterLevel(4, 'teleport', { arrival: { x: 3, y: 7 } });
     const p = g.player; p.facing = { dx: 0, dy: 1 };
-    const types = [['ghoul', 'Ghoul'], ['wraith', 'Wraith'], ['vampire', 'Vampire'], ['werewolf', 'Werewolf']];
-    const placed = [{ label: 'Hero', x: 3, y: 5 }];
-    types.forEach(([t, label], i) => {
-      const x = 7 + i * 2, y = 5;
-      const m = g.spawnMonster('hobgoblin', x, y, { depth: 12, state: 'idle' });
-      if (!m) return;
-      m.type = t; m.name = label;             // the sprite registry keys off entity.type
-      freeze(m); m.facing = { dx: 0, dy: 1 }; m.invisible = false; m.flags.invisible = false;
-      placed.push({ label, x, y });
-    });
+    g.give('light', 1); g.castSpell('light');
+    const placed = [{ label: 'Hero', x: 3, y: 7 }];
+    standRank(g, [['assassin', 'Assassin'], ['war-lord', 'War Lord'], ['mage', 'Mage']],
+      { y: 7, x0: 8, gap: 5, depth }, placed);
+    standRank(g, [['shadow-dragon', 'Shadow Dragon'], ['fyre-drake', 'Fyre Drake'], ['demon', 'Demon']],
+      { y: 3, x0: 5, gap: 6, depth }, placed);
     ctx.renderer.fog.override = 'all';
     ctx.renderer.rebuildLevel();
-    ctx.renderer.cameraRig.setOverview(8.4, 5.5, 13.5, 7.6, { elevation: 32 });
+    ctx.renderer.cameraRig.setOverview(12, 4.6, 22, 10, { elevation: 44 });
     ctx.renderer.cameraRig.snap();
     ctx.step(600);
     nameplates(ctx, placed);
@@ -850,7 +969,7 @@ export const scenarios = {
     g.enterLevel(depth, 'teleport', { arrival: { x: 2, y: 5 } });
     const p = g.player; p.facing = { dx: 0, dy: 1 };
     g.give('light', 1); g.castSpell('light');    // depth 14 is the darkest band; light the whole rank
-    const types = [['ogre', 'Ogre'], ['fyre-drake', 'Salamander'], ['shadow-dragon', 'Shadow Dragon'], ['demon', 'Demon']];
+    const types = [['ogre', 'Ogre'], ['fyre-drake', 'Fyre Drake'], ['shadow-dragon', 'Shadow Dragon'], ['demon', 'Demon']];
     const placed = [{ label: 'Hero', x: 2, y: 5 }];
     types.forEach(([t, label], i) => {
       const x = 5 + i * 3, y = 5;
@@ -1118,7 +1237,7 @@ let nameplateEl = null;
  * Caption tiles in the 3D view: projects each {label,x,y} tile through the live camera and writes
  * the name under it on a transparent overlay (removed when the next game starts).
  */
-function nameplates(ctx, items) {
+function nameplates(ctx, items, { font = 15, dy = 10 } = {}) {
   if (!nameplateEl) {
     nameplateEl = document.createElement('canvas');
     nameplateEl.id = 'nameplate-overlay';
@@ -1130,7 +1249,7 @@ function nameplates(ctx, items) {
   nameplateEl.width = W; nameplateEl.height = H;
   const c = nameplateEl.getContext('2d');
   c.clearRect(0, 0, W, H);
-  c.font = '600 15px ui-monospace, Menlo, Consolas, monospace';
+  c.font = `600 ${font}px ui-monospace, Menlo, Consolas, monospace`;
   c.textAlign = 'center'; c.textBaseline = 'top';
   const cam = ctx.renderer.camera;
   cam.updateMatrixWorld(true);
@@ -1139,10 +1258,13 @@ function nameplates(ctx, items) {
   for (const it of items) {
     const clip = mul(cam.projectionMatrix.elements, mul(cam.matrixWorldInverse.elements, [it.x, 0.02, it.y, 1]));
     const w = clip[3] || 1;
-    const sx = (clip[0] / w * 0.5 + 0.5) * W, sy = (-clip[1] / w * 0.5 + 0.5) * H + 10;
-    const tw = c.measureText(it.label).width + 14;
-    c.fillStyle = 'rgba(12,9,18,0.72)';
-    c.fillRect(sx - tw / 2, sy - 3, tw, 21);
+    let sx = (clip[0] / w * 0.5 + 0.5) * W;
+    const sy = (-clip[1] / w * 0.5 + 0.5) * H + dy;
+    const tw = c.measureText(it.label).width + 12;
+    // a plate that runs off the edge is a name nobody can read: keep every one inside the frame
+    sx = Math.max(tw / 2 + 4, Math.min(W - tw / 2 - 4, sx));
+    c.fillStyle = 'rgba(12,9,18,0.78)';
+    c.fillRect(sx - tw / 2, sy - 3, tw, font + 7);
     c.fillStyle = '#e7dfc8';
     c.fillText(it.label, sx, sy);
   }
@@ -1493,9 +1615,9 @@ export const uiScenarios = {
     p.maxHp = 58; p.hp = 41; p.kills = 12;
     g.give('gold', 267); g.give('teleport', 1); g.give('potion', 1);
     g.log('You descend the stairs. Cold air rises from below.', 'info');
-    g.log('A kobold strikes from the shadows! HITS: 44', 'combat');
+    g.log('A dark warrior strikes from the shadows! HITS: 44', 'combat');
     g.log('HITS: 41 SLASH', 'combat');
-    g.log('The kobold is slain. +38 exp', 'combat');
+    g.log('The dark warrior is slain. +38 exp', 'combat');
     g.log('GOLD! 120 pieces', 'loot');
     g.log('TELEPORT SPELL!!', 'magic');
     g.log('The air hums here. Something of great power lies on this level.', 'quest');

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { TILE, DIRS8, DIRS4 } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
 import { createWaterMaterial, createShaftMaterial, CELLS, cellUV, ATLAS, stoneFamily } from './materials.js';
-import { MeshBuilder, slabGeometry, pushWornStep, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
+import { MeshBuilder, slabGeometry, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
 import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
 
 const WALL_H = 0.82;      // body top; caps sit on top
@@ -446,6 +446,105 @@ export class DungeonView {
   /** Local frame for a tile leaning on wall side d: local -z points at the wall. */
   frameFor(x, y, d) { return new THREE.Matrix4().compose(new THREE.Vector3(x, 0, y), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(d.dx, d.dy) + Math.PI), new THREE.Vector3(1, 1, 1)); }
 
+  /**
+   * ONE TREAD OF A FLIGHT, CUT FROM THE FLOOR'S OWN STONE.
+   *
+   * The staircases used to be laid with `pushWornStep`, whose uv rectangle was a FIXED slice of an
+   * atlas cell — `v` from 0.1 to 0.9 — whatever the size of the face it was mapped onto. A tread is
+   * 0.22 of a tile deep, so 25 texels of painted flagstone were crushed into a quarter of a tile:
+   * about 116 texels per tile against the floor's 32, three and a half times the density of every
+   * other surface in the room. At that ratio the stone's grain stops being grain and turns into
+   * horizontal smear, which is why both flights read as an untextured grey wedge with a hard bevel
+   * standing behind the hero — the one raw 3D object left in a hand-painted room. The tints made it
+   * worse: `pushWornStep` multiplied its middle strip by 1.08 and the up-flight passed 1.06 on top
+   * of that, so the treads left the material's white point at 1.14 and went straight into the bloom
+   * pass, blowing the top of the stairs out to paper.
+   *
+   * So a tread is now built here, in the SAME painted flagstone the floor is laid with, at the SAME
+   * texel density: the uv rectangle is the face's own world size, so 32 texels cover a tile on a
+   * stair exactly as they do on a slab, and each step reads a different band of its cell (`v0`) so
+   * a flight is five different stones rather than one stone printed five times. The light is the
+   * house key light and nothing is brighter than the stone it is cut from: the tread turns away as
+   * it comes forward, the riser gets a lit nose over a shadowed face — a crisp break at the front
+   * edge instead of a smooth bevel — the left flank is lighter than the right, and every tint is
+   * under 1 so the flight cannot bloom.
+   *
+   * @param {THREE.Matrix4} m the tread's frame (origin at the middle of its top face, -z into the wall)
+   * @param {number} w tread width @param {number} d tread depth @param {number} h drop to the floor
+   * @param {[number, number]} cell the atlas cell this step is cut from
+   * @param {{v0?:number, tint?:number, nose?:number}} [o] `v0` picks the band of the cell; `tint`
+   *   is the step's own value (never above 1); `nose` is how deep the lit front edge runs.
+   */
+  pushTread(m, w, d, h, cell, { v0 = 0, tint = 0.9, nose = 0.06 } = {}) {
+    const b = this.detail, F = this.family ? this.family.tint : [1, 1, 1];
+    const hw = w / 2, hd = d / 2;
+    const nm = new THREE.Matrix3().getNormalMatrix(m);
+    const P = new THREE.Vector3(), N3 = new THREE.Vector3();
+    const X = (x, y, z) => { P.set(x, y, z).applyMatrix4(m); return [P.x, P.y, P.z]; };
+    const NN = (x, y, z) => { N3.set(x, y, z).applyMatrix3(nm).normalize(); return [N3.x, N3.y, N3.z]; };
+    const c = (k) => [F[0] * tint * k, F[1] * tint * k, F[2] * tint * k];
+    // uv spans the face's world size out of one 32-texel cell: same texels per tile as the floor
+    const uW = Math.min(0.94, w), vD = Math.min(0.9 - v0, d), vH = Math.min(0.9 - v0, Math.max(0.1, h));
+    const u0 = (1 - uW) / 2;
+    const T = (ux, vz) => [u0 + ux * uW, v0 + vz * vD];
+    const R = (ux, vy) => [u0 + ux * uW, v0 + vy * vH];
+    // the tread, turning away from the light as it runs forward
+    const back = c(1), front = c(0.88);
+    b.face([X(-hw, 0, -hd), X(hw, 0, -hd), X(hw, 0, hd), X(-hw, 0, hd)], NN(0, 1, 0),
+      [T(0, 0), T(1, 0), T(1, 1), T(0, 1)], [back, back, front, front], cell);
+    // the riser in two bands: a lit nose along the top edge, then the face falling into its shadow
+    const k = Math.min(0.9, nose / Math.max(0.02, h));
+    const lit = c(1), mid = c(0.68), dark = c(0.42);
+    b.face([X(-hw, 0, hd), X(-hw, -nose, hd), X(hw, -nose, hd), X(hw, 0, hd)], NN(0, 0, 1),
+      [R(0, 0), R(0, k), R(1, k), R(1, 0)], [lit, mid, mid, lit], cell);
+    b.face([X(-hw, -nose, hd), X(-hw, -h, hd), X(hw, -h, hd), X(hw, -nose, hd)], NN(0, 0, 1),
+      [R(0, k), R(0, 1), R(1, 1), R(1, k)], [mid, dark, dark, mid], cell);
+    // flanks: the left one takes the key light, the right one is the shadow side
+    const flank = (s, top, bot) => b.face(
+      s < 0 ? [X(-hw, 0, -hd), X(-hw, -h, -hd), X(-hw, -h, hd), X(-hw, 0, hd)] : [X(hw, 0, hd), X(hw, -h, hd), X(hw, -h, -hd), X(hw, 0, -hd)],
+      NN(s, 0, 0), [R(0, 0), R(0, 1), R(1, 1), R(1, 0)], [top, bot, bot, top], cell);
+    flank(-1, c(0.92), c(0.52)); flank(1, c(0.7), c(0.4));
+  }
+
+  /**
+   * A BLOCK OF THE FLOOR'S OWN STONE, standing in the stair's local frame — the doorway piers and
+   * lintel of the up-flight are cut from these.
+   *
+   * They used to be an instance of the shared `cutStone` archway, whose map is smooth and
+   * low-frequency: a pale, almost untextured grey plank with a hard bevel, standing DIRECTLY BEHIND
+   * THE HERO in the opening frame of every game, in a room where every other surface is painted
+   * texel by texel. Built here instead, the doorway is the same flagstone as the floor, at the same
+   * 32-texels-to-a-tile density, in the level's own stone family, lit by the house key light: top
+   * face brightest, left flank a step down, front face mid, right flank in shadow, all of it under
+   * the material's white point so it cannot bloom.
+   * @param {THREE.Matrix4} frame the stair's local frame (-z into the wall)
+   * @param {number} cx centre x @param {number} y0 the block's FOOT @param {number} cz centre z
+   * @param {number} w @param {number} h @param {number} d @param {[number,number]} cell
+   * @param {number} [tint]
+   */
+  pushStairBlock(frame, cx, y0, cz, w, h, d, cell, tint = 0.84) {
+    const b = this.detail, F = this.family ? this.family.tint : [1, 1, 1];
+    const nm = new THREE.Matrix3().getNormalMatrix(frame);
+    const P = new THREE.Vector3(), N3 = new THREE.Vector3();
+    const X = (x, y, z) => { P.set(cx + x, y0 + y, cz + z).applyMatrix4(frame); return [P.x, P.y, P.z]; };
+    const NN = (x, y, z) => { N3.set(x, y, z).applyMatrix3(nm).normalize(); return [N3.x, N3.y, N3.z]; };
+    const c = (k) => [F[0] * tint * k, F[1] * tint * k, F[2] * tint * k];
+    const hw = w / 2, hd = d / 2;
+    // uv spans each face's own world size out of one cell, so the grain never stretches
+    const U = (uw, uh) => (a, e) => [0.04 + a * Math.min(0.9, uw), 0.04 + e * Math.min(0.9, uh)];
+    const top = U(w, d), side = U(d, h), face = U(w, h);
+    b.face([X(-hw, h, -hd), X(hw, h, -hd), X(hw, h, hd), X(-hw, h, hd)], NN(0, 1, 0),
+      [top(0, 0), top(1, 0), top(1, 1), top(0, 1)], [c(1), c(0.96), c(0.9), c(0.94)], cell);
+    b.face([X(-hw, h, hd), X(-hw, 0, hd), X(hw, 0, hd), X(hw, h, hd)], NN(0, 0, 1),
+      [face(0, 1), face(0, 0), face(1, 0), face(1, 1)], [c(0.92), c(0.62), c(0.62), c(0.86)], cell);
+    b.face([X(-hw, h, -hd), X(-hw, 0, -hd), X(-hw, 0, hd), X(-hw, h, hd)], NN(-1, 0, 0),
+      [side(0, 1), side(0, 0), side(1, 0), side(1, 1)], [c(0.98), c(0.66), c(0.66), c(0.98)], cell);
+    b.face([X(hw, h, hd), X(hw, 0, hd), X(hw, 0, -hd), X(hw, h, -hd)], NN(1, 0, 0),
+      [side(0, 1), side(0, 0), side(1, 0), side(1, 1)], [c(0.72), c(0.48), c(0.48), c(0.72)], cell);
+    b.face([X(hw, h, -hd), X(hw, 0, -hd), X(-hw, 0, -hd), X(-hw, h, -hd)], NN(0, 0, -1),
+      [face(0, 1), face(0, 0), face(1, 0), face(1, 1)], [c(0.6), c(0.38), c(0.38), c(0.6)], cell);
+  }
+
   /** Square shaft lining for a hole tile (inner faces from y=top down to y=bottom). */
   pushSquareShaft(x, y, top, bottom, colTop, colBot, glow = null) {
     const inset = 0.01;
@@ -463,17 +562,19 @@ export class DungeonView {
     const d = this.wallSide(x, y, this.level);
     const frame = this.frameFor(x, y, d);
     this.pushSquareShaft(x, y, 0.01, -1.6, [0.8, 0.78, 0.75], [0.1, 0.1, 0.12]);
-    const cell = cellUV(rng.pick(CELLS.plain));
+    // every tread is its own stone: a different cell and a different band of it, so a flight is a
+    // course of laid steps rather than one texture printed five times
     for (let i = 0; i < 5; i++) {
       const m = new THREE.Matrix4().makeTranslation(0, -0.045 - i * 0.2, 0.38 - i * 0.19).premultiply(frame);
-      pushWornStep(this.detail, m, 0.94, 0.21, 0.26, cell, 1 - i * 0.1, 0.022);
+      this.pushTread(m, 0.94, 0.21, 0.28, cellUV(rng.pick(CELLS.plain)),
+        { v0: rng.float(0, 0.5), tint: 0.98 - i * 0.12, nose: 0.05 });
     }
-    // squat newel posts at the top of the flight (a tall arch here would hide the treads from the camera)
+    // Squat newel posts at the top of the flight (a tall arch here would hide the treads from the
+    // camera). They used to be instances of the shared `cutStone` pillar tinted up to 1.05 — a
+    // smooth, near-white grey block sticking out of a hand-painted floor, the same raw-3D fault as
+    // the arch. Cut from the flagstone instead, like the rest of the flight.
+    for (const sx of [-0.44, 0.44]) this.pushStairBlock(frame, sx, 0, 0.44, 0.2, 0.42, 0.2, cellUV(rng.pick(CELLS.plain)), 0.95);
     const ry = Math.atan2(d.dx, d.dy) + Math.PI;
-    for (const sx of [-0.44, 0.44]) {
-      const p = new THREE.Vector3(sx, 0, 0.44).applyMatrix4(frame);
-      this.posts.push({ x: p.x, z: p.z, ry, tint: 0.9 + rng.float(0, 0.15), h: 0.42 });
-    }
     // the passage continues under the wall: a dark tunnel mouth in the far shaft wall
     const mouth = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.7, 0.75)), this.mats.dark);
     mouth.position.copy(new THREE.Vector3(0, -0.9, -0.475).applyMatrix4(frame));
@@ -501,13 +602,14 @@ export class DungeonView {
     const d = this.wallSide(x, y, this.level);
     const hasWall = this.tileAt(x + d.dx, y + d.dy) === TILE.WALL;
     const frame = this.frameFor(x, y, d);
-    const cell = cellUV(rng.pick(CELLS.plain));   // flagstone grain, not the flat marble cell
     for (let i = 0; i < 4; i++) {
       const m = new THREE.Matrix4().makeTranslation(0, 0.12 + i * 0.15, 0.34 - i * 0.2).premultiply(frame);
-      pushWornStep(this.detail, m, 0.96, 0.22 + (i === 3 ? 0.14 : 0), 0.12 + i * 0.15 + 0.06, cell, 1.06, 0.03);
+      this.pushTread(m, 0.94, 0.22 + (i === 3 ? 0.14 : 0), 0.18 + i * 0.15, cellUV(rng.pick(CELLS.plain)),
+        { v0: rng.float(0, 0.5), tint: 0.95 - i * 0.03, nose: 0.055 });
     }
     // landing at the top of the flight, so the climb arrives somewhere solid
-    pushWornStep(this.detail, new THREE.Matrix4().makeTranslation(0, 0.57, -0.42).premultiply(frame), 0.96, 0.28, 0.63, cell, 1.02, 0.02);
+    this.pushTread(new THREE.Matrix4().makeTranslation(0, 0.57, -0.42).premultiply(frame), 0.94, 0.28, 0.63,
+      cellUV(rng.pick(CELLS.cracked)), { v0: 0.2, tint: 0.88, nose: 0.05 });
     const g = new THREE.Group();
     g.applyMatrix4(frame);
     if (hasWall) {
@@ -517,20 +619,28 @@ export class DungeonView {
       mouth.position.set(0, 1.02, -0.487);
       mouth.renderOrder = 2;
       g.add(mouth);
-      const spill = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.9, 1.3)), flatGlowMaterial(stairSpillTexture(), 0xcfe2ff, { opacity: 0.5, intensity: 0.9 }));
+      const spill = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.9, 1.3)), flatGlowMaterial(stairSpillTexture(), 0xcfe2ff, { opacity: 0.34, intensity: 0.7 }));
       spill.position.set(0, 1.12, -0.455);
       spill.renderOrder = 3;
       g.add(spill);
     }
-    // light of the level above falling down the flight (soft radial; nothing with a border)
-    const halo = billboard(glowTexture(), 0xd8e6ff, 1.15, { intensity: 0.45 });
-    halo.position.set(0, 1.0, -0.28);
+    // Light of the level above falling down the flight (soft radial; nothing with a border). It is
+    // deliberately weaker and higher than it was: at 1.15 units of additive glow sitting a metre
+    // over the treads it washed the top of the flight to paper and took the newly painted stone
+    // with it — the light is meant to say "the way out is up there", not to erase the staircase.
+    const halo = billboard(glowTexture(), 0xd8e6ff, 0.62, { intensity: 0.22 });
+    halo.position.set(0, 1.28, -0.34);
     g.add(halo);
     const shaft = new THREE.Mesh(this.own(new THREE.CylinderGeometry(0.22, 0.42, 1.6, 12, 1, true)), this.shaftMats.stair);
     shaft.position.set(0, 1.3, -0.25); shaft.rotation.x = 0.35;
     g.add(shaft);
     this.root.add(g);
-    this.arches.push({ x: x - d.dx * 0.12, z: y - d.dy * 0.12, y: 0.55, ry: Math.atan2(d.dx, d.dy), tint: 1.25, s: 0.9 });
+    // THE DOORWAY — the original's "III" columns — cut from the floor's own painted stone rather
+    // than instanced from the smooth `cutStone` arch, which was tinted 1.25 on top of everything
+    // else: a quarter above the material's white point, so the lintel standing right behind the
+    // hero in the opening frame went through the bloom pass and came out a white bar.
+    for (const sx of [-0.4, 0.4]) this.pushStairBlock(frame, sx, 0, 0.06, 0.18, 0.9, 0.26, cellUV(rng.pick(CELLS.plain)), 0.95);
+    this.pushStairBlock(frame, 0, 0.9, 0.06, 1.0, 0.15, 0.3, cellUV(rng.pick(CELLS.cracked)), 1);
   }
 
   /** Pit: crumbling flagstone lip, masonry shaft, rocks on the rim and a red glow from far below. */

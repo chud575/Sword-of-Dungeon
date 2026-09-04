@@ -10,9 +10,9 @@ import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
 import { PALETTE, createShaftMaterial } from './materials.js';
 import { glowTexture, glintTexture, sigilTexture, runeCircleTexture, billboard, groundGlow, flame, litMaterial, getFog, updateFlames } from './propFx.js';
-import { paint, outline, toRGBA, Palette, makePix, blit } from './sprites/pixelPainter.js';
+import { paint, outline, toRGBA, Palette, makePix, blit, setPx, keyShade, bounds } from './sprites/pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from './sprites/style.js';
-import { PX_PER_TILE } from './sprites/spriteBillboard.js';
+import { PX_PER_TILE, frameTexelSize } from './sprites/spriteBillboard.js';
 
 const geoCache = new Map();
 function geo(key, make) { let g = geoCache.get(key); if (!g) { g = make(); geoCache.set(key, g); } return g; }
@@ -35,7 +35,7 @@ export const SPELL_COLORS = { teleport: 0x4ee1ff, shield: 0xffd43b, regeneration
 // cast is — a hand-pixelled sprite on the house ramps, with the house ink outline and the house
 // top-left key light — and billboarded upright in the lit room. Everything else (glow pools,
 // glints, motes, particles) is unchanged, so the props still read as magical, just not as plastic.
-const _wp = new THREE.Vector3(), _bufSize = new THREE.Vector2();
+const _wp = new THREE.Vector3(), _bufSize = new THREE.Vector2(), _fwd = new THREE.Vector3();
 const pixTex = new Map();
 
 /**
@@ -53,11 +53,18 @@ function itemPalette(ramps, extra = {}) {
   return p;
 }
 
-/** Painted rows -> a padded, house-outlined, NearestFilter texture (built once per key). */
-function pixelTexture(key, rows, pal) {
+/** Painted art -> a padded, house-outlined, NearestFilter texture (built once per key). */
+function pixelTexture(key, art0, pal) {
   let t = pixTex.get(key);
   if (t) return t;
-  const src = paint(rows);
+  const drawn = typeof art0 === 'function' ? art0() : paint(art0);
+  // CROP TO THE DRAWING. The quad's pivot is its bottom edge, so a blank row left under an object
+  // is a texel of air between it and the floor — which is exactly how a pickup starts to float.
+  // Cropping to the painted bounds makes "the bottom row of the art" and "the row it rests on" the
+  // same row, for every pickup, whatever canvas it happened to be drawn on.
+  const b = bounds(drawn) || { x0: 0, y0: 0, w: drawn.w, h: drawn.h };
+  const src = makePix(b.w, b.h);
+  blit(src, drawn, -b.x0, -b.y0);
   const pad = makePix(src.w + 2, src.h + 2);
   blit(pad, src, 1, 1);
   const art = outline(pad, '#', { lit: LIT, litKey: '@' });
@@ -73,24 +80,36 @@ function pixelTexture(key, rows, pal) {
 }
 
 /**
- * Size a pixel prop from the camera so one art texel covers a WHOLE number of device pixels (the
- * rounding spriteBillboard.js explains at length), and turn it to the camera's yaw so it stays
- * upright. Without the rounding the same 3px/4px/3px mush that ruined the characters shows up on
- * the pickups.
+ * ONE PIXEL GRID FOR THE WHOLE SCREEN — pickups included.
+ *
+ * This used to round its own texel size, per prop, from the CAMERA'S DISTANCE to that prop:
+ * `S = max(2, round(pxPerWorld / 32))`. Two faults fell straight out of it, both measured live in
+ * the 'treasure' shot at 1600x900: the twelve pickups in one frame came out at texel sizes from
+ * 0.0285 to 0.0484 world units — the same 16-texel sprite drawn at three different resolutions in
+ * one picture — and every one of them was coarser than the hero beside them, who was on the cast's
+ * shared grid at 0.0281. A potion whose pixels are 1.7x the hero's is not a prop in his world; it
+ * is a sticker from a different game.
+ *
+ * So the size now comes from `frameTexelSize()` — THE grid, the one integer the whole cast shares,
+ * derived from the camera alone (see spriteBillboard.js "ONE TEXEL SIZE FOR THE WHOLE SCREEN").
+ * One art texel of a chest is exactly one art texel of the hero, always. A pickup that wants to
+ * look bigger is a request for MORE TEXELS of art, never for fatter ones.
+ *
+ * The quad is screen-aligned rather than merely yawed: a world-upright quad under this steeply
+ * pitched camera is foreshortened to about 60% of its height, which turns a carefully drawn pickup
+ * into a flat lozenge. Facing the image plane keeps the art at its true aspect and every texel
+ * square — the same bargain the character billboards make. `pxPerWorld` is therefore measured on
+ * the camera's VIEW-SPACE DEPTH (not its radial distance, which is longer at the edges of the
+ * frame and quietly shrank everything away from the centre).
  */
 function syncPixelSprite(m, renderer, camera) {
   m.getWorldPosition(_wp);
-  // SCREEN-ALIGNED, not merely yawed to the camera. A world-upright quad under this steeply pitched
-  // camera is foreshortened to about 60% of its height, which turns every carefully drawn pickup
-  // into a flat lozenge on the floor. Facing the image plane keeps the art at its true aspect and
-  // keeps all four corners at one depth, so the texels stay square — the same bargain the character
-  // billboards make.
   m.quaternion.copy(camera.quaternion);
   const size = renderer.getDrawingBufferSize(_bufSize);
-  const d = Math.max(0.5, camera.position.distanceTo(_wp));
-  const pxPerWorld = (size.y * (camera.zoom || 1)) / (2 * Math.tan((camera.fov || 45) * Math.PI / 360) * d);
-  const S = Math.max(2, Math.round(pxPerWorld / PX_PER_TILE));
-  const w = S / pxPerWorld;
+  _fwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  const d = Math.max(0.5, (_wp.x - camera.position.x) * _fwd.x + (_wp.y - camera.position.y) * _fwd.y + (_wp.z - camera.position.z) * _fwd.z);
+  const pxPerWorld = (size.y * 0.5 * (camera.zoom || 1)) / (Math.tan((camera.fov || 45) * Math.PI / 360) * d);
+  const w = frameTexelSize(renderer, camera, PX_PER_TILE) / pxPerWorld;
   const t = m.userData.tex;
   m.scale.set(t.w * w, t.h * w, 1);
   m.updateMatrix();
@@ -99,14 +118,21 @@ function syncPixelSprite(m, renderer, camera) {
 }
 
 /**
- * A hand-pixelled item billboard, pivoted on its bottom edge and lit by the room like any other
- * surface (alpha-tested, so it writes depth and sorts against the dungeon properly).
- * @param {string} key @param {string[]} rows @param {Palette} pal
- * @param {{glow?:number, emissive?:number, y?:number}} [o] `glow` is the emissive floor that keeps
- *   a pickup legible in an unlit corridor; magical items push it up.
+ * A hand-pixelled item billboard, PIVOTED ON THE FLOOR ROW OF ITS QUAD and lit by the room like any
+ * other surface (alpha-tested, so it writes depth and sorts against the dungeon properly).
+ *
+ * The pivot is the law: `y` is 0.01 (a hair off the flagstone so it never z-fights) for every
+ * pickup in the game, so the bottom row of the art is the row the object rests on and the tile it
+ * belongs to is never in doubt. A pickup may BOB — `bob()` below moves this mesh and nothing else —
+ * but the shadow and the glow pool stay welded to the tile, which is what makes the bob read as the
+ * object breathing rather than as the whole prop having come loose.
+ * @param {string} key @param {string[]|(() => object)} art rows, or a painter returning a Pix
+ * @param {Palette} pal
+ * @param {{glow?:number, emissive?:number}} [o] `glow` is the emissive floor that keeps a pickup
+ *   legible in an unlit corridor; magical items push it up.
  */
-function pixelSprite(key, rows, pal, o = {}) {
-  const tex = pixelTexture(key, rows, pal);
+function pixelSprite(key, art, pal, o = {}) {
+  const tex = pixelTexture(key, art, pal);
   const mat = litMaterial('pixel:' + key, {
     map: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide,
     roughness: 1, metalness: 0,
@@ -114,158 +140,298 @@ function pixelSprite(key, rows, pal, o = {}) {
   });
   const m = new THREE.Mesh(geo('pixelQuad', () => new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0)), mat);
   m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
-  m.position.y = o.y ?? 0.01;
+  m.position.y = ITEM_PIVOT_Y;
   m.userData.tex = tex.userData.size;
   m.onBeforeRender = (renderer, scene, camera) => syncPixelSprite(m, renderer, camera);
   return m;
 }
 
+/** Every pickup's quad stands on this row and no other. */
+const ITEM_PIVOT_Y = 0.01;
+
+// ------------------------------------------------------------------ the contact shadow
+/**
+ * THE SAME TWO-LOBE CONTACT SHADOW THE CAST STANDS ON (spriteBillboard.js `makeBlobMaterial`).
+ *
+ * Pickups had no shadow at all — only an additive glow pool, which LIFTS a tile rather than
+ * darkening it, so every chest, book and potion in the dungeon floated a few pixels above the
+ * flagstone it was supposed to be lying on. A glow is not grounding; a hole in the tile is.
+ *
+ * Two lobes on one floor quad, exactly as the characters have:
+ *  - a near-opaque CORE ellipse no wider than the object's footprint, flat across its middle and
+ *    falling off over three or four screen pixels (a flat disc with a smoothstep rim, not a
+ *    Gaussian: a Gaussian has no plateau, so its darkest value is one texel wide and the rest is
+ *    smudge);
+ *  - a wide, very faint ambient-occlusion HALO that just dirties the tile out to the quad's edge.
+ * It is drawn AFTER the glow pool (`renderOrder`) so it darkens it instead of being erased by it,
+ * and it is welded to the tile: nothing in `bob()` touches it.
+ */
+let _shadowMat = null;
+function contactShadowMaterial() {
+  if (_shadowMat) return _shadowMat;
+  const fog = getFog();
+  const uniforms = { uCore: { value: 0.42 }, uEdge: { value: 0.2 }, uStrength: { value: 1 } };
+  if (fog) Object.assign(uniforms, { fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint });
+  _shadowMat = new THREE.ShaderMaterial({
+    uniforms, transparent: true, depthWrite: false,
+    vertexShader: 'varying vec2 vUv; varying vec2 vFogXZ; void main() { vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vFogXZ = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }',
+    fragmentShader: `uniform float uCore, uEdge, uStrength; varying vec2 vUv; varying vec2 vFogXZ;
+      ${fog ? fog.glsl() : 'vec2 fogMask(vec2 xz) { return vec2(1.0); }'}
+      void main() {
+        vec2 p = (vUv - 0.5) * 2.0;
+        // the core drifts a hair down-right, away from the house key light (top-left)
+        float rc = length((p - vec2(0.06, -0.06)) / max(0.05, uCore));
+        float core = 1.0 - smoothstep(1.0 - uEdge, 1.0 + uEdge, rc);
+        float halo = pow(max(0.0, 1.0 - length(p)), 3.0);
+        float a = clamp(core * 0.82 + halo * 0.16, 0.0, 1.0) * uStrength;
+        a *= smoothstep(0.0, 1.0, fogMask(vFogXZ).r);
+        gl_FragColor = vec4(0.014, 0.011, 0.018, a);
+      }`,
+  });
+  return _shadowMat;
+}
+
+/**
+ * The floor quad a pickup sits in. `footW` is the object's footprint in TILES (the width of the
+ * art that actually touches the ground), and the quad runs out to 1.9x that for the AO skirt — the
+ * same proportion the cast uses. It is squashed in z because the camera is pitched.
+ * @param {number} footW
+ */
+function contactShadow(footW) {
+  const halo = Math.max(0.1, footW) * 1.9;
+  const m = new THREE.Mesh(geo('itemShadowQuad', () => new THREE.PlaneGeometry(1, 1)), contactShadowMaterial());
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = 0.013;
+  m.scale.set(halo, halo * 0.66, 1);
+  m.renderOrder = 5;            // after the ground glow (3), so it darkens it instead of losing to it
+  m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
+  return m;
+}
+
 // ------------------------------------------------------------------ the art
+//
+// ONE PROJECTION FOR EVERY PICKUP.
+//
+// The pickups used to be drawn in three incompatible spaces at once: the scrolls and spellbooks
+// stood up as flat playing cards facing the camera, the potions and gold sacks lay down as
+// top-down blobs, and only the chest was a solid object seen from anywhere in particular. Three
+// projections in one room is not a style, it is three artists; and none of the three agreed with
+// the ROOM, which the camera looks into from above and in front.
+//
+// So there is now exactly one: **every pickup is a solid object resting on the floor, seen from
+// above and in front** — the same angle the flagstones are seen at. That gives every one of them
+// the same three parts:
+//
+//   · a TOP face, foreshortened to `SQUASH` of its true depth (the number the floor tiles
+//     themselves are drawn at) and narrowing toward the back, so the eye reads a horizontal
+//     surface: the lid of the chest, the cover of the book, the open mouth of the sack, the cork
+//     of the flask, the top of the rolled scroll;
+//   · a FRONT face, upright and unforeshortened, carrying the object's identity — planks and a
+//     lock, page edges, cloth folds, the liquid line;
+//   · a BASE that meets the floor, with the contact shadow underneath it.
+//
+// Light is the house key light (style.js `LIT`, top-left) on every face of every object: top faces
+// sit high on the ramp, front faces a step or two lower, the left of each face lighter than its
+// right. Colour is `ramp()` and nothing else, the outline is the house ink, and the art is drawn
+// on the HERO'S TEXEL GRID — 32 texels to a tile, the same grid the cast stands on — so a chest is
+// nineteen of the hero's pixels wide rather than nine of somebody else's.
+const SQUASH = 0.55;
+
+const step = (keys, i) => keys[i < 0 ? 0 : i >= keys.length ? keys.length - 1 : i];
+/**
+ * A horizontal run of one tone with the key light EDGED IN, not smeared across it: the run's left
+ * pixel goes `grad` steps up the ramp and its right pixel `grad` steps down. Gradients across a
+ * flat face are how pixel art turns a plank into a set of vertical stripes; a flat face is flat,
+ * and the light lives on its edges.
+ */
+function span(p, x0, x1, y, keys, base, grad = 1) {
+  for (let x = x0; x <= x1; x++) setPx(p, x, y, step(keys, base + (grad && x === x0 ? grad : grad && x === x1 ? -grad : 0)));
+}
+/** Solid rectangle in one key. */
+function box(p, x0, y0, x1, y1, k) { for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) setPx(p, x, y, k); }
+/** Filled ellipse in one key. */
+function ell(p, cx, cy, rx, ry, k) {
+  for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+    const dx = (x - cx) / rx, dy = (y - cy) / ry;
+    if (dx * dx + dy * dy <= 1.04) setPx(p, x, y, k);
+  }
+}
+/**
+ * THE TOP FACE: a horizontal surface `d` texels deep draws `round(d * SQUASH)` rows tall and
+ * narrows toward the back by `taper`. Brightest at the back-left corner, one step down by the
+ * front edge. Returns the row its front edge landed on.
+ */
+function topFace(p, cx, yBack, w, d, keys, { base = 5, taper = 0.84, grad = 1 } = {}) {
+  const rows = Math.max(1, Math.round(d * SQUASH));
+  for (let i = 0; i < rows; i++) {
+    const t = rows === 1 ? 1 : i / (rows - 1);
+    const ww = w * (taper + (1 - taper) * t);
+    span(p, Math.round(cx - ww / 2), Math.round(cx + ww / 2), yBack + i, keys, base - (i === rows - 1 ? 1 : 0), grad);
+  }
+  return yBack + rows - 1;
+}
+/** THE FRONT FACE: an upright panel, `fall` steps darker at its foot, a step lighter on its left. */
+function frontFace(p, cx, y0, y1, w, keys, { base = 4, grad = 1, fall = 1 } = {}) {
+  const x0 = Math.round(cx - w / 2), x1 = Math.round(cx + w / 2);
+  for (let y = y0; y <= y1; y++) span(p, x0, x1, y, keys, base + (y === y0 ? 1 : y > y1 - fall ? -1 : 0), grad);
+  return { x0, x1 };
+}
+/** Move a pixel `d` steps along `keys` from whatever tone the modelling pass left there. */
+function shift(p, x, y, keys, d) {
+  const i = keys.indexOf(String.fromCharCode(p.d[y * p.w + x] || 0));
+  if (i >= 0) setPx(p, x, y, step(keys, i + d));
+}
+/** Model a solid silhouette painted in `keys` with the house key light (pixelPainter.keyShade). */
+const model = (p, keys, o = {}) => keyShade(p, keys, { lit: LIT, gain: 0.6, mid: 0.52, up: 0.6, dome: 0.15, local: 0.35, ...o });
+
+// --- the eleven pickups, all in the one projection -------------------------------------------
+/** Treasure chest, closed: domed lid seen from above, planked front, iron bands, a gold lock. */
+function artChest() {
+  const p = makePix(23, 20), cx = 11, W = 'abcdefg';
+  const lipY = topFace(p, cx, 1, 18, 11, W, { base: 5, taper: 0.8 });   // the lid
+  span(p, 2, 20, lipY + 1, W, 6, 1);                                    // the lid's lit front nose
+  span(p, 2, 20, lipY + 2, W, 2, 0);                                    // the shadow the lid throws
+  frontFace(p, cx, lipY + 3, 16, 18, W, { base: 4, fall: 1 });          // the planked body
+  for (const x of [7, 15]) for (let y = lipY + 3; y <= 16; y++) setPx(p, x, y, 'c');  // plank grooves
+  for (const bx of [5, 16]) for (let y = 3; y <= 16; y++) {             // iron bands over lid and body
+    setPx(p, bx, y, 'j'); setPx(p, bx + 1, y, 'i');
+  }
+  box(p, 9, 9, 13, 13, 'p'); span(p, 9, 13, 9, 'mnopq', 4, 0); span(p, 9, 13, 13, 'mnopq', 2, 0);
+  setPx(p, 11, 10, '%'); setPx(p, 11, 11, '%'); setPx(p, 10, 12, '%'); setPx(p, 12, 12, '%');
+  box(p, 4, 17, 6, 18, 'a'); box(p, 16, 17, 18, 18, 'a');               // feet
+  return p;
+}
+
+/** The same chest thrown open: lid tipped back, a heap of coin inside catching the light. */
+function artChestOpen() {
+  const p = makePix(23, 23), cx = 11, W = 'abcdefg';
+  topFace(p, cx, 0, 16, 8, W, { base: 4, taper: 0.74 });                // the lid, tipped away
+  span(p, 3, 19, 5, W, 2, 1);                                           // its underside edge
+  box(p, 3, 6, 19, 10, '%');                                            // the dark of the open box
+  ell(p, 11, 9, 7, 2.8, 'o'); ell(p, 9, 8, 3.6, 1.7, 'p');              // heaped coin
+  for (const [x, y] of [[6, 9], [10, 7], [14, 9], [12, 10], [8, 10]]) setPx(p, x, y, 'q');
+  span(p, 2, 20, 11, W, 6, 1);                                          // the box's front rim, lit
+  span(p, 2, 20, 12, W, 2, 0);
+  frontFace(p, cx, 13, 20, 18, W, { base: 4, fall: 1 });
+  for (const x of [7, 15]) for (let y = 13; y <= 20; y++) setPx(p, x, y, 'c');
+  for (const bx of [5, 16]) for (let y = 11; y <= 20; y++) { setPx(p, bx, y, 'j'); setPx(p, bx + 1, y, 'i'); }
+  box(p, 4, 21, 6, 22, 'a'); box(p, 16, 21, 18, 22, 'a');
+  return p;
+}
+
+/** Gold sack: a bulging cloth body, gathered neck and an open mouth you can see the coin in. */
+function artSack(sigil = false) {
+  let p = makePix(19, 18);
+  ell(p, 9, 12, 8, 5.2, 'd');                                           // the body
+  ell(p, 9, 7, 3.4, 3, 'd');                                            // the gathered neck
+  p = model(p, 'abcdefg', { dome: 0.18 });
+  ell(p, 9, 4, 3, 1.8, 'o'); ell(p, 8, 4, 1.9, 1, 'q');                 // the mouth: a TOP face of coin
+  for (let y = 5; y <= 6; y++) span(p, 6, 12, y, 'abcdefg', 5 - (y - 5), 1);      // the cloth above the cord
+  span(p, 5, 13, 7, 'abcdefg', 6, 0);                                   // the cord, catching the light
+  for (const [x, y0, y1] of [[6, 11, 15], [9, 10, 16], [12, 11, 15]]) for (let y = y0; y <= y1; y++) shift(p, x, y, 'abcdefg', -1);
+  if (sigil) {                                                          // a woven sigil for the magic sack
+    for (const [x, y] of [[9, 11], [9, 12], [9, 13], [7, 12], [11, 12], [8, 14], [10, 14]]) setPx(p, x, y, 'k');
+    setPx(p, 9, 12, '*');
+  } else {
+    for (const [x, y] of [[2, 15], [3, 16], [14, 15], [15, 16]]) { setPx(p, x, y, 'p'); setPx(p, x + 1, y, 'n'); }
+  }
+  span(p, 3, 15, 17, 'abcdefg', 1, 0);                                  // the base, in its own shade
+  return p;
+}
+
+/** Buried cache: a low mound of turned earth with coin showing through the top of it. */
+function artCache() {
+  let p = makePix(21, 11);
+  ell(p, 10, 8, 9, 4.4, 'd');
+  p = model(p, 'abcdefg', { up: 0.9, dome: 0.18 });
+  for (const [x, y, r] of [[7, 5, 1.8], [11, 4, 1.6], [14, 6, 1.7]]) { ell(p, x, y, r, r * 0.66, 'o'); span(p, Math.round(x - r), Math.round(x + r), Math.round(y - r * 0.5), 'mnopq', 3, 1); }
+  for (const [x, y] of [[4, 7], [16, 7], [9, 9], [14, 9]]) setPx(p, x, y, 'b');   // clods of spoil
+  span(p, 3, 17, 10, 'abcdefg', 0, 0);
+  return p;
+}
+
+/** Healing potion: a round-bellied flask standing on the stone, corked, half-lit through the glass. */
+function artPotion() {
+  let p = makePix(15, 21);
+  ell(p, 7, 14, 5.6, 5, 'd');                                           // the belly
+  box(p, 5, 8, 9, 11, 'd'); box(p, 6, 4, 8, 8, 'd');                    // shoulder and neck
+  box(p, 5, 3, 9, 4, 'e');                                              // the lip
+  p = model(p, 'abcdefg', { dome: 0.18 });
+  ell(p, 7, 15, 4.2, 3.6, 'j');                                         // the draught inside
+  p = model(p, 'hijkl', { dome: 0.2, mid: 0.55 });
+  span(p, 4, 10, 11, 'hijkl', 4, 0);                                    // its meniscus
+  topFace(p, 7, 0, 5, 3, 'rstuv', { base: 4, taper: 0.7 });             // the cork, seen from above
+  box(p, 5, 2, 9, 3, 't');
+  setPx(p, 4, 12, '*'); setPx(p, 4, 13, '*'); setPx(p, 5, 11, '*');     // the catch-light on the glass
+  span(p, 4, 10, 18, 'abcdefg', 1, 0);                                  // where the glass meets stone
+  return p;
+}
+
+/** Treasure map: a scroll rolled and tied, lying across the tile, its spiral ends facing out. */
+function artScroll() {
+  const p = makePix(22, 12), P = 'abcdefg';
+  const ROLL = [6, 6, 5, 5, 4, 4, 3];                                   // the cylinder, top lit to front
+  for (let y = 3; y <= 9; y++) span(p, 3, 18, y, P, ROLL[y - 3], 1);
+  for (const ex of [3, 18]) {                                           // the rolled ends
+    ell(p, ex, 6, 2, 3.4, 'd');
+    ell(p, ex, 6, 1.1, 1.9, 'c'); setPx(p, ex, 6, 'e');
+    setPx(p, ex - 1, 4, 'f'); setPx(p, ex, 3, 'f');
+  }
+  box(p, 10, 2, 12, 10, 'i'); box(p, 10, 2, 10, 10, 'k'); box(p, 12, 2, 12, 10, 'h');   // the ribbon
+  setPx(p, 11, 2, 'j'); setPx(p, 9, 3, 'i'); setPx(p, 13, 10, 'h');
+  span(p, 5, 16, 10, P, 2, 0);
+  return p;
+}
+
+/** Spellbook, closed and lying flat: tooled cover, gilt boss, a block of cream page edges. */
+function artBook() {
+  const p = makePix(22, 14), cx = 11, C = 'abcdefg';
+  const lip = topFace(p, cx, 1, 17, 11, C, { base: 5, taper: 0.86 });   // the cover, seen from above
+  for (let x = 5; x <= 17; x++) { setPx(p, x, 2, step(C, 6)); setPx(p, x, lip - 1, step(C, 3)); }  // tooled border
+  for (const [x, y] of [[11, 3], [10, 4], [12, 4], [11, 5], [11, 4]]) setPx(p, x, y, 'o');
+  setPx(p, 11, 4, 'q');                                                 // the gilt boss
+  span(p, 3, 19, lip + 1, 'rstuv', 4, 1); span(p, 3, 19, lip + 2, 'rstuv', 3, 1);   // the block of page edges
+  for (let x = 5; x <= 17; x += 2) shift(p, x, lip + 2, 'rstuv', -1);   // the leaves, one texel apart
+  span(p, 2, 20, lip + 3, C, 3, 1);                                     // the cover's front lip
+  for (let y = lip; y <= lip + 3; y++) { setPx(p, 2, y, step(C, 4)); setPx(p, 3, y, step(C, 3)); }  // the spine
+  span(p, 3, 19, lip + 4, C, 1, 0);
+  return p;
+}
+
+/** An enchanted blade, driven point-first into the flagstone and left standing. */
+function artBlade() {
+  const p = makePix(14, 26), cx = 6, S = 'abcdefg';
+  ell(p, cx, 2, 1.8, 1.6, 'j'); setPx(p, cx - 1, 1, 'l');                // pommel
+  box(p, cx - 1, 3, cx + 1, 7, 's'); setPx(p, cx - 1, 3, 'u');           // grip
+  span(p, 2, 10, 8, 'hijkl', 4, 1); span(p, 3, 9, 9, 'hijkl', 2, 1);     // crossguard
+  for (let y = 10; y <= 21; y++) {                                       // the blade, tapering to a point
+    const hw = Math.max(0, Math.round(2.4 - (y - 10) * 0.17));
+    span(p, cx - hw, cx + hw, y, S, 4, 2);
+    if (hw > 0) setPx(p, cx, y, step(S, 6));                             // the fuller, catching the light
+  }
+  setPx(p, cx, 22, 'c'); setPx(p, cx, 23, 'b');
+  for (const [x, y] of [[3, 22], [4, 23], [8, 22], [9, 23], [5, 24], [7, 24]]) setPx(p, x, y, 'r');  // chipped stone
+  span(p, 3, 9, 24, 'rstuv', 1, 0);
+  return p;
+}
+
+/** Beacon crystal: a standing shard on a bed of chipped stone, lit down its left facet. */
+function artCrystal() {
+  const p = makePix(15, 20), cx = 7, C = 'abcdefg';
+  for (let y = 0; y <= 15; y++) {
+    const hw = y < 6 ? Math.round(0.6 + y * 0.75) : y > 12 ? Math.round(4.5 - (y - 12) * 0.9) : 4;
+    if (hw < 0) continue;
+    for (let x = cx - hw; x <= cx + hw; x++) setPx(p, x, y, x < cx ? step(C, 5) : x === cx ? step(C, 6) : step(C, 3));
+  }
+  for (let y = 2; y <= 14; y++) setPx(p, cx - 1, y, step(C, 4));         // the near facet edge
+  setPx(p, cx - 2, 4, '*'); setPx(p, cx - 2, 5, '*');
+  ell(p, cx, 17, 5, 2.2, 't'); span(p, 3, 11, 18, 'rstuv', 1, 0);        // the stone it stands in
+  for (const [x, y] of [[3, 16], [11, 16], [5, 18], [9, 18]]) setPx(p, x, y, 's');
+  return p;
+}
+
+/** The hidden-treasure slab: a floor tile, so its top face IS the whole of it. */
 const ART = {
-  potion: [
-    '.....dd.....',
-    '.....bc.....',
-    '....s33q....',
-    '....s33q....',
-    '...s3333q...',
-    '..s443333q..',
-    '.s44333333q.',
-    's443*333333q',
-    's4333333333q',
-    's3333333222q',
-    's3222222221q',
-    '.s22222211q.',
-    '..s211111q..',
-    '...s1111q...',
-    '....qqqq....',
-  ],
-  sack: [
-    '.....non......',
-    '...nonomon....',
-    '..nomooomon...',
-    '.jnomoooomonj.',
-    '.jihhhhhhhggf.',
-    'jiihgihhgihgff',
-    'jiihgihhgihgff',
-    'jiihgihhgihgff',
-    'iiihgihhgihgff',
-    'iihhgihhgihgff',
-    'iihhhhhhhggfff',
-    '.ihhhhhhggfff.',
-    '..hhhgggggff..',
-    '..onm...onm...',
-  ],
-  magicSack: [
-    '.....jij......',
-    '....pppp......',
-    '....jihhhg....',
-    '...jiihhhhgf..',
-    '..jiihhhhhggf.',
-    '.jiihhXhhhggff',
-    '.jiihXXXhhggff',
-    'jiiihhXhhhggff',
-    'iiihhhhhhggfff',
-    'iihhhhhhggffff',
-    '.ihhhhhhggfff.',
-    '..hhhgggggff..',
-  ],
-  cache: [
-    '....wvvu....',
-    '..wvvuuuts..',
-    '.wvvuuuuttss',
-    'vvvuuuuttsss',
-    'vvuuuuonmsss',
-    'uuuuttonmsss',
-    '.uutttsssss.',
-  ],
-  scroll: [
-    '..vwwwwwwwv..',
-    '.uvwwwwwwwvu.',
-    'tuvwwiiiwwvut',
-    'tuvwwhhhwwvut',
-    'stuvvhhhvvuts',
-    '.sttuhhhutts.',
-    '..sstttttss..',
-  ],
-  book: [
-    '.ssssssssxy.',
-    'prrrrrrrrxyw',
-    'prrrrrrrrxyw',
-    'prrrrrrrrxyw',
-    'prrr**rrrxyw',
-    'prr*oo*rrxyw',
-    'prr*oo*rrxyw',
-    'prrr**rrrxyw',
-    'prrrrrrrrxyw',
-    'prrrrrrrrxyw',
-    'pqqqqqqqqxyw',
-    'pqqqqqqqqxyw',
-    'pqqqqqqqqxyw',
-    '.qqqqqqqqxy.',
-    '.pppppppppp.',
-  ],
-  blade: [
-    '....e....',
-    '...dec...',
-    '...dec...',
-    '...dec...',
-    '...dec...',
-    '...dec...',
-    '...dec...',
-    '...dec...',
-    '...dec...',
-    '...dec...',
-    '.iiihiii.',
-    '.hhhghhh.',
-    '....l....',
-    '....l....',
-    '....k....',
-    '...hih...',
-  ],
-  crystal: [
-    '....e....',
-    '...dee...',
-    '..cddee..',
-    '.ccdddee.',
-    'bccdddeed',
-    'bccdddeed',
-    '.bccddee.',
-    '..bccdd..',
-    '...bcc...',
-    '....b....',
-  ],
-  chest: [
-    '.....bccccccb.....',
-    '...bccddddddccb...',
-    '..bccddddddddccb..',
-    '.bccddfddddddfccb.',
-    'bccddfddddddfccbba',
-    'bccddfddddddfccbba',
-    'hhhhhhhhhhhhhhhhhh',
-    'ddcccfccbbbbfbaaaa',
-    'ddcccfccnmncfbaaaa',
-    'ddcccfccnkncfbaaaa',
-    'ddcccfccbbbbfbaaaa',
-    'ccbbbfbbaaaafaaaaa',
-    'ccbbbfbbaaaafaaaaa',
-    'hhhhhhhhhhhhhhhhhh',
-    '.gg............gg.',
-  ],
-  chestOpen: [
-    '..bccddddddddccb..',
-    '..bccddddddddccb..',
-    '..hhhhhhhhhhhhhh..',
-    '.gg###########gg..',
-    '.gg#nmnlmnlnm#gg..',
-    '.gg#mnmnmnmnm#gg..',
-    '.ggclmlmlmlmlcgg..',
-    'ddcccfccbbbbfbaaaa',
-    'ddcccfccbbbbfbaaaa',
-    'ccbbbfbbaaaafaaaaa',
-    'hhhhhhhhhhhhhhhhhh',
-    '.gg............gg.',
-  ],
-  // a floor slab, seen from above: worn stone speckle inside a brass frame
   trapSlab: [
     'pppppppppppppppp',
     'pmmmmmmmmmmmmmmp',
@@ -286,16 +452,24 @@ const ART = {
   ],
 };
 
-const GOLD_RAMP = { klmno: '#c99a2e' };
+// One key alphabet for every pickup, so the drawing routines above are material-agnostic:
+// 'abcdefg' the object's own body, 'hijkl' its second material, 'mnopq' gold, 'rstuv' a third,
+// '*' the catch-light, '%' a hollow the light does not reach.
+// The gold ramp's base hue sits a hair BELOW style.LIGHT_HUE (0.115). `ramp()` cools a shadow the
+// short way round the wheel from below that line and the LONG way (up through green and cyan) from
+// above it, so '#c99a2e' — hue 0.116, a whisker over — gave a gold whose two dark steps were
+// #0a5008 and #638a16: bottle green. '#c8912c' is hue 0.108 and cools through red into the house
+// violet, which is what a coin in shadow actually does.
+const GOLD = { mnopq: '#c8912c' };
 const PAL = {
-  potion: itemPalette({ qrstu: '#8ba4c2', 12345: '#c8322f', abcde: '#8a6034' }, { '*': '#f4f8ff' }),
-  sack: itemPalette({ fghij: '#7a5a34', ...GOLD_RAMP }, { p: '#9a7840' }),
-  magicSack: itemPalette({ fghij: '#5b3a8a', ...GOLD_RAMP }, { p: '#c9a94e', X: '#e8d8ff' }),
-  cache: itemPalette({ stuvw: '#6d5a42', ...GOLD_RAMP }),
-  scroll: itemPalette({ stuvw: '#c6b183', fghij: '#a5262a' }),
-  blade: itemPalette({ abcde: '#9fc0d8', fghij: '#c9a94e' }, { k: '#4a3020', l: '#5d3d28' }),
-  crystal: itemPalette({ abcde: '#3fbf62' }),
-  chest: itemPalette({ abcde: '#7a5230', fghij: '#8f8b86', ...GOLD_RAMP }),
+  chest: itemPalette({ abcdefg: '#7a5230', hijkl: '#6d6862', ...GOLD }, { '%': '#241a12' }),
+  sack: itemPalette({ abcdefg: '#7a5a34', ...GOLD }, { '%': '#231a10' }),
+  magicSack: itemPalette({ abcdefg: '#5b3a8a', hijkl: '#a37cf0', ...GOLD }, { '*': '#efe4ff', '%': '#150d24' }),
+  cache: itemPalette({ abcdefg: '#6d5a42', ...GOLD }, { '%': '#1e1710' }),
+  potion: itemPalette({ abcdefg: '#8ba4c2', hijkl: '#c8322f', rstuv: '#8a6034' }, { '*': '#f2f7ff', '%': '#2a1216' }),
+  scroll: itemPalette({ abcdefg: '#c6b183', hijkl: '#a5262a' }, { '%': '#3a2f1c' }),
+  blade: itemPalette({ abcdefg: '#9fc0d8', hijkl: '#c9a94e', rstuv: '#5d3d28' }, { '*': '#eaf6ff', '%': '#1d2530' }),
+  crystal: itemPalette({ abcdefg: '#3fbf62', rstuv: '#6b6f63' }, { '*': '#e6ffe9', '%': '#0f2a17' }),
   trapSlab: itemPalette({ pqrst: '#7d7468', klmno: '#a8843a' }),
 };
 /** Spellbook: cream pages + a cover in the spell's own colour (one palette per spell type). */
@@ -305,7 +479,7 @@ const bookPal = (() => {
     let p = cache.get(type);
     if (!p) {
       const c = '#' + new THREE.Color(SPELL_COLORS[type] || 0xffffff).getHexString();
-      p = itemPalette({ pqrst: c, uvwxy: '#d9cdaa' }, { '*': '#fff6d8', o: '#e8c45a' });
+      p = itemPalette({ abcdefg: c, rstuv: '#d8c6a2', ...GOLD }, { '*': '#fff6d8', '%': '#241d14' });
       cache.set(type, p);
     }
     return p;
@@ -334,6 +508,27 @@ export function updateProps(dt, time, ctx) {
   }
 }
 export function liveProps() { return LIVE.size; }
+
+/**
+ * A pickup's idle bob — and the ONE thing it is allowed to move.
+ *
+ * Bobbing used to be done by DungeonView on the whole prop GROUP, which lifted the glow pool off
+ * the tile with the sprite: the pickup and its own grounding rose together, so nothing on screen
+ * ever said which flagstone the thing was lying on. The bob now moves the SPRITE MESH and nothing
+ * else; the contact shadow and the glow pool are welded to the tile at y ~ 0.012 and never budge.
+ * The offset is one-sided (0..amp) so the object's base still touches the floor at the bottom of
+ * every cycle rather than sinking through it.
+ * @param {THREE.Group} g the prop @param {THREE.Mesh} sprite its billboard
+ * @param {{amp?:number, speed?:number, t0?:number}} [o]
+ */
+function bob(g, sprite, { amp = 0.024, speed = 2, t0 = 0 } = {}) {
+  const y0 = sprite.position.y, prev = g.userData.tick;
+  animate(g, (dt, time, ctx, d) => {
+    if (prev) prev(dt, time, ctx, d);
+    sprite.position.y = y0 + (0.5 + 0.5 * Math.sin(time * speed + t0)) * amp;
+  });
+  return g;
+}
 
 let defaultFactory = null;
 /** The renderer's PropFactory (Effects borrows it for transient props such as the opened chest). */
@@ -401,20 +596,24 @@ export class PropFactory {
 
   goldSack(g, amount = 20) {
     const rich = Math.min(1, amount / 120);
-    g.add(pixelSprite('sack', ART.sack, PAL.sack, { glow: 0.1 }));
-    g.add(groundGlow(0xffb340, 0.42, { opacity: 0.32 + rich * 0.15 }));
-    this.addGlints(g, 0xfff0b0, [[-0.17, 0.035, 0.05], [0.17, 0.035, 0.05], [0.0, 0.4, 0.03]], { size: 0.14 + rich * 0.05 });
+    const s = pixelSprite('sack', artSack, PAL.sack, { glow: 0.1 });
+    g.add(s);
+    g.add(groundGlow(0xffb340, 0.36, { opacity: 0.2 + rich * 0.12 }));
+    g.add(contactShadow(0.4));
+    this.addGlints(g, 0xfff0b0, [[-0.2, 0.06, 0.05], [0.2, 0.06, 0.05], [0.0, 0.42, 0.03]], { size: 0.13 + rich * 0.04 });
     this.finishGlints(g);
+    bob(g, s, { amp: 0.02, speed: 1.7, t0: g.userData.anim.t });
     g.userData.anim.sparkle = true;
     return g;
   }
 
   buriedCache(g) {
-    g.add(pixelSprite('cache', ART.cache, PAL.cache, { glow: 0.08 }));
-    g.add(groundGlow(0xffb340, 0.3, { opacity: 0.18 }));
-    this.addGlints(g, 0xfff0b0, [[0.05, 0.11, 0.04]], { size: 0.12, rate: 1.1 });
+    g.add(pixelSprite('cache', artCache, PAL.cache, { glow: 0.08 }));
+    g.add(groundGlow(0xffb340, 0.28, { opacity: 0.14 }));
+    g.add(contactShadow(0.46));
+    this.addGlints(g, 0xfff0b0, [[0.05, 0.13, 0.04]], { size: 0.12, rate: 1.1 });
     this.finishGlints(g);
-    return g;
+    return g;   // spoil heaped on the floor does not bob: it is part of the floor
   }
 
   /** Hidden treasure/trap square: an inset slab of painted flagstone framed in brass. */
@@ -430,19 +629,21 @@ export class PropFactory {
 
   /** Closed chest: painted planks, iron bands and a gold lock, hand-pixelled. */
   chest(g) {
-    g.add(pixelSprite('chest', ART.chest, PAL.chest, { glow: 0.1 }));
-    g.add(groundGlow(0xffb340, 0.45, { opacity: 0.22 }));
-    if (!g.userData.glints) { this.addGlints(g, 0xfff0b0, [[0.0, 0.29, 0.03], [0.2, 0.44, 0.02]], { size: 0.13, rate: 1.2 }); this.finishGlints(g); }
-    return g;
+    g.add(pixelSprite('chest', artChest, PAL.chest, { glow: 0.1 }));
+    g.add(groundGlow(0xffb340, 0.4, { opacity: 0.16 }));
+    g.add(contactShadow(0.52));
+    if (!g.userData.glints) { this.addGlints(g, 0xfff0b0, [[0.0, 0.3, 0.03], [0.2, 0.46, 0.02]], { size: 0.13, rate: 1.2 }); this.finishGlints(g); }
+    return g;   // a chest is heavy: it sits, it does not bob
   }
 
   /** Open chest for the loot moment: lid thrown back, gold heaped inside, light spilling out. */
   chestOpen() {
     const g = new THREE.Group();
-    g.add(pixelSprite('chestOpen', ART.chestOpen, PAL.chest, { glow: 0.12 }));
-    const inner = billboard(glowTexture(), 0xffc860, 0.9); inner.position.set(0, 0.32, 0.02); g.add(inner);
+    g.add(pixelSprite('chestOpen', artChestOpen, PAL.chest, { glow: 0.12 }));
+    g.add(contactShadow(0.52));
+    const inner = billboard(glowTexture(), 0xffc860, 0.7); inner.position.set(0, 0.34, 0.02); g.add(inner);
     g.userData.inner = inner;
-    this.addGlints(g, 0xfff4c0, [[0.09, 0.3, 0.02], [-0.11, 0.28, 0.02], [0.0, 0.36, 0.02]], { size: 0.2, rate: 3 });
+    this.addGlints(g, 0xfff4c0, [[0.09, 0.34, 0.02], [-0.11, 0.32, 0.02], [0.0, 0.4, 0.02]], { size: 0.2, rate: 3 });
     this.finishGlints(g);
     return g;
   }
@@ -509,70 +710,82 @@ export class PropFactory {
     return s;
   }
 
-  /** Healing potion: hand-pixelled flask, glowing liquid, cork and a catch-light glint. */
+  /** Healing potion: a corked flask standing on the stone, its draught catching the light. */
   potion(g) {
-    g.add(pixelSprite('potion', ART.potion, PAL.potion, { glow: 0.2, emissive: 0xffb4a4 }));
-    g.add(groundGlow(0xff5a48, 0.35, { opacity: 0.35 }));
-    this.addGlints(g, 0xffd8d0, [[-0.1, 0.36, 0.03]], { size: 0.12, rate: 1.3 });
+    const s = pixelSprite('potion', artPotion, PAL.potion, { glow: 0.2, emissive: 0xffb4a4 });
+    g.add(s);
+    g.add(groundGlow(0xff5a48, 0.3, { opacity: 0.24 }));
+    g.add(contactShadow(0.24));
+    this.addGlints(g, 0xffd8d0, [[-0.1, 0.4, 0.03]], { size: 0.12, rate: 1.3 });
     this.finishGlints(g);
-    g.userData.anim = { y0: 0.04, amp: 0.035, speed: 2.2, spin: 0, t: this.rng.float(0, 6) };
+    bob(g, s, { amp: 0.026, speed: 2.2, t0: g.userData.anim.t });
     return g;
   }
 
   /** Magic sack: violet cloth with a glowing sigil woven into it. */
   magicSack(g) {
-    g.add(pixelSprite('magicSack', ART.magicSack, PAL.magicSack, { glow: 0.18, emissive: 0xc9a8ff }));
-    const sig = billboard(sigilTexture('sack'), 0xd0b0ff, 0.26); sig.position.set(0, 0.22, 0.02); g.add(sig);
-    g.add(groundGlow(0xb197fc, 0.36, { opacity: 0.3 }));
-    this.addGlints(g, 0xe0d0ff, [[0.13, 0.3, 0.02], [-0.11, 0.14, 0.02]], { size: 0.12 });
+    const s = pixelSprite('magicSack', () => artSack(true), PAL.magicSack, { glow: 0.18, emissive: 0xc9a8ff });
+    g.add(s);
+    const sig = billboard(sigilTexture('sack'), 0xd0b0ff, 0.24); sig.position.set(0, 0.48, 0.02); g.add(sig);
+    g.add(groundGlow(0xb197fc, 0.32, { opacity: 0.22 }));
+    g.add(contactShadow(0.4));
+    this.addGlints(g, 0xe0d0ff, [[0.15, 0.34, 0.02], [-0.13, 0.18, 0.02]], { size: 0.12 });
     this.finishGlints(g);
-    g.userData.anim = { y0: 0.04, amp: 0.03, speed: 1.8, spin: 0, t: this.rng.float(0, 6) };
+    bob(g, s, { amp: 0.022, speed: 1.8, t0: g.userData.anim.t });
     return g;
   }
 
-  /** Treasure map: a rolled parchment tied with a red ribbon. */
+  /** Treasure map: a rolled parchment tied with a red ribbon, lying across the tile. */
   scroll(g) {
-    g.add(pixelSprite('scroll', ART.scroll, PAL.scroll, { glow: 0.12 }));
-    g.add(groundGlow(0xffe0a0, 0.3, { opacity: 0.22 }));
-    g.userData.anim = { y0: 0.05, amp: 0.035, speed: 2, spin: 0, t: this.rng.float(0, 6) };
+    const s = pixelSprite('scroll', artScroll, PAL.scroll, { glow: 0.12 });
+    g.add(s);
+    g.add(groundGlow(0xffe0a0, 0.28, { opacity: 0.16 }));
+    g.add(contactShadow(0.5));
+    bob(g, s, { amp: 0.018, speed: 2, t0: g.userData.anim.t });
     return g;
   }
 
-  /** Spellbook lying open: hand-pixelled cover in the spell's colour, with a sigil rising off the pages. */
+  /** Spellbook lying closed on the stone: a tooled cover in the spell's colour and a rising sigil. */
   spellbook(g, type) {
     const c = SPELL_COLORS[type] || 0xffffff;
-    g.add(pixelSprite('book:' + type, ART.book, bookPal(type), { glow: 0.15, emissive: c }));
-    const pageGlow = billboard(glowTexture(), c, 0.22, { intensity: 0.4 }); pageGlow.position.set(0, 0.05, 0.02); g.add(pageGlow);
-    const sig = billboard(sigilTexture(type), c, 0.26); sig.position.set(0, 0.5, 0.02); g.add(sig);
-    g.add(groundGlow(c, 0.36, { opacity: 0.26 }));
-    this.addGlints(g, 0xffffff, [[0.15, 0.14, 0.02], [-0.16, 0.14, 0.02], [0.02, 0.24, 0.02]], { size: 0.12 });
+    const s = pixelSprite('book:' + type, artBook, bookPal(type), { glow: 0.15, emissive: c });
+    g.add(s);
+    const pageGlow = billboard(glowTexture(), c, 0.2, { intensity: 0.4 }); pageGlow.position.set(0, 0.1, 0.02); g.add(pageGlow);
+    const sig = billboard(sigilTexture(type), c, 0.26); sig.position.set(0, 0.46, 0.02); g.add(sig);
+    g.add(groundGlow(c, 0.32, { opacity: 0.18 }));
+    g.add(contactShadow(0.5));
+    this.addGlints(g, 0xffffff, [[0.17, 0.18, 0.02], [-0.18, 0.18, 0.02], [0.02, 0.28, 0.02]], { size: 0.12 });
     this.finishGlints(g);
     const tick = g.userData.tick;
     animate(g, (dt, time, ctx, d) => {
       tick(dt, time, ctx, d);
-      sig.position.y = 0.5 + 0.06 * Math.sin(time * 2.3 + g.userData.anim.t);
-      const s = 0.26 * (0.9 + 0.1 * Math.sin(time * 4.1)); sig.scale.set(s, s, 1);
-      const pg = 0.22 * (0.85 + 0.15 * Math.sin(time * 3.1 + 1)); pageGlow.scale.set(pg, pg, 1);
+      sig.position.y = 0.46 + 0.06 * Math.sin(time * 2.3 + g.userData.anim.t);
+      const sc = 0.26 * (0.9 + 0.1 * Math.sin(time * 4.1)); sig.scale.set(sc, sc, 1);
+      const pg = 0.2 * (0.85 + 0.15 * Math.sin(time * 3.1 + 1)); pageGlow.scale.set(pg, pg, 1);
       if (ctx.emit && d < 9) { g.userData.acc = (g.userData.acc || 0) + dt; while (g.userData.acc > 0.3) { g.userData.acc -= 0.3; ctx.emit({ x: g.position.x, y: 0.12, z: g.position.z, count: 1, color: [c, 0xffffff], speed: 0.1, spread: 1, up: 0.9, life: 1.3, size: 0.06, gravity: 0.15, drag: 1, radius: 0.15, kind: 2 }); } }
     });
-    g.userData.anim = { y0: 0.04, amp: 0.03, speed: 2, spin: 0, t: this.rng.float(0, 6) };
+    bob(g, s, { amp: 0.018, speed: 2, t0: g.userData.anim.t });
     return g;
   }
 
+  /** An enchanted blade left standing point-first in the flagstone. */
   enchantedWeapon(g) {
-    g.add(pixelSprite('blade', ART.blade, PAL.blade, { glow: 0.2, emissive: 0x9fd0ff }));
-    g.add(groundGlow(0x9fd0ff, 0.35, { opacity: 0.3 }));
-    this.addGlints(g, 0xdff0ff, [[0.0, 0.5, 0.02]], { size: 0.16, rate: 2.2 });
+    const s = pixelSprite('blade', artBlade, PAL.blade, { glow: 0.2, emissive: 0x9fd0ff });
+    g.add(s);
+    g.add(groundGlow(0x9fd0ff, 0.3, { opacity: 0.22 }));
+    g.add(contactShadow(0.22));
+    this.addGlints(g, 0xdff0ff, [[0.0, 0.62, 0.02]], { size: 0.16, rate: 2.2 });
     this.finishGlints(g);
-    g.userData.anim = { y0: 0.05, amp: 0.045, speed: 2, spin: 0, t: 0 };
-    return g;
+    return g;   // driven into the stone: it does not bob
   }
 
+  /** Beacon crystal: a standing shard, its base bedded in chipped stone. */
   beaconItem(g) {
-    g.add(pixelSprite('crystal', ART.crystal, PAL.crystal, { glow: 0.4, emissive: 0x4bd66a, y: 0.16 }));
-    const b = billboard(glowTexture(), 0x4bd66a, 0.7, { intensity: 0.8 }); b.position.y = 0.32; g.add(b);
-    g.add(groundGlow(0x4bd66a, 0.35, { opacity: 0.35 }));
-    g.userData.anim = { y0: 0.05, amp: 0.05, speed: 2.5, spin: 0, t: 0 };
+    const s = pixelSprite('crystal', artCrystal, PAL.crystal, { glow: 0.4, emissive: 0x4bd66a });
+    g.add(s);
+    const b = billboard(glowTexture(), 0x4bd66a, 0.6, { intensity: 0.8 }); b.position.y = 0.34; g.add(b);
+    g.add(groundGlow(0x4bd66a, 0.3, { opacity: 0.24 }));
+    g.add(contactShadow(0.3));
     return g;
   }
 
