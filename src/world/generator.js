@@ -1211,6 +1211,15 @@ export function placeDecor(level, isSwordLevel = false) {
   }
   const corridor = dressCorridors(level, rng);
   let all = furniture.concat(scatter, corridor);
+  // one piece per wall tile, level-wide: two rooms can share the same stretch of rock (§8.2 rule 11)
+  const mounted = new Set();
+  all = all.filter((d) => {
+    if (DECOR_TYPES[d.type].cls !== 'wall') return true;
+    const k = key(d.x, d.y);
+    if (mounted.has(k)) return false;
+    mounted.add(k);
+    return true;
+  });
   if (all.length > 220) all = all.slice(0, 220);   // renderer budget (§8.3)
   level.setDecor(all);
   // §4.3 rule 4: nothing may sever the level. Back blocking pieces out until the fill passes.

@@ -62,12 +62,14 @@ test('every decor entry obeys the data contract (§4.1, §5)', () => {
         assert.ok(lv.get(d.x, d.y) !== TILE.WALL, `floor decor stands on floor (${where})`);
       }
     }
-    // two standing props may never share a tile; two decals may never share a tile (§8.2 rule 12)
-    const props = new Set(), decals = new Set();
+    // two standing props may never share a tile; two decals may never share a tile (§8.2 rule 12);
+    // and one wall tile carries at most one hung piece (§8.2 rule 11)
+    const props = new Set(), decals = new Set(), mounts = new Set();
     for (const d of lv.decor) {
       const k = `${d.x},${d.y}`, cls = DECOR_TYPES[d.type].cls;
       if (cls === 'prop') { assert.ok(!props.has(k), `one prop per tile ${k}`); props.add(k); }
       if (cls === 'decal') { assert.ok(!decals.has(k), `one decal per tile ${k}`); decals.add(k); }
+      if (cls === 'wall') { assert.ok(!mounts.has(k), `one hung piece per wall tile ${k}`); mounts.add(k); }
     }
     assert.ok(lv.decor.length <= 220, `level decor budget ${lv.decor.length}`);
   }
