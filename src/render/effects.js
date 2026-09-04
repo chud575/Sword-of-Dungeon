@@ -486,7 +486,8 @@ export class Effects {
         // the lid is painted open in the art, so the "spring" is a squash on the whole prop
         const open = easeOutBack(Math.min(1, t / 0.32));
         o.scale.set(1 + 0.10 * (1 - open), 0.82 + 0.18 * open, 1);
-        const s = 0.9 * (0.6 + 0.4 * Math.sin(t * 5)) * (1 - k * k); inner.scale.set(s, s, 1);
+        // `inner` is pinned to the chest art (props.js `onArt`), which owns its scale each frame
+        inner.userData.k = 1.3 * (0.6 + 0.4 * Math.sin(t * 5)) * (1 - k * k);
         if (k > 0.78) { const f = (k - 0.78) / 0.22; o.position.y = -f * 0.5; o.scale.multiplyScalar(1 - f * 0.9); }
       } });
     }
@@ -600,6 +601,10 @@ export class Effects {
     this.flashes.update(dt); this.rings.update(dt); this.runes.update(dt); this.arcs.update(dt); this.decals.update(dt); this.lights.update(dt);
     this.particles.update(dt);
     this.matter.update(dt);
+    // The hero is the sprite that owns the frame: hand the numbers his box so none of them can park
+    // on top of him (damageNumbers.js "NEVER OVER THE HERO"). It is the player's tile, not a mesh
+    // bound, so it costs nothing and it is right even while he is mid-step between two flagstones.
+    this.numbers.setProtect(p.x, p.z);
     this.numbers.update(dt);
   }
 

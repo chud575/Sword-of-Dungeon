@@ -12,7 +12,7 @@ import { PALETTE, createShaftMaterial } from './materials.js';
 import { glowTexture, glintTexture, sigilTexture, runeCircleTexture, billboard, groundGlow, flame, litMaterial, getFog, updateFlames } from './propFx.js';
 import { paint, outline, toRGBA, Palette, makePix, blit, setPx, keyShade, bounds } from './sprites/pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from './sprites/style.js';
-import { PX_PER_TILE, frameTexelSize } from './sprites/spriteBillboard.js';
+import { PX_PER_TILE, frameTexelSize, texelGrid } from './sprites/spriteBillboard.js';
 
 const geoCache = new Map();
 function geo(key, make) { let g = geoCache.get(key); if (!g) { g = make(); geoCache.set(key, g); } return g; }
@@ -79,6 +79,45 @@ function pixelTexture(key, art0, pal) {
   return t;
 }
 
+/** The drawing buffer, shared by every pickup material's snap (see `pixelSnap`). */
+const _snapVp = { value: new THREE.Vector2(1600, 900) };
+
+/**
+ * SNAP THE QUAD TO THE DEVICE PIXEL GRID — the other half of "one texel is one texel".
+ *
+ * Sizing a pickup's quad from the shared grid makes one art texel cover S device pixels ON AVERAGE.
+ * It does not make texel EDGES land on pixel edges: the quad's anchor projects to some fractional
+ * pixel, so a nearest-filtered 16-texel sprite came out as a 3px column, a 5px column, a 4px column
+ * — the same mush the character billboards were built in screen space to avoid. So the vertex shader
+ * projects the quad's pivot, rounds it to a whole device pixel, and lays the corners out at whole
+ * pixel offsets from there. The art is untouched; only where it lands is.
+ *
+ * The injection rides on whatever `litMaterial` already installed (the fog patch), never replaces it.
+ */
+function pixelSnap(mat) {
+  if (mat.userData.pixelSnapped) return mat;
+  mat.userData.pixelSnapped = true;
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = function (shader, renderer) {
+    if (prev) prev.call(this, shader, renderer);
+    shader.uniforms.uSnapViewport = _snapVp;
+    shader.vertexShader = 'uniform vec2 uSnapViewport;\n' + shader.vertexShader.replace(
+      '#include <project_vertex>',
+      `#include <project_vertex>
+      {
+        vec4 aClip = projectionMatrix * modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+        if (aClip.w > 0.0001 && gl_Position.w > 0.0001) {
+          vec2 aPx = (aClip.xy / aClip.w * 0.5 + 0.5) * uSnapViewport;
+          vec2 vPx = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * uSnapViewport;
+          vec2 outPx = floor(aPx + 0.5) + floor(vPx - aPx + 0.5);
+          gl_Position.xy = (outPx / uSnapViewport * 2.0 - 1.0) * gl_Position.w;
+        }
+      }`);
+  };
+  mat.needsUpdate = true;
+  return mat;
+}
+
 /**
  * ONE PIXEL GRID FOR THE WHOLE SCREEN — pickups included.
  *
@@ -103,6 +142,7 @@ function pixelTexture(key, art0, pal) {
  * frame and quietly shrank everything away from the centre).
  */
 function syncPixelSprite(m, renderer, camera) {
+  renderer.getDrawingBufferSize(_snapVp.value);
   m.getWorldPosition(_wp);
   m.quaternion.copy(camera.quaternion);
   const size = renderer.getDrawingBufferSize(_bufSize);
@@ -112,6 +152,7 @@ function syncPixelSprite(m, renderer, camera) {
   const w = frameTexelSize(renderer, camera, PX_PER_TILE) / pxPerWorld;
   const t = m.userData.tex;
   m.scale.set(t.w * w, t.h * w, 1);
+  placeArtChildren(m);
   m.updateMatrix();
   if (m.parent) m.matrixWorld.multiplyMatrices(m.parent.matrixWorld, m.matrix);
   else m.matrixWorld.copy(m.matrix);
@@ -133,17 +174,61 @@ function syncPixelSprite(m, renderer, camera) {
  */
 function pixelSprite(key, art, pal, o = {}) {
   const tex = pixelTexture(key, art, pal);
-  const mat = litMaterial('pixel:' + key, {
+  const mat = pixelSnap(litMaterial('pixel:' + key, {
     map: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide,
     roughness: 1, metalness: 0,
-    emissiveMap: tex, emissive: new THREE.Color(o.emissive ?? 0xffffff), emissiveIntensity: o.glow ?? 0.14,
-  });
+    // HALF THE OLD SELF-LIGHT. The emissive map is the sprite itself, so every lit texel of a pickup
+    // was also a little lamp, and the bloom pass smeared a coloured haze a good four device pixels
+    // out past the one-texel ink outline — which is what a floating object looks like. The pickups
+    // keep enough emission to stay legible in an unlit corridor and no longer glow through their own
+    // outline; the coloured spill on the floor is the `groundGlow` pool's job, not the art's.
+    emissiveMap: tex, emissive: new THREE.Color(o.emissive ?? 0xffffff), emissiveIntensity: (o.glow ?? 0.14) * 0.5,
+  }));
   const m = new THREE.Mesh(geo('pixelQuad', () => new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0)), mat);
   m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
   m.position.y = ITEM_PIVOT_Y;
   m.userData.tex = tex.userData.size;
   m.onBeforeRender = (renderer, scene, camera) => syncPixelSprite(m, renderer, camera);
   return m;
+}
+
+/**
+ * PIN A GLOW, A GLINT OR A SIGIL TO THE ART, NOT TO THE ROOM.
+ *
+ * The twinkles, page glows and sigils were placed at world offsets from the tile — `y = 0.18` and
+ * so on — while the pickup they belong to is a SCREEN-ALIGNED quad. Under a camera pitched fifty
+ * degrees a world offset of 0.18 up rises only 0.18 * cos(pitch) up the screen, so every one of
+ * them landed a third of the way down the sprite it was meant to sit on, and the low ones dropped
+ * clean off the bottom of the object into its own contact shadow — two green sparkles sitting in
+ * the dark under a spellbook, which is exactly what "floating" looks like.
+ *
+ * So they are parented to the sprite instead, and placed in the ART'S OWN COORDINATES: `u` runs
+ * -0.5 to 0.5 across the drawing and `v` runs 0 (the floor row) to 1 (the top row), whatever the
+ * zoom and whatever the object. A lamp on a chest lid is "u 0, v 0.8" for every chest in the game
+ * instead of a metre count that only worked at one camera. `size` stays in world units, and
+ * `syncPixelSprite` divides it back out by the quad's live, non-uniform scale so a round glow
+ * cannot come out as an egg.
+ * @param {THREE.Mesh} sprite @param {THREE.Object3D} obj
+ * @param {number} u across the art (-0.5 .. 0.5) @param {number} v up the art (0 .. 1)
+ * @param {number} size world size of the billboard
+ */
+function onArt(sprite, obj, u, v, size) {
+  obj.userData.art = { u, v, size };
+  obj.userData.k = 1;
+  sprite.add(obj);
+  return obj;
+}
+
+/** Place every art-pinned child of a pickup quad. Called from `syncPixelSprite`, once per frame. */
+function placeArtChildren(m) {
+  const sx = m.scale.x || 1, sy = m.scale.y || 1;
+  for (const c of m.children) {
+    const a = c.userData.art;
+    if (!a) continue;
+    c.position.set(a.u, a.v, 0.02);
+    const s = a.size * (c.userData.k ?? 1);
+    c.scale.set(s / sx, s / sy, 1);
+  }
 }
 
 /** Every pickup's quad stands on this row and no other. */
@@ -165,12 +250,20 @@ const ITEM_PIVOT_Y = 0.01;
  *  - a wide, very faint ambient-occlusion HALO that just dirties the tile out to the quad's edge.
  * It is drawn AFTER the glow pool (`renderOrder`) so it darkens it instead of being erased by it,
  * and it is welded to the tile: nothing in `bob()` touches it.
+ *
+ * AND THE POOL UNDER IT IS NOT A SHADOW. Every pickup also lays down a `groundGlow` in its OWN
+ * colour, and at the old radius and opacity that pool was the biggest dark-ish shape on the tile:
+ * green under the green spellbook, blue under the teleport one, red under the potion. A shadow the
+ * colour of the object is not a shadow, it is a spotlight, and it read as one — the item hovering
+ * over its own coloured halo. The pools are now half as strong and half again as wide, so they spill
+ * light onto the FLAGSTONES AROUND the object (which is what a glowing thing does to a floor) while
+ * the tile it actually stands on is a warm neutral bite of dark, the same one the cast stands in.
  */
 let _shadowMat = null;
 function contactShadowMaterial() {
   if (_shadowMat) return _shadowMat;
   const fog = getFog();
-  const uniforms = { uCore: { value: 0.42 }, uEdge: { value: 0.2 }, uStrength: { value: 1 } };
+  const uniforms = { uCore: { value: 0.62 }, uEdge: { value: 0.1 }, uStrength: { value: 1 } };
   if (fog) Object.assign(uniforms, { fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint });
   _shadowMat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false,
@@ -182,8 +275,8 @@ function contactShadowMaterial() {
         // the core drifts a hair down-right, away from the house key light (top-left)
         float rc = length((p - vec2(0.06, -0.06)) / max(0.05, uCore));
         float core = 1.0 - smoothstep(1.0 - uEdge, 1.0 + uEdge, rc);
-        float halo = pow(max(0.0, 1.0 - length(p)), 3.0);
-        float a = clamp(core * 0.82 + halo * 0.16, 0.0, 1.0) * uStrength;
+        float halo = pow(max(0.0, 1.0 - length(p)), 4.0);
+        float a = clamp(core * 0.88 + halo * 0.07, 0.0, 1.0) * uStrength;
         a *= smoothstep(0.0, 1.0, fogMask(vFogXZ).r);
         gl_FragColor = vec4(0.014, 0.011, 0.018, a);
       }`,
@@ -192,17 +285,25 @@ function contactShadowMaterial() {
 }
 
 /**
- * The floor quad a pickup sits in. `footW` is the object's footprint in TILES (the width of the
- * art that actually touches the ground), and the quad runs out to 1.9x that for the AO skirt — the
- * same proportion the cast uses. It is squashed in z because the camera is pitched.
+ * The floor quad a pickup sits in. `footW` is the object's footprint in TILES (the width of the art
+ * that actually touches the ground).
+ *
+ * WHY IT IS SMALLER AND HARDER THAN IT WAS. A character's shadow can afford a wide soft skirt: he
+ * is a metre and a half of sprite standing on it, and it barely shows. A potion is nine texels
+ * tall, so a skirt running out to 1.9x its footprint is not grounding — it is a soft radial pool
+ * with an object hovering in the middle of it, which is exactly how the 'treasure' shot read. The
+ * quad is now 1.25x the footprint, squashed harder in z (the camera is pitched, and half of a round
+ * shadow hanging out below an object is the classic look of something that is NOT touching), the
+ * core fills most of it, and its rim is a couple of device pixels rather than eight. What the eye
+ * gets is a dark bite out of the flagstone under the object, which is what contact looks like.
  * @param {number} footW
  */
 function contactShadow(footW) {
-  const halo = Math.max(0.1, footW) * 1.9;
+  const w = Math.max(0.1, footW) * 1.25;
   const m = new THREE.Mesh(geo('itemShadowQuad', () => new THREE.PlaneGeometry(1, 1)), contactShadowMaterial());
   m.rotation.x = -Math.PI / 2;
-  m.position.y = 0.013;
-  m.scale.set(halo, halo * 0.66, 1);
+  m.position.set(0, 0.013, w * 0.06);   // a hair back, so the object's own base covers its near rim
+  m.scale.set(w, w * 0.5, 1);
   m.renderOrder = 5;            // after the ground glow (3), so it darkens it instead of losing to it
   m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
   return m;
@@ -430,27 +531,129 @@ function artCrystal() {
   return p;
 }
 
-/** The hidden-treasure slab: a floor tile, so its top face IS the whole of it. */
-const ART = {
-  trapSlab: [
-    'pppppppppppppppp',
-    'pmmmmmmmmmmmmmmp',
-    'pnqqqqqqqqqqqqnp',
-    'pnqrrrsrsrrrrqnp',
-    'pnqrsrrrrrsrrqnp',
-    'pnqrrrrsrrrrrqnp',
-    'pnqrrsrrrrsrrqnp',
-    'pnqsrrrrrrrrsqnp',
-    'pnqrrrrsrrrrrqnp',
-    'pnqrsrrrrrrsrqnp',
-    'pnqrrrrrsrrrrqnp',
-    'pnqrrsrrrrrrsqnp',
-    'pnqrrrrrrsrrrqnp',
-    'pnqqqqqqqqqqqqnp',
-    'pllllllllllllllp',
-    'pppppppppppppppp',
-  ],
-};
+// =============================================================== trap tiles, drawn INTO the floor
+//
+// WHAT WAS WRONG. Both trap markers were objects sitting ON the floor rather than marks IN it: the
+// hidden cache was a raised 0.7 x 0.04 x 0.7 BOX carrying a 16-texel painting and framed in four
+// brass bars, and the teleport trap was two smooth `RingGeometry` annuli. So a tile the camera sees
+// in perspective, with flagstones whose far edge is narrower than their near one, carried a set of
+// nested gold/navy/olive rectangles of exactly equal width on all four sides — hazard signage laid
+// on a floor it disagreed with, at half the floor's resolution, with a brass kerb catching a
+// specular the stone never does.
+//
+// WHAT THEY ARE NOW. One flat quad in the floor plane, one world tile across, painted at
+// `PX_PER_TILE` — the flagstones' own resolution and the cast's — and MOSTLY TRANSPARENT: the real
+// slab shows through, so the mark inherits the floor's perspective, its wear, its lighting and its
+// texel grid for free. The whole vocabulary is the mason's: a cut seam one texel wide, a lip that
+// catches the top-left key light on two sides and drops a texel of shade on the other two, grit
+// where the cut spilled, and (for the cache) two flecks of gold in the crack. Nothing is a closed
+// rectangle: every run is broken, and the cut wanders a texel the way a prised slab does.
+const DECAL_PX = PX_PER_TILE;
+
+/** Stone that matches the flagstone atlas (materials.js `STONE`), plus a warm gold for the flecks. */
+const trapPal = () => itemPalette({ abcdefg: '#8b8274', ...GOLD }, { '%': '#241a12' });
+
+/** Break a run into dashes so nothing on the tile reads as a drawn rectangle. */
+function dash(p, from, to, at, key, rng, keep = 0.72) {
+  for (let i = from; i <= to; i++) if (rng.chance(keep)) at(p, i, key);
+}
+
+/**
+ * A flagstone that has been lifted and dropped back: the give-away for a buried cache or a trap.
+ * The seam is jagged, the lip is lit top-left and shaded bottom-right, and the middle of the tile is
+ * left empty so the flagstone's own wear carries it.
+ */
+function artTrapSlab() {
+  const r = createRng('fargoal-trap-slab');
+  const p = makePix(DECAL_PX, DECAL_PX);
+  const T = 6, B = DECAL_PX - 7, L = 6, R = DECAL_PX - 7;
+  // the cut itself: one texel of ink, wandering
+  const topY = [], botY = [], leftX = [], rightX = [];
+  for (let x = L; x <= R; x++) { topY[x] = T + (r.chance(0.18) ? 1 : 0); botY[x] = B - (r.chance(0.18) ? 1 : 0); }
+  for (let y = T; y <= B; y++) { leftX[y] = L + (r.chance(0.18) ? 1 : 0); rightX[y] = R - (r.chance(0.18) ? 1 : 0); }
+  // the cut is not a drawn line: it opens and closes, and its floor is dark stone, not black
+  const nick = (x, y) => { if (r.chance(0.12)) return; setPx(p, x, y, r.chance(0.62) ? '#' : 'a'); };
+  for (let x = L; x <= R; x++) { nick(x, topY[x]); nick(x, botY[x]); }
+  for (let y = T; y <= B; y++) { nick(leftX[y], y); nick(rightX[y], y); }
+  // the lip: light on the two edges facing the key light, shade on the two facing away — dashed,
+  // because a continuous highlight all the way round is a picture frame, not a stone
+  dash(p, L + 1, R - 1, (q, x, k) => setPx(q, x, topY[x] + 1, k), 'g', r, 0.5);
+  dash(p, T + 1, B - 1, (q, y, k) => setPx(q, leftX[y] + 1, y, k), 'f', r, 0.5);
+  dash(p, L + 1, R - 1, (q, x, k) => setPx(q, x, botY[x] - 1, k), 'b', r, 0.42);
+  dash(p, T + 1, B - 1, (q, y, k) => setPx(q, rightX[y] - 1, y, k), 'b', r, 0.42);
+  // grit that came up with the slab, and the pry notch on the near-left corner
+  for (let i = 0; i < 14; i++) {
+    const side = r.int(0, 3);
+    const t = r.int(L - 2, R + 2);
+    const x = side === 0 || side === 1 ? t : side === 2 ? L - r.int(1, 3) : R + r.int(1, 3);
+    const y = side === 0 ? T - r.int(1, 3) : side === 1 ? B + r.int(1, 3) : t;
+    setPx(p, x, y, r.chance(0.5) ? 'c' : 'd');
+  }
+  for (const [x, y] of [[L - 1, B - 2], [L - 2, B - 1], [L - 1, B - 1], [L, B]]) setPx(p, x, y, '#');
+  setPx(p, L - 2, B - 2, 'f');
+  // two flecks of gold in the crack: the only hint that this one is worth digging
+  setPx(p, L + 4, botY[L + 4], 'o'); setPx(p, L + 5, botY[L + 5] - 1, 'p');
+  setPx(p, R - 6, topY[R - 6], 'n');
+  return p;
+}
+
+/**
+ * The teleport trap: a sigil CHISELLED into the slab, not a ring hovering over it. Eight dashes on
+ * an octagon plus a struck cross, cut one texel deep (ink) with a lit texel on the top-left of each
+ * cut, so the light reads it as carved stone rather than as a decal printed on top.
+ */
+function artTrapRune() {
+  const p = makePix(DECAL_PX, DECAL_PX);
+  const c = DECAL_PX / 2 - 0.5, rad = 10.5;
+  const cut = (x, y) => { setPx(p, x, y, '#'); if (!p.d[(y - 1) * p.w + (x - 1)]) setPx(p, x - 1, y - 1, 'f'); };
+  for (let i = 0; i < 8; i++) {
+    const a0 = (i / 8) * Math.PI * 2 + 0.13, a1 = ((i + 1) / 8) * Math.PI * 2 - 0.13;
+    for (let t = 0; t <= 1; t += 0.055) {
+      const a = a0 + (a1 - a0) * t;
+      cut(Math.round(c + Math.cos(a) * rad), Math.round(c + Math.sin(a) * rad));
+    }
+  }
+  for (let k = -4; k <= 4; k++) { cut(Math.round(c) + k, Math.round(c)); cut(Math.round(c), Math.round(c) + k); }
+  for (const [dx, dy] of [[-2, -2], [2, 2], [-2, 2], [2, -2]]) cut(Math.round(c) + dx, Math.round(c) + dy);
+  return p;
+}
+
+/** A tile-sized decal texture: no ink outline and no crop — the art IS the tile. */
+const decalTex = new Map();
+function decalTexture(key, painter, pal) {
+  let t = decalTex.get(key);
+  if (t) return t;
+  const art = painter();
+  const canvas = document.createElement('canvas');
+  canvas.width = art.w; canvas.height = art.h;
+  canvas.getContext('2d').putImageData(new ImageData(toRGBA(art, pal), art.w, art.h), 0, 0);
+  t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+  decalTex.set(key, t);
+  return t;
+}
+
+/**
+ * One tile of painted floor, lying IN the floor plane. It is lit like any other surface, so the
+ * torches model it and the fog-of-war darkens it with the stone around it.
+ * @param {string} key @param {() => object} painter @param {object} pal
+ * @param {{y?:number, glow?:number, emissive?:number}} [o]
+ */
+function floorDecal(key, painter, pal, o = {}) {
+  const tex = decalTexture(key, painter, pal);
+  const mat = litMaterial('decal:' + key, {
+    map: tex, transparent: true, depthWrite: false, roughness: 1, metalness: 0,
+    emissiveMap: tex, emissive: new THREE.Color(o.emissive ?? 0xffffff), emissiveIntensity: o.glow ?? 0,
+  });
+  const m = new THREE.Mesh(geo('decalQuad', () => new THREE.PlaneGeometry(1, 1)), mat);
+  m.rotation.x = -Math.PI / 2;
+  m.userData.floorDecal = true;      // dungeon.js turns these, and only these, with the slab
+  m.position.y = o.y ?? 0.02;
+  m.renderOrder = 4;
+  m.castShadow = false; m.receiveShadow = true; m.frustumCulled = false;
+  return m;
+}
 
 // One key alphabet for every pickup, so the drawing routines above are material-agnostic:
 // 'abcdefg' the object's own body, 'hijkl' its second material, 'mnopq' gold, 'rstuv' a third,
@@ -470,7 +673,6 @@ const PAL = {
   scroll: itemPalette({ abcdefg: '#c6b183', hijkl: '#a5262a' }, { '%': '#3a2f1c' }),
   blade: itemPalette({ abcdefg: '#9fc0d8', hijkl: '#c9a94e', rstuv: '#5d3d28' }, { '*': '#eaf6ff', '%': '#1d2530' }),
   crystal: itemPalette({ abcdefg: '#3fbf62', rstuv: '#6b6f63' }, { '*': '#e6ffe9', '%': '#0f2a17' }),
-  trapSlab: itemPalette({ pqrst: '#7d7468', klmno: '#a8843a' }),
 };
 /** Spellbook: cream pages + a cover in the spell's own colour (one palette per spell type). */
 const bookPal = (() => {
@@ -518,14 +720,25 @@ export function liveProps() { return LIVE.size; }
  * else; the contact shadow and the glow pool are welded to the tile at y ~ 0.012 and never budge.
  * The offset is one-sided (0..amp) so the object's base still touches the floor at the bottom of
  * every cycle rather than sinking through it.
+ *
+ * AND IT IS MEASURED IN TEXELS, NOT IN METRES. A bob of "0.024 world units" is 2.4 device pixels at
+ * one zoom and 0.6 at another, and at every zoom it is a FRACTION of a texel — so the pickup's
+ * bottom row spent the whole cycle straddling two device pixel rows, which is a blur, and the object
+ * never sat on the flagstone at all. `amp` is now a whole number of TEXELS off the frame's shared
+ * grid (spriteBillboard.js `texelGrid`), stepped as a square wave: the thing is either on the floor
+ * row or exactly one texel above it, the way a sprite in a 2D game hops.
  * @param {THREE.Group} g the prop @param {THREE.Mesh} sprite its billboard
- * @param {{amp?:number, speed?:number, t0?:number}} [o]
+ * @param {{amp?:number, speed?:number, t0?:number}} [o] `amp` in TEXELS
  */
-function bob(g, sprite, { amp = 0.024, speed = 2, t0 = 0 } = {}) {
+function bob(g, sprite, { amp = 1, speed = 2, t0 = 0 } = {}) {
   const y0 = sprite.position.y, prev = g.userData.tick;
   animate(g, (dt, time, ctx, d) => {
     if (prev) prev(dt, time, ctx, d);
-    sprite.position.y = y0 + (0.5 + 0.5 * Math.sin(time * speed + t0)) * amp;
+    const grid = texelGrid();
+    const texel = grid.pxPerWorld > 0 ? grid.S / grid.pxPerWorld : 1 / PX_PER_TILE;
+    // a SQUARE WAVE, not a sine: the sprite is either on the floor row or exactly `amp` texels above
+    // it, and never at 0.37 of a texel, where nearest filtering smears its bottom row into the stone
+    sprite.position.y = y0 + (Math.sin(time * speed + t0) > 0 ? amp * texel : 0);
   });
   return g;
 }
@@ -569,12 +782,19 @@ export class PropFactory {
     }
   }
 
-  /** Twinkling glints at given local positions (scale-animated, deterministic phases). */
-  addGlints(g, color, spots, { size = 0.16, rate = 1.7 } = {}) {
-    const glints = spots.map(([x, y, z], i) => {
+  /**
+   * Twinkling glints at given offsets (scale-animated, deterministic phases). `o.on` is the pickup's
+   * sprite: pass it and the offsets are measured on the ART (see `onArt`), which is where a sparkle
+   * on an object belongs. Without it they hang in the room, which for a screen-aligned sprite means
+   * a third of the way down it.
+   */
+  addGlints(g, color, spots, { size = 0.16, rate = 1.7, on = null } = {}) {
+    const glints = spots.map(([x, y, z = 0.02], i) => {
       const b = billboard(glintTexture(), color, size);
-      b.position.set(x, y, z); b.userData.phase = this.rng.float(0, 6.28) + i * 1.3; b.userData.rate = rate * this.rng.float(0.8, 1.25);
-      g.add(b); return b;
+      b.userData.phase = this.rng.float(0, 6.28) + i * 1.3; b.userData.rate = rate * this.rng.float(0.8, 1.25);
+      b.userData.size0 = size;
+      if (on) onArt(on, b, x, y, size); else { b.position.set(x, y, z); g.add(b); }
+      return b;
     });
     g.userData.glints = glints;
     return glints;
@@ -584,13 +804,14 @@ export class PropFactory {
     const gl = o.userData.glints; if (!gl) return;
     for (const b of gl) {
       const s = Math.max(0, Math.sin(time * b.userData.rate + b.userData.phase));
-      const k = s * s * s * s; // sharp twinkle
-      b.scale.set(b.userData.size0 * (0.2 + k), b.userData.size0 * (0.2 + k), 1);
+      const k = 0.2 + s * s * s * s; // sharp twinkle
+      b.userData.k = k;
+      if (!b.userData.art) b.scale.set(b.userData.size0 * k, b.userData.size0 * k, 1);
     }
   }
 
   finishGlints(g) {
-    for (const b of g.userData.glints || []) b.userData.size0 = b.scale.x;
+    for (const b of g.userData.glints || []) if (!b.userData.art) b.userData.size0 = b.scale.x;
     animate(g, (dt, time) => this.tickGlints(g, time));
   }
 
@@ -598,52 +819,53 @@ export class PropFactory {
     const rich = Math.min(1, amount / 120);
     const s = pixelSprite('sack', artSack, PAL.sack, { glow: 0.1 });
     g.add(s);
-    g.add(groundGlow(0xffb340, 0.36, { opacity: 0.2 + rich * 0.12 }));
+    g.add(groundGlow(0xffb340, 0.54, { opacity: 0.09 + rich * 0.05 }));
     g.add(contactShadow(0.4));
-    this.addGlints(g, 0xfff0b0, [[-0.2, 0.06, 0.05], [0.2, 0.06, 0.05], [0.0, 0.42, 0.03]], { size: 0.13 + rich * 0.04 });
+    this.addGlints(g, 0xfff0b0, [[-0.3, 0.36], [0.3, 0.36], [0.0, 0.86]], { size: 0.13 + rich * 0.04, on: s });
     this.finishGlints(g);
-    bob(g, s, { amp: 0.02, speed: 1.7, t0: g.userData.anim.t });
+    bob(g, s, { amp: 1, speed: 1.7, t0: g.userData.anim.t });
     g.userData.anim.sparkle = true;
     return g;
   }
 
   buriedCache(g) {
-    g.add(pixelSprite('cache', artCache, PAL.cache, { glow: 0.08 }));
-    g.add(groundGlow(0xffb340, 0.28, { opacity: 0.14 }));
+    const s = pixelSprite('cache', artCache, PAL.cache, { glow: 0.08 });
+    g.add(s);
+    g.add(groundGlow(0xffb340, 0.42, { opacity: 0.06 }));
     g.add(contactShadow(0.46));
-    this.addGlints(g, 0xfff0b0, [[0.05, 0.13, 0.04]], { size: 0.12, rate: 1.1 });
+    this.addGlints(g, 0xfff0b0, [[0.12, 0.52]], { size: 0.12, rate: 1.1, on: s });
     this.finishGlints(g);
     return g;   // spoil heaped on the floor does not bob: it is part of the floor
   }
 
-  /** Hidden treasure/trap square: an inset slab of painted flagstone framed in brass. */
+  /** Hidden treasure/trap square: a flagstone that has been lifted, cut INTO the floor. */
   trapSquare(g) {
-    const M = this.mats;
-    const slab = mesh(geo('trapSlab', () => new THREE.BoxGeometry(0.7, 0.04, 0.7)),
-      litMaterial('trapSlabPix', { map: pixelTexture('trapSlab', ART.trapSlab, PAL.trapSlab), roughness: 0.92, metalness: 0.05 }), 0, 0.03, 0);
-    g.add(slab);
-    const frame = geo('trapFrame', () => new THREE.BoxGeometry(0.78, 0.03, 0.05));
-    for (const [x, z, ry] of [[0, 0.365, 0], [0, -0.365, 0], [0.365, 0, Math.PI / 2], [-0.365, 0, Math.PI / 2]]) g.add(mesh(frame, M.brass, x, 0.035, z, { ry }));
+    g.add(floorDecal('trapSlab', artTrapSlab, trapPal(), { y: 0.02 }));
+    g.add(groundGlow(0xffb340, 0.4, { opacity: 0.05 }));
+    this.addGlints(g, 0xfff0b0, [[-0.12, 0.03, 0.1]], { size: 0.1, rate: 0.9 });
+    this.finishGlints(g);
     return g;
   }
 
   /** Closed chest: painted planks, iron bands and a gold lock, hand-pixelled. */
   chest(g) {
-    g.add(pixelSprite('chest', artChest, PAL.chest, { glow: 0.1 }));
-    g.add(groundGlow(0xffb340, 0.4, { opacity: 0.16 }));
+    const s = pixelSprite('chest', artChest, PAL.chest, { glow: 0.1 });
+    g.add(s);
+    g.add(groundGlow(0xffb340, 0.6, { opacity: 0.07 }));
     g.add(contactShadow(0.52));
-    if (!g.userData.glints) { this.addGlints(g, 0xfff0b0, [[0.0, 0.3, 0.03], [0.2, 0.46, 0.02]], { size: 0.13, rate: 1.2 }); this.finishGlints(g); }
+    if (!g.userData.glints) { this.addGlints(g, 0xfff0b0, [[0.0, 0.55], [0.3, 0.82]], { size: 0.13, rate: 1.2, on: s }); this.finishGlints(g); }
     return g;   // a chest is heavy: it sits, it does not bob
   }
 
   /** Open chest for the loot moment: lid thrown back, gold heaped inside, light spilling out. */
   chestOpen() {
     const g = new THREE.Group();
-    g.add(pixelSprite('chestOpen', artChestOpen, PAL.chest, { glow: 0.12 }));
+    const s = pixelSprite('chestOpen', artChestOpen, PAL.chest, { glow: 0.12 });
+    g.add(s);
     g.add(contactShadow(0.52));
-    const inner = billboard(glowTexture(), 0xffc860, 0.7); inner.position.set(0, 0.34, 0.02); g.add(inner);
+    const inner = billboard(glowTexture(), 0xffc860, 0.7); onArt(s, inner, 0, 0.62, 0.5);
     g.userData.inner = inner;
-    this.addGlints(g, 0xfff4c0, [[0.09, 0.34, 0.02], [-0.11, 0.32, 0.02], [0.0, 0.4, 0.02]], { size: 0.2, rate: 3 });
+    this.addGlints(g, 0xfff4c0, [[0.16, 0.6], [-0.2, 0.56], [0.0, 0.78]], { size: 0.16, rate: 3, on: s });
     this.finishGlints(g);
     return g;
   }
@@ -714,11 +936,11 @@ export class PropFactory {
   potion(g) {
     const s = pixelSprite('potion', artPotion, PAL.potion, { glow: 0.2, emissive: 0xffb4a4 });
     g.add(s);
-    g.add(groundGlow(0xff5a48, 0.3, { opacity: 0.24 }));
+    g.add(groundGlow(0xff5a48, 0.46, { opacity: 0.10 }));
     g.add(contactShadow(0.24));
-    this.addGlints(g, 0xffd8d0, [[-0.1, 0.4, 0.03]], { size: 0.12, rate: 1.3 });
+    this.addGlints(g, 0xffd8d0, [[-0.2, 0.74]], { size: 0.1, rate: 1.3, on: s });
     this.finishGlints(g);
-    bob(g, s, { amp: 0.026, speed: 2.2, t0: g.userData.anim.t });
+    bob(g, s, { amp: 1, speed: 2.2, t0: g.userData.anim.t });
     return g;
   }
 
@@ -726,12 +948,12 @@ export class PropFactory {
   magicSack(g) {
     const s = pixelSprite('magicSack', () => artSack(true), PAL.magicSack, { glow: 0.18, emissive: 0xc9a8ff });
     g.add(s);
-    const sig = billboard(sigilTexture('sack'), 0xd0b0ff, 0.24); sig.position.set(0, 0.48, 0.02); g.add(sig);
-    g.add(groundGlow(0xb197fc, 0.32, { opacity: 0.22 }));
+    const sig = billboard(sigilTexture('sack'), 0xd0b0ff, 0.24); onArt(s, sig, 0, 0.98, 0.18);
+    g.add(groundGlow(0xb197fc, 0.48, { opacity: 0.10 }));
     g.add(contactShadow(0.4));
-    this.addGlints(g, 0xe0d0ff, [[0.15, 0.34, 0.02], [-0.13, 0.18, 0.02]], { size: 0.12 });
+    this.addGlints(g, 0xe0d0ff, [[0.26, 0.6], [-0.24, 0.4]], { size: 0.1, on: s });
     this.finishGlints(g);
-    bob(g, s, { amp: 0.022, speed: 1.8, t0: g.userData.anim.t });
+    bob(g, s, { amp: 1, speed: 1.8, t0: g.userData.anim.t });
     return g;
   }
 
@@ -739,9 +961,9 @@ export class PropFactory {
   scroll(g) {
     const s = pixelSprite('scroll', artScroll, PAL.scroll, { glow: 0.12 });
     g.add(s);
-    g.add(groundGlow(0xffe0a0, 0.28, { opacity: 0.16 }));
+    g.add(groundGlow(0xffe0a0, 0.42, { opacity: 0.07 }));
     g.add(contactShadow(0.5));
-    bob(g, s, { amp: 0.018, speed: 2, t0: g.userData.anim.t });
+    bob(g, s, { amp: 1, speed: 2, t0: g.userData.anim.t });
     return g;
   }
 
@@ -750,21 +972,25 @@ export class PropFactory {
     const c = SPELL_COLORS[type] || 0xffffff;
     const s = pixelSprite('book:' + type, artBook, bookPal(type), { glow: 0.15, emissive: c });
     g.add(s);
-    const pageGlow = billboard(glowTexture(), c, 0.2, { intensity: 0.4 }); pageGlow.position.set(0, 0.1, 0.02); g.add(pageGlow);
-    const sig = billboard(sigilTexture(type), c, 0.26); sig.position.set(0, 0.46, 0.02); g.add(sig);
-    g.add(groundGlow(c, 0.32, { opacity: 0.18 }));
+    // A soft glow sprite parked at the book's BASE is the single worst thing you can put next to a
+    // contact shadow: it is additive, it is the cover's own colour, and it sits exactly where the
+    // shadow is supposed to be dark — which is how the 'treasure' shot came to have a green pool
+    // under the green book. It now sits up on the cover, small, and dim enough to read as page light.
+    const pageGlow = billboard(glowTexture(), c, 0.13, { intensity: 0.22 }); onArt(s, pageGlow, 0, 0.55, 0.11);
+    const sig = billboard(sigilTexture(type), c, 0.26); onArt(s, sig, 0, 1.02, 0.2);
+    g.add(groundGlow(c, 0.48, { opacity: 0.08 }));
     g.add(contactShadow(0.5));
-    this.addGlints(g, 0xffffff, [[0.17, 0.18, 0.02], [-0.18, 0.18, 0.02], [0.02, 0.28, 0.02]], { size: 0.12 });
+    this.addGlints(g, 0xffffff, [[0.3, 0.5], [-0.32, 0.5], [0.06, 0.8]], { size: 0.1, on: s });
     this.finishGlints(g);
     const tick = g.userData.tick;
     animate(g, (dt, time, ctx, d) => {
       tick(dt, time, ctx, d);
-      sig.position.y = 0.46 + 0.06 * Math.sin(time * 2.3 + g.userData.anim.t);
-      const sc = 0.26 * (0.9 + 0.1 * Math.sin(time * 4.1)); sig.scale.set(sc, sc, 1);
-      const pg = 0.2 * (0.85 + 0.15 * Math.sin(time * 3.1 + 1)); pageGlow.scale.set(pg, pg, 1);
+      sig.userData.art.v = 1.02 + 0.12 * Math.sin(time * 2.3 + g.userData.anim.t);
+      sig.userData.k = 0.9 + 0.1 * Math.sin(time * 4.1);
+      pageGlow.userData.k = 0.85 + 0.15 * Math.sin(time * 3.1 + 1);
       if (ctx.emit && d < 9) { g.userData.acc = (g.userData.acc || 0) + dt; while (g.userData.acc > 0.3) { g.userData.acc -= 0.3; ctx.emit({ x: g.position.x, y: 0.12, z: g.position.z, count: 1, color: [c, 0xffffff], speed: 0.1, spread: 1, up: 0.9, life: 1.3, size: 0.06, gravity: 0.15, drag: 1, radius: 0.15, kind: 2 }); } }
     });
-    bob(g, s, { amp: 0.018, speed: 2, t0: g.userData.anim.t });
+    bob(g, s, { amp: 1, speed: 2, t0: g.userData.anim.t });
     return g;
   }
 
@@ -772,9 +998,9 @@ export class PropFactory {
   enchantedWeapon(g) {
     const s = pixelSprite('blade', artBlade, PAL.blade, { glow: 0.2, emissive: 0x9fd0ff });
     g.add(s);
-    g.add(groundGlow(0x9fd0ff, 0.3, { opacity: 0.22 }));
+    g.add(groundGlow(0x9fd0ff, 0.46, { opacity: 0.10 }));
     g.add(contactShadow(0.22));
-    this.addGlints(g, 0xdff0ff, [[0.0, 0.62, 0.02]], { size: 0.16, rate: 2.2 });
+    this.addGlints(g, 0xdff0ff, [[0.0, 0.88]], { size: 0.13, rate: 2.2, on: s });
     this.finishGlints(g);
     return g;   // driven into the stone: it does not bob
   }
@@ -783,8 +1009,8 @@ export class PropFactory {
   beaconItem(g) {
     const s = pixelSprite('crystal', artCrystal, PAL.crystal, { glow: 0.4, emissive: 0x4bd66a });
     g.add(s);
-    const b = billboard(glowTexture(), 0x4bd66a, 0.6, { intensity: 0.8 }); b.position.y = 0.34; g.add(b);
-    g.add(groundGlow(0x4bd66a, 0.3, { opacity: 0.24 }));
+    const b = billboard(glowTexture(), 0x4bd66a, 0.6, { intensity: 0.8 }); onArt(s, b, 0, 0.62, 0.42);
+    g.add(groundGlow(0x4bd66a, 0.46, { opacity: 0.11 }));
     g.add(contactShadow(0.3));
     return g;
   }
@@ -877,14 +1103,19 @@ export class PropFactory {
     return g;
   }
 
+  /** Teleport trap: a sigil chiselled into the slab, breathing a little violet out of its cuts. */
   trapRune() {
     const g = new THREE.Group();
-    const ring = mesh(geo('runeRing', () => new THREE.RingGeometry(0.22, 0.3, 24)), this.mats.rune, 0, 0.012, 0, { rx: -Math.PI / 2, shadow: false });
-    g.add(ring);
-    const inner = mesh(geo('runeInner', () => new THREE.RingGeometry(0.08, 0.12, 6)), this.mats.rune, 0, 0.012, 0, { rx: -Math.PI / 2, shadow: false });
-    g.add(inner);
-    g.add(groundGlow(PALETTE.magic, 0.38, { opacity: 0.25 }));
-    g.userData.anim = { y0: 0, amp: 0, speed: 0, spin: 1.2, t: 0, node: inner };
+    const d = floorDecal('trapRune', artTrapRune, trapPal(), { y: 0.021, glow: 0.16, emissive: PALETTE.magic });
+    g.add(d);
+    const pool = groundGlow(PALETTE.magic, 0.46, { opacity: 0.12 });
+    g.add(pool);
+    g.userData.anim = { y0: 0, amp: 0, speed: 0, spin: 0, t: 0 };
+    animate(g, (dt, time) => {
+      const k = 0.5 + 0.5 * Math.sin(time * 1.6);
+      d.material.emissiveIntensity = 0.1 + k * 0.16;
+      pool.material.opacity = 0.08 + k * 0.09;
+    });
     return g;
   }
 

@@ -277,7 +277,7 @@ export class DungeonView {
       else if (t === TILE.STAIRS_UP) this.addStairsUp(x, y, rng);
       else if (t === TILE.PIT || t === TILE.TRAP_PIT) this.addPit(x, y, rng);
       else if (t === TILE.TEMPLE) this.addTemple(x, y, rng);
-      else if (t === TILE.TRAP_TELEPORT) this.addAt(this.props.trapRune(), x, y);
+      else if (t === TILE.TRAP_TELEPORT) this.turnDecal(this.addAt(this.props.trapRune(), x, y), x, y);
     }
     this.addDoorways(rng);
     this.addTempleRooms(rng);
@@ -457,6 +457,23 @@ export class DungeonView {
   /** Same placement rule as Lighting.setLevel so flames and lights coincide. */
   torchSpotsFor(level) { return this._torchSpots || []; }
   setTorchSpots(spots) { this._torchSpots = spots; }
+
+  /**
+   * TRAP TILES ARE FLOOR, SO THEY TURN LIKE FLOOR. The slabs are laid with a per-tile quarter-turn
+   * (`buildSlabs`) precisely so a repeated 32-texel painting cannot be spotted. The trap decals —
+   * the lifted flagstone over a cache, the chiselled teleport sigil — are painted on the same grid
+   * and are just as repeatable, so they take a quarter-turn from the same place the tile does: the
+   * tile's own coordinates, so it is stable across rebuilds and saves.
+   */
+  turnDecal(obj, x, y) {
+    if (!obj) return obj;
+    // Only the decal QUADS turn. Turning the whole prop group would take any billboard riding on it
+    // with it, and a screen-aligned sprite whose parent has been yawed ninety degrees is edge-on:
+    // the buried cache simply vanished.
+    const q = (Math.PI / 2) * (((x * 73856093) ^ (y * 19349663)) & 3);
+    obj.traverse((o) => { if (o.userData.floorDecal) o.rotation.z = q; });
+    return obj;
+  }
 
   addAt(obj, x, y) { obj.position.set(x, 0, y); this.root.add(obj); if (obj.userData.anim) this.animated.push(obj); obj.traverse((o) => { if (o.userData.flame) this.flames.push(o); }); return obj; }
 
@@ -782,6 +799,7 @@ export class DungeonView {
       if (this.itemViews.has(it.id)) continue;
       const v = this.props.item(it);
       v.position.set(it.x, 0, it.y);
+      if (it.hidden) this.turnDecal(v, it.x, it.y);   // the lifted-flagstone mark is a floor decal
       v.userData.item = it;
       this.root.add(v);
       this.itemViews.set(it.id, v);
