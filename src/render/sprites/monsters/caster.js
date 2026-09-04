@@ -70,16 +70,28 @@ const edge = (p) => outline(p, '#', { lit: LIT, litKey: '@' });
 // gone; a species that genuinely needs a different slice passes `picks` instead.
 const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
 const RAMP_PICK = {
-  skin: [1, 3, 5], cloth: [0, 2, 4, 5], trim: [1, 4], metal: [1, 3, 5, 6],
+  cloth: [0, 2, 4, 5], trim: [1, 4], metal: [1, 3, 5, 6],
   accent: [1, 3, 5], magic: [2, 4, 6], shimmer: [2, 4, 6],
 };
 
 /**
- * THE SEAM VOCABULARY (pixelPainter `seamInk`): every material of this group, DARKEST FIRST.
- * INK and INK_LIT are the outer contour and nothing else; a crease in a robe, the line where a
- * sleeve crosses the chest and the joint of a staff are all drawn a step down their own ramp.
+ * THE FLESH RAMP IS NOT A CLOTH RAMP. `RAMP_PICK` above cools a shadow by walking it toward violet
+ * and GAINING saturation, which is right for a dyed wool and wrong for a face: from an orange skin
+ * base the short way round the wheel runs THROUGH RED, so step 1 of the seven-step curve came out
+ * arterial (`#c99a6e` -> `#7a3321`, hue 0.034 at saturation 0.57) and sat two whole steps below the
+ * lit side. Painted down the shadow half of a face that reads as a wound, not as a cheek turning
+ * away from a lamp — see the long note in humans.js, where two of the six fighters shipped like it.
+ * Flesh therefore gets its own curve (shadows DESATURATE, the hue barely moves) and ADJACENT steps
+ * of it, and five keys instead of three: `1 2 3` the shadow / core / light of the flesh, `j` the
+ * step below for a brow shadow, a nostril and a mouth line, `k` the step above for the highlight on
+ * a brow ridge or a nose bridge.
  */
-const SEAM_RAMPS = ['4567', '123', '89', 'abcd', 'efg', 'mno', 'stu'];
+const SKIN_OPTS = { hueShift: 0.012, satShift: -0.05 };
+/** The flesh keys, darkest first: feature shadow, shadow, core, light, feature highlight. */
+const SKIN_KEYS = 'j123k';
+const SKIN_PICK = [1, 2, 3, 4, 5];
+
+const SEAM_RAMPS = ['4567', SKIN_KEYS, '89', 'abcd', 'efg', 'mno', 'stu'];
 
 /**
  * One species palette over the shared key vocabulary.
@@ -94,7 +106,9 @@ export function casterPalette(o) {
     const pick = (o.picks && o.picks[which]) || RAMP_PICK[which];
     [...keys].forEach((k, i) => p.set(k, r[pick[i]]));
   };
-  put('123', o.skin, 'skin');
+  const flesh = ramp(o.skin, 7, SKIN_OPTS);
+  const skinPick = (o.picks && o.picks.skin) || SKIN_PICK;
+  [...SKIN_KEYS].forEach((k, i) => p.set(k, flesh[skinPick[i] ?? SKIN_PICK[i]]));
   put('4567', o.cloth, 'cloth');   // 4 is the deep crease, 7 the lit fold
   put('89', o.trim, 'trim');
   put('abcd', o.metal, 'metal');   // d is the specular, 1-px edges only
@@ -873,7 +887,7 @@ const SPRITE_PALETTE = casterPalette({
   skin: '#a9c8da', cloth: '#7fa3bd', trim: '#4f7fa8', metal: '#9fc4d8',
   accent: '#c6d8e2', magic: '#7fc8de', eye: '#c9ff7a', spark: '#ffffff',
   shimmer: '#93b6c8', voidCol: '#26394f',
-  picks: { shimmer: [1, 3, 5], skin: [1, 3, 5], cloth: [0, 2, 3, 4], magic: [1, 3, 5] },
+  picks: { shimmer: [1, 3, 5], cloth: [0, 2, 3, 4], magic: [1, 3, 5] },
 });
 
 /** The pixie's body, solid — never drawn, only hollowed. */

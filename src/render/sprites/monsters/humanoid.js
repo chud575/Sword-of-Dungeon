@@ -133,7 +133,24 @@ const keyed = (rows, passes) => passes.reduce((q, [keys, o]) => relight(q, keys,
 // gone: five species each inventing their own contrast is exactly what made the cast look sampled
 // from five different games.
 const RAMP_OPTS = { hueShift: 0.02, satShift: 0.06 };
-const RAMP_PICK = { skin: [1, 3, 5], cloth: [0, 2, 3, 4], leather: [1, 3, 4], metal: [1, 3, 5, 6], accent: [1, 3, 5] };
+const RAMP_PICK = { cloth: [0, 2, 3, 4], leather: [1, 3, 4], metal: [1, 3, 5, 6], accent: [1, 3, 5] };
+
+/**
+ * THE FLESH RAMP IS NOT A CLOTH RAMP. `RAMP_PICK` above cools a shadow by walking it toward violet
+ * and GAINING saturation, which is right for a dyed wool and wrong for a face: from an orange skin
+ * base the short way round the wheel runs THROUGH RED, so step 1 of the seven-step curve came out
+ * arterial (`#c99a6e` -> `#7a3321`, hue 0.034 at saturation 0.57) and sat two whole steps below the
+ * lit side. Painted down the shadow half of a face that reads as a wound, not as a cheek turning
+ * away from a lamp — see the long note in humans.js, where two of the six fighters shipped like it.
+ * Flesh therefore gets its own curve (shadows DESATURATE, the hue barely moves) and ADJACENT steps
+ * of it, and five keys instead of three: `1 2 3` the shadow / core / light of the flesh, `j` the
+ * step below for a brow shadow, a nostril and a mouth line, `k` the step above for the highlight on
+ * a brow ridge or a nose bridge.
+ */
+const SKIN_OPTS = { hueShift: 0.012, satShift: -0.05 };
+/** The flesh keys, darkest first: feature shadow, shadow, core, light, feature highlight. */
+const SKIN_KEYS = 'j123k';
+const SKIN_PICK = [1, 2, 3, 4, 5];
 
 /**
  * One species palette over the shared key vocabulary.
@@ -147,7 +164,9 @@ function humanoidPalette(o) {
     const pick = (o.picks && o.picks[which]) || RAMP_PICK[which];
     [...keys].forEach((k, i) => p.set(k, r[pick[i]]));
   };
-  put('123', o.skin, 'skin');
+  const flesh = ramp(o.skin, 7, SKIN_OPTS);
+  const skinPick = (o.picks && o.picks.skin) || SKIN_PICK;
+  [...SKIN_KEYS].forEach((k, i) => p.set(k, flesh[skinPick[i] ?? SKIN_PICK[i]]));
   put('7456', o.cloth, 'cloth');   // 7 is the darkest crease, then 4 5 6 up to the lit fold
   put('890', o.leather, 'leather');
   // `s` is THE SOLE: the bottom step of the leather ramp, below the darkest boot tone, so the last
@@ -171,7 +190,7 @@ function humanoidPalette(o) {
  * barbarian shipped a black bar across the collarbone, black rings round both arms and a black
  * notch under the belt, all of which read at the play camera as holes punched through him.
  */
-const SEAM_RAMPS = ['123', '7456', 's890', 'abcd', 'efg'];
+const SEAM_RAMPS = [SKIN_KEYS, '7456', 's890', 'abcd', 'efg'];
 
 // ------------------------------------------------------------------------------------ shared legs
 // 18 wide, 12 tall, stamped at (G.legX, G.legY): two 3-px legs with a 2-px gap, boots flaring outward.
@@ -344,7 +363,7 @@ const LEGS_E = {
 LEGS_E.squat = LEGS_S.squat; LEGS_E.kneel = LEGS_S.kneel; LEGS_E.down = LEGS_S.down;
 
 // ------------------------------------------------------------------------------------ rig helpers
-const LIGHT_KEYS = new Set(['3', '6', '0', 'c', 'd', 'g', 'T', 'W'].map((c) => c.charCodeAt(0)));
+const LIGHT_KEYS = new Set(['3', 'k', '6', '0', 'c', 'd', 'g', 'T', 'W'].map((c) => c.charCodeAt(0)));
 
 /** Soften the hand-drawn outline to '@' where a light tone meets empty space on the top-left edge. */
 function softenLit(p) {
