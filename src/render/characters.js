@@ -110,10 +110,13 @@ export class CharacterFactory {
     const armR = new THREE.Object3D(); armR.position.set(0, 0.5, 0); root.add(armR);
     const view = {
       root, nodes: { root, armR }, material: sprite.material, sprite, mesh: sprite.mesh, kind: 'sprite', entity, type,
-      // ONE size law (sprites/style.js): SCALE[type] is the creature's height relative to the hero,
-      // and `sizeFor` turns it into the billboard multiplier for the height this art actually has.
-      // The billboard then applies it by choosing a bigger integer texel, so a troll is as crisp as
-      // the hero rather than a stretched copy of him.
+      // ONE size law (sprites/style.js): SCALE[type] is the creature's height relative to the hero.
+      // For a SPRITE that law is served by the ART — the sheet is drawn so its figure is SCALE times
+      // the hero's 46 rows — because the whole cast shares one texel size per frame (see the header
+      // of sprites/spriteBillboard.js). `sizeFor` is therefore an AUDIT number here: how far this
+      // sheet's drawn height is from the height SCALE asks for, i.e. how badly it wants redrawing on
+      // a bigger canvas. It no longer scales anything on screen. (Rigged, non-sprite characters below
+      // still scale their mesh by it — polygons have no texel grid to protect.)
       size: sizeFor(type, figurePx), style: 'swing',
       // ground-locked stride: a rat's scurry cycles far faster than the hero's march
       stride: 0.45 + (built.h / 48) * 0.9,
@@ -122,7 +125,7 @@ export class CharacterFactory {
     };
     view.anim.angle = Math.atan2(entity.facing?.dx || 0, entity.facing?.dy || 1);
     view.anim.facing = facingOf(entity.facing?.dx || 0, entity.facing?.dy || 1);
-    sprite.scale = view.size;
+    sprite.scale = view.size;   // recorded for the art audit only; it does not size the billboard
     root.position.copy(view.pos);
     return view;
   }
@@ -151,7 +154,7 @@ export class CharacterFactory {
     };
     view.anim.angle = Math.atan2(entity.facing?.dx || 0, entity.facing?.dy || 1);
     view.anim.facing = facingOf(entity.facing?.dx || 0, entity.facing?.dy || 1);
-    sprite.scale = view.size;
+    sprite.scale = view.size;   // recorded for the art audit only; it does not size the billboard
     root.position.copy(view.pos);
     this.playerView = view;
     return view;
@@ -593,8 +596,9 @@ export class CharacterFactory {
     }
     // NO idle "breathing" squash here: a permanent fractional squash puts every texel edge a
     // fraction of a pixel off the grid, which is the mush this whole billboard exists to avoid. The
-    // idle clip breathes in the ART, where it belongs. Steady size rides on `scale` (an integer
-    // texel choice); `squash` only ever carries the brief hit/attack deformation.
+    // idle clip breathes in the ART, where it belongs. Steady size rides on the ART's texel count
+    // (the whole cast shares one texel size per frame); `squash` only ever carries the brief
+    // hit/attack deformation.
     sp.scale = view.size;
     sp.squash.set(sx, sy);
     sp.flash = a.flash * 0.7;

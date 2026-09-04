@@ -29,7 +29,8 @@
 //      4.4 at the showcase camera — a fraction, hence the uneven blocks. We ROUND it to an integer
 //      S (with a little hysteresis so it does not flip-flop mid-zoom) and derive the sprite's world
 //      size back from it: worldPerTexel = S / pxPerWorld. The billboard's world size is therefore a
-//      function of the camera, not a constant — exactly the trade HD-2D games make.
+//      function of the camera, not a constant — exactly the trade HD-2D games make. S is chosen
+//      ONCE PER FRAME FOR THE WHOLE CAST (see `frameTexelSize`), never per sprite.
 //   4. the quad's corners are then offset from the anchor in DEVICE PIXELS (multiples of S) and
 //      converted to clip space as `ndcOffset * anchor.w`, which survives the perspective divide
 //      untouched. Every vertex shares the anchor's w, so the whole sprite is parallel to the image
@@ -41,14 +42,34 @@
 //      vertex shader (`floor(apx + 0.5) - apx`). Frame pivots are integer texel coordinates, so once
 //      the pivot lands on a pixel corner every texel edge in the sprite lands on a pixel edge too.
 //
-// SCALE vs SQUASH — why a big monster is not a scaled-up quad
-// `scale` (a troll is 1.66x the hero: see sprites/style.js SCALE) is applied by CHOOSING A BIGGER
-// INTEGER TEXEL, S = round(want * scale), never by multiplying the quad. Multiplying would put a
-// fractional number of screen pixels on every texel again and hand back the 3px/4px/3px mush the
-// whole screen-space construction exists to avoid — which is exactly what happened while character
-// scale rode in on `uSquash`. So every sprite in the room, hero and troll alike, is drawn on its own
-// whole-pixel grid; only the size steps are quantised (a troll is 6 device pixels per texel where
-// the hero is 4), which is the trade every HD-2D game makes.
+// ---------------------------------------------------------------------------------------------
+// THE RULE: ONE TEXEL SIZE FOR THE WHOLE SCREEN
+// ---------------------------------------------------------------------------------------------
+// Every character sprite in a frame — hero, hobgoblin, shadow dragon, near or far — is drawn at the
+// SAME integer texel size S, derived from the CAMERA alone (`frameTexelSize`), never per instance.
+// One screen, one pixel grid.
+//
+// It used to be per instance: S = round(pxPerWorld(this sprite's depth) / 32 * this.scale). Two
+// things fell out of that, both measured live at 1600x900:
+//   * three resolutions in one frame — the bestiary rendered part of its cast at 3 device pixels
+//     per texel, part at 4 and part at 5, so a rank of monsters standing in one room read as three
+//     different games pasted together;
+//   * WORSE, the same creature at two sizes at once: two wyverns at S=3 and S=4, four fyre drakes
+//     at S=4 and S=5, three dwarven guards at S=3 and S=4 — because `round()` of a per-instance
+//     depth tips across an integer boundary a metre apart, so one guard was 33% chunkier than his
+//     twin standing next to him, and walking toward the camera made a monster pop between grids.
+// The camera's own forward ray, not the sprite's position, now fixes the number: whatever the cast
+// does, S changes only when the CAMERA moves, and then it changes for everyone at once.
+//
+// WHERE SIZE COMES FROM NOW
+// A creature's on-screen size is the number of TEXELS ITS ART OCCUPIES (frame w/h from the sheet,
+// which is what sprites/style.js SCALE tells the art files to draw), times the one shared texel
+// size. It is NOT a bigger texel: `scale`/`uSquash` must never carry steady size again. Multiplying
+// the quad would put a fractional number of screen pixels on every texel and hand back the
+// 3px/4px/3px mush this whole screen-space construction exists to avoid; a bigger per-creature
+// texel buys the size back at the price of the shared grid, which is the bug above. A creature that
+// does not loom the way SCALE says it should is a request to REDRAW IT ON A BIGGER CANVAS (see
+// style.js sizeFor/DENSITY_MIN..MAX), not a request for its own pixel size.
 // `squash` stays for the brief hit/attack deformation ONLY. It is allowed to be fractional for the
 // few frames a body pops or recoils, because a deforming body is not meant to look nailed to the
 // grid; nothing may park a non-integer value in it.
@@ -67,6 +88,50 @@ const MAX_POINTS = 8, MAX_SPOTS = 2;
  * blends with src=ONE/dst=ZERO while opaque so this tag is written, not composited.
  */
 export const SPRITE_MASK_ALPHA = 0.35;
+
+// ------------------------------------------------------------------ the one grid (see the header)
+/** Height above the floor the texel grid is measured at: chest height of the cast, not their boots. */
+const GRID_FOCUS_Y = 0.7;
+/** How far the ideal texel size must drift before the shared grid steps, so it cannot flip-flop. */
+const GRID_HYSTERESIS = 0.62;
+/** The frame's grid: `S` device pixels per sprite texel, shared by every billboard on screen. */
+const GRID = { S: 4, want: 4, pxPerWorld: 128, depth: 12, init: false };
+const _gFwd = new THREE.Vector3(), _gVp = new THREE.Vector2();
+
+/**
+ * THE texel size for every character sprite this frame — one integer for the whole cast.
+ *
+ * It is a property of the CAMERA, not of any sprite: we take the depth of the point where the
+ * camera's own forward ray crosses the plane the cast stands in (chest height above the floor),
+ * work out how many device pixels one world unit covers there, and round that to a whole number of
+ * pixels per texel. Every billboard then reads the same S, so the whole cast sits on one pixel grid
+ * and a given monster can never render at two sizes in one frame (which is what per-instance
+ * rounding did — see the header). Idempotent within a frame: calling it again with the same camera
+ * returns the same S, because after a step |want - S| <= 0.5 < GRID_HYSTERESIS.
+ * @param {THREE.WebGLRenderer} renderer
+ * @param {THREE.Camera} camera
+ * @param {number} [pxPerTile] sprite texels per world tile
+ * @returns {number} device pixels per texel (>= 1)
+ */
+export function frameTexelSize(renderer, camera, pxPerTile = PX_PER_TILE) {
+  if (!camera || !camera.isPerspectiveCamera) return GRID.S;
+  const vp = renderer.getDrawingBufferSize(_gVp);
+  const fwd = _gFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  // where the camera is looking: forward ray x plane y = GRID_FOCUS_Y (fall back to the drop to
+  // that plane if the camera is level or looking up, which no gameplay camera does)
+  let depth = fwd.y < -1e-3 ? (camera.position.y - GRID_FOCUS_Y) / -fwd.y : 0;
+  if (!(depth > 0.05)) depth = Math.max(0.05, Math.abs(camera.position.y - GRID_FOCUS_Y));
+  const pxPerWorld = (vp.y * 0.5 * (camera.zoom || 1)) / (Math.tan(camera.fov * Math.PI / 360) * depth);
+  const want = pxPerWorld / pxPerTile;
+  GRID.want = want; GRID.pxPerWorld = pxPerWorld; GRID.depth = depth;
+  // the first camera of the session sets the grid outright; after that it only steps when the
+  // camera has drifted far enough that the old size is plainly wrong, so a zoom cannot flip-flop
+  if (!GRID.init || Math.abs(want - GRID.S) >= GRID_HYSTERESIS) { GRID.init = true; GRID.S = Math.max(1, Math.round(want)); }
+  return GRID.S;
+}
+
+/** Read-only snapshot of the shared grid (probes, tests, HUD overlays). */
+export function texelGrid() { return { S: GRID.S, want: GRID.want, pxPerWorld: GRID.pxPerWorld, depth: GRID.depth }; }
 
 const LIGHT_GLSL = `
 uniform vec3 uHemiSky, uHemiGround, uDirColor, uDirDir;
@@ -343,13 +408,18 @@ export class SpriteBillboard {
     this.animator = new SpriteAnimator(sheet);
     this.flip = false;
     this.depthBias = 0.22;
-    /** steady size relative to the hero (style.js SCALE) — applied by picking the integer texel size */
+    /**
+     * The size this creature's ART SHOULD have been drawn at, relative to the hero (style.js
+     * `sizeFor`). Recorded for audits only: it deliberately does NOT touch the texel size any more
+     * (see "ONE TEXEL SIZE FOR THE WHOLE SCREEN" in the header). Anything far from 1 here is a
+     * request to redraw that sheet on a bigger or smaller canvas.
+     */
     this.scale = 1;
     /** transient hit/attack deformation only (see the header): 1,1 whenever nothing is deforming */
     this.squash = new THREE.Vector2(1, 1);
     this.opacity = 1; this.flash = 0;
-    /** device pixels per sprite texel (snapped to an integer in sync()) and the world size of one texel */
-    this.texelPx = 4; this.texelWorld = 1 / this.px;
+    /** device pixels per sprite texel — THE ONE the whole cast shares (see `frameTexelSize`) */
+    this.texelPx = GRID.S; this.texelWorld = GRID.S / GRID.pxPerWorld;
     /** eased foot metrics for the contact shadow (see updateBlob) */
     this._footW = 12; this._footCx = 0; this._footLift = 0; this._footInit = false;
     this.lights = null; this._lightCount = -1;
@@ -439,10 +509,10 @@ export class SpriteBillboard {
     const pxPerWorld = (vp.y * 0.5 * (camera.zoom || 1)) / (Math.tan(camera.fov * Math.PI / 360) * depth);
     const pitch = Math.asin(Math.max(-1, Math.min(1, -fwd.y)));
     u.uZLift.value = 1 / Math.max(0.35, Math.cos(pitch)); // depth-only: see the vertex shader
-    // the creature's size rides in HERE, on the integer texel, not on the quad (see the header)
-    const want = (pxPerWorld / this.px) * this.scale;
-    let S = Math.max(1, Math.round(want));
-    if (Math.abs(want - this.texelPx) < 0.62) S = this.texelPx; // hysteresis: no flip-flop mid-zoom
+    // ONE TEXEL SIZE FOR THE WHOLE SCREEN (see the header): the grid comes from the camera, so every
+    // sprite in the frame — and every instance of one type, whatever its depth — shares it. The
+    // creature's size rides on how many texels its ART occupies, never on a texel of its own.
+    const S = frameTexelSize(renderer, camera, this.px);
     this.texelPx = S;
     this.texelWorld = S / pxPerWorld;
     u.uTexelPx.value = S;
