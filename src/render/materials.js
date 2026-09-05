@@ -530,11 +530,15 @@ function grungeTexture() {
  * @returns {{name:string, tint:number[], moss:number}}
  */
 export function stoneFamily(depth) {
+  // Board-bright: the family says which QUARRY, not how dark the level is. Every tint here now
+  // averages 1.0 or a touch over, so the quarry shifts a room's hue without taking light off it —
+  // the deep bands used to average 0.92-0.95 and stacked that loss on top of a grade that was
+  // already crushing them, which is how depth 18 arrived at a black-green wash.
   if (depth <= 0) return { name: 'weathered court flags', tint: [1.06, 1.04, 0.98], moss: 1.15 };
-  if (depth <= 5) return { name: 'warm limestone', tint: [1.02, 0.98, 0.9], moss: 1 };
-  if (depth <= 12) return { name: 'cold granite', tint: [0.9, 0.94, 1.02], moss: 0.75 };
-  if (depth <= 18) return { name: 'green serpentine', tint: [0.88, 0.98, 0.9], moss: 1.25 };
-  return { name: 'violet basalt', tint: [0.96, 0.88, 1.02], moss: 0.45 };
+  if (depth <= 5) return { name: 'warm limestone', tint: [1.04, 1.0, 0.93], moss: 1 };
+  if (depth <= 12) return { name: 'cold granite', tint: [0.95, 0.99, 1.06], moss: 0.75 };
+  if (depth <= 18) return { name: 'green serpentine', tint: [0.94, 1.04, 0.96], moss: 1.25 };
+  return { name: 'violet basalt', tint: [1.01, 0.94, 1.07], moss: 0.45 };
 }
 
 /** Tileable caustic pattern (bright cell edges). */
@@ -771,7 +775,21 @@ export function createMaterials(fog) {
     medallion: std({ map: T.medallion, roughness: 0.45, metalness: 0.05, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
     checker: std({ map: T.checker, roughness: 0.8 }),
     dirt: std({ map: T.dirt, roughness: 1 }),
-    dark: std({ color: 0x050405, roughness: 1 }),
+    // THE ROCK UNDER THE FLOOR (dungeon.js's abyss plane, the stairs' tunnel mouth). Not a void:
+    // solid rock inside the level rectangle that never touches a floor tile gets no wall geometry,
+    // so this plane 1.75 units down is the ONLY thing between two corridors — and at 0x050405 it
+    // read as a hole punched through the board, which on the overview shot was a third of the
+    // frame and on a revealed level was the whole left half of it (0.059 screen luminance beside
+    // a surround apron at 0.156: the same mountain, one half of it missing).
+    //
+    // UNLIT AND CONSTANT, like the apron it continues (surround.js). As a lit, fogged material it
+    // could not be tuned at all: an albedo dark enough for a revealed level (where the reveal
+    // multiplies the room light by 3.4) left it black under the fog's memory dim, and one bright
+    // enough to read through the memory dim turned 'room-crypt' into a glowing periwinkle field
+    // brighter than its own corridors. It is deep rock at a fixed value in every scenario, a
+    // shade under the apron so the level still reads as the subject. A pit shaft is still a black
+    // hole: that is its own walled geometry, not this plane.
+    dark: new THREE.MeshBasicMaterial({ color: 0x272224 }),
     pitWall: surf({ map: M.albedo, normalMap: M.normal, roughnessMap: M.rough, roughness: 1, color: 0xd8d0c8, vertexColors: true }, { grunge: 0.5, quant: MASONRY_Q }),
     rim: std({ color: 0x6a6058, roughness: 0.9 }),
     cutStone: surf({ map: T.cutStone, roughness: 0.88, metalness: 0.02, color: 0xcfc6bc }, { grunge: 0.5 }),

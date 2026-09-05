@@ -81,11 +81,22 @@ export class Renderer {
     this.gl.shadowMap.enabled = true;
     this.gl.shadowMap.type = this.quality === 'low' ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
     this.gl.toneMapping = THREE.ACESFilmicToneMapping;
-    this.gl.toneMappingExposure = 1.1;
+    // EXPOSURE FOLLOWS THE AMBIENT. The board-bright pass roughly tripled the room light below the
+    // surface (lighting.js `depthTint`), so the exposure comes down to meet it: at 1.1 the pale
+    // corridor cobble under a torch went to paper white and took the grout lines with it. 0.92 puts
+    // lit stone back on the shoulder of the ACES curve, where it keeps its field colour, while the
+    // flames and the Sword still have the top of the range to themselves.
+    this.gl.toneMappingExposure = 0.92;
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
     this.gl.info.autoReset = false;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x000000);
+    // NOT BLACK. Whatever no mesh covers — past the surround apron, and for a frame during a level
+    // change — used to be the void, which is the one thing the board-bright direction rules out.
+    // A shade under the unexplored bedrock (lighting.js `bedrock()`) and the apron itself
+    // (surround.js), so all three read as one mountain at three distances from the light.
+    // (The rock BETWEEN two corridors is not this: that mass gets no wall geometry, so what shows
+    // through the gap is dungeon.js's abyss plane — materials.js `dark`, lifted with it.)
+    this.scene.background = new THREE.Color(0x16131a);
     this.fog = new FogOfWar();
     this.mats = createMaterials(this.fog);
     this.props = new PropFactory(this.mats);
@@ -120,7 +131,13 @@ export class Renderer {
     // Bloom threshold sits well above lit stone and above anything the character sprites can reach
     // (spriteBillboard clamps non-emissive art under it), so only genuinely hot things glow: flames,
     // gold, magic, the Sword — the pixel art stays a crisp read instead of smearing into a halo.
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.62, 0.55, 1.3);
+    //
+    // "Well above lit stone" is a moving line, and the board-bright ambient moved it: at a 1.3
+    // threshold the pale corridor cobble inside a torch pool crossed it and the corridors picked up
+    // a haze along every wall. 1.55 clears the brightest floor the new ambient can produce and
+    // still sits under the flames and the Sword; the strength comes down with it so the glow is a
+    // halo on a hot object rather than a wash over the frame.
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.44, 0.5, 1.55);
     // ...and bloom adds only light: leave the alpha channel (the character mask) untouched so the
     // grading pass can still tell sprite pixels from the room.
     const bm = this.bloom.blendMaterial;

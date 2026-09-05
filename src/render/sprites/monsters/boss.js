@@ -378,7 +378,7 @@ function crest(p, pts, height, keys, { flip = false, tip = null } = {}) {
 function wingFan(p, cx, cy, fingers, dir, keys, o = {}) {
   cx = S(cx); cy = S(cy); fingers = fingers.map((f) => ({ a: f.a, r: S(f.r) }));
   const n = fingers.length - 1;
-  const lift = o.lift ?? 0;
+  const lift = o.lift ?? 0, slope = o.slope ?? 0.66;
   const nm = keys.length - 1;                            // membrane steps; the last key is the bone
   const scallop = S(o.scallop ?? 3.1), tatter = S(o.tatter ?? 0);
   const rmax = Math.max(...fingers.map((f) => f.r));
@@ -413,7 +413,12 @@ function wingFan(p, cx, cy, fingers, dir, keys, o = {}) {
     // hem keeps a step of falloff (`rad`) in the same direction as the light rather than around it.
     const k = (a - fingers[0].a) / (fingers[n].a - fingers[0].a), rad = rr / Math.max(1, reach);
     const u = (-(x + 0.5 - cx) * 0.70 - (y + 0.5 - cy) * 0.72) / Math.max(1, rmax);
-    const t = 0.5 + lift + 0.66 * u + 0.15 * (0.5 - k) - 0.08 * rad;
+    // `slope` is how fast the membrane walks its ramp across the fan, i.e. how WIDE one flat step
+    // of colour is. The demon asks for a steeper one (see demonWing): its fan is small and pale,
+    // so at the house 0.66 a single step spanned 28 screen texels of its shoulders — one flat
+    // plateau wide enough for the room's own falloff to put a bright middle in it, which is a
+    // pillow the sheet cannot see because the sheet is flat there by design.
+    const t = 0.5 + lift + slope * u + 0.15 * (0.5 - k) - 0.08 * rad;
     const ki = t < 0 ? 0 : t > 0.999 ? nm - 1 : (t * nm) | 0;
     putPx(p, x, y, keys[ki]);
   }
@@ -1352,7 +1357,14 @@ function demonWing(p, cx, cy, k, dir) {
   // 0.17 of its body centre-lit at the play camera. The wing on the key side (the creature's left,
   // dir = -1) now hangs a full step up its own membrane ramp and its twin a step down it, which is
   // the figure's one light plane (`gl`) reaching the one part of it `tone()` never touched.
-  wingFan(p, wx, wy, fingers, dir, WING + 'H', { scallop: 2.2, tatter: 2.0, lift: 0 });
+  // ...and the fan walks its ramp HALF AGAIN as fast as the house default (`slope`). The demon's
+  // folded wing is small and pale, and at 0.66 one flat step of membrane spanned 28 screen texels
+  // of its shoulders — a plateau wide enough that the room's own falloff put a bright middle in it
+  // and screenTruth read 0.155 of the demon centre-lit at the play camera against a 0.15 ceiling.
+  // The sheet cannot see this (the demon's own `analyseForms` is a clean 0.078): a flat step is
+  // flat ON THE SHEET, and it only becomes a pillow once a lit room shades across it. More steps
+  // across the same fan, and the run breaks where the membrane folds. Measured back at 0.144.
+  wingFan(p, wx, wy, fingers, dir, WING + 'H', { scallop: 2.2, tatter: 2.0, lift: 0, slope: 1.05 });
   // the leading-edge arm running shoulder -> wrist, and the hooked claw at the crown of it
   if (s < 0.55) limb(p, cx, cy, wx, wy, 2.6, 1.5, WING, -0.02);
   const hx = Math.round(wx + dir), hy = Math.round(wy - 2);

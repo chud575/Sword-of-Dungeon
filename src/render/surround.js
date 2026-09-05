@@ -11,25 +11,39 @@ import * as THREE from 'three';
 
 const MARGIN = 26; // tiles of rock drawn beyond each edge — past the far zoom stop's view
 
-/** Procedural top-down bedrock: mottled stone with darker fissures, tiled without visible seams. */
+/**
+ * Procedural top-down bedrock: mottled stone with darker fissures, tiled without visible seams.
+ *
+ * THIS TEXTURE IS THE FINAL COLOUR. It used to be painted around #161219 and then multiplied AGAIN
+ * by the material's 0x2a2533 — two dark values multiplied in linear space land at 0.0002, which is
+ * black to four decimal places, so the mountain the dungeon sits inside was rendering as exactly
+ * the void it exists to remove: 0.007 screen luminance off the 'default' frame, against 0.064 for
+ * the in-level bedrock next to it. The material tint is now white and every value below is the
+ * value that reaches the screen; it measures 0.158 against the bedrock's 0.150, so the apron and
+ * the rock inside the level read as one mass and the seam between them stops being a horizon.
+ */
 function rockTexture() {
   const S = 256;
   const c = document.createElement('canvas');
   c.width = c.height = S;
   const g = c.getContext('2d');
-  g.fillStyle = '#161219';
+  g.fillStyle = '#2a2526';
   g.fillRect(0, 0, S, S);
   // Deterministic value noise — this is decoration, but keeping it seeded keeps frames identical.
   let seed = 0x9e3779b9;
   const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
   for (let i = 0; i < 2600; i++) {
     const x = rnd() * S, y = rnd() * S, r = 2 + rnd() * 16;
-    const v = 0.10 + rnd() * 0.16;
-    g.fillStyle = `rgba(${(60 * v * 6) | 0},${(52 * v * 6) | 0},${(66 * v * 6) | 0},0.30)`;
+    const v = 0.42 + rnd() * 0.58;
+    // Warm-neutral grey, not lavender: the grading pass already casts the shadows of every depth
+    // band toward blue or violet, so a violet pigment here came out of the post chain as a purple
+    // carpet laid around the level instead of as rock.
+    g.fillStyle = `rgba(${(80 * v) | 0},${(70 * v) | 0},${(71 * v) | 0},0.40)`;
     g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
   }
-  // Fissures: short dark strokes that give the mass some grain at this camera distance.
-  g.strokeStyle = 'rgba(8,6,11,0.55)';
+  // Fissures: short dark strokes that give the mass some grain at this camera distance. Kept low
+  // in contrast — at full strength on lit rock they read as scratches on the lens.
+  g.strokeStyle = 'rgba(26,22,23,0.4)';
   for (let i = 0; i < 130; i++) {
     const x = rnd() * S, y = rnd() * S, a = rnd() * Math.PI, len = 8 + rnd() * 34;
     g.lineWidth = 0.6 + rnd() * 1.5;
@@ -56,8 +70,9 @@ export class Surround {
 
     this.texture = rockTexture();
     // Unlit on purpose: this is background mass far from every torch, and a lit material here
-    // would flicker distractingly at the edge of vision. A flat dim tone reads as depth.
-    this.material = new THREE.MeshBasicMaterial({ map: this.texture, color: 0x2a2533, fog: false });
+    // would flicker distractingly at the edge of vision. A flat dim tone reads as depth — and the
+    // tone lives in the texture (see rockTexture), so this tint stays white.
+    this.material = new THREE.MeshBasicMaterial({ map: this.texture, color: 0xffffff, fog: false });
     this.geo = new THREE.PlaneGeometry(1, 1);
     this.geo.rotateX(-Math.PI / 2);
 

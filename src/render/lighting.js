@@ -29,22 +29,36 @@ float bnoise(vec2 p) {
   return mix(mix(bhash(i), bhash(i + vec2(1.0, 0.0)), f.x),
              mix(bhash(i + vec2(0.0, 1.0)), bhash(i + vec2(1.0, 1.0)), f.x), f.y);
 }
-/** Dim, faintly mottled stone: dark enough to keep the dungeon's secrets, lit enough to read as mass. */
+/**
+ * Mottled stone: the rock the dungeon is cut from, seen by the same room light everything else is.
+ *
+ * BOARD-BRIGHT (the gate direction): the reference is a printed board under room light, and a
+ * printed board has no black areas — the parts that are not a room are TABLE, not void. Measured
+ * off the 'default' frame, this used to land at 0.064 screen luminance over the two thirds of the
+ * frame unexplored rock covers: technically not black and, next to a torchlit room, read as black
+ * by everyone who looked at it. It now measures 0.150 — dark lit rock. It still hides layout,
+ * because it is a flat noise fill with no tiles in it: concealment is the fog mask's job (a game
+ * rule), never the exposure's.
+ */
 vec3 bedrock(vec2 xz) {
   float n = bnoise(xz * 1.7) * 0.6 + bnoise(xz * 5.3) * 0.4;
   // Faintly warm-neutral: the post grade splits shadows toward blue, so a neutral base here
   // would come out navy. Nudging red up keeps it reading as stone rather than night sky.
-  vec3 base = vec3(0.0168, 0.0142, 0.0146);
-  return base * (0.58 + 1.05 * n);
+  vec3 base = vec3(0.0290, 0.0254, 0.0259);
+  return base * (0.62 + 0.95 * n);
 }
 vec3 applyFog(vec3 c, vec2 xz) {
   vec2 f = fogMask(xz);
   float explored = smoothstep(0.0, 1.0, f.r), vis = smoothstep(0.0, 1.0, f.g);
   float lum = dot(c, vec3(0.299, 0.587, 0.114));
-  vec3 memory = mix(vec3(lum), c, 0.3) * fogTint;
+  // MEMORY IS DIMMED, NOT CRUSHED. A room you have walked through keeps its own colour field —
+  // that is the whole point of giving each room a field — so remembered stone holds three quarters
+  // of its saturation and a little over half its light, and reads as "the lamp is elsewhere"
+  // rather than as a hole. (Was 0.30 of saturation against a 0.3 tint: a dark grey rectangle.)
+  vec3 memory = mix(vec3(lum), c, 0.76) * fogTint;
   // Unexplored space is not a void: it reads as the unlit bedrock the dungeon is cut from, so the
-  // screen shows solid rock rather than black nothing. It stays dark enough to hide layout — the
-  // fog of war still conceals rooms and corridors, which is the point of exploring.
+  // screen shows solid rock rather than black nothing. It stays featureless enough to hide layout —
+  // the fog of war still conceals rooms and corridors, which is the point of exploring.
   return mix(bedrock(xz), mix(memory, c, vis), explored);
 }`;
 
@@ -239,34 +253,58 @@ export function moodFlicker(kind, t, phase) {
 
 /**
  * Depth bands drive the whole look (DESIGN.md §9.3): ambient/sky colours, the fog "memory" tint,
- * post grading (deeper = colder, less saturated, more contrast, heavier vignette) and atmosphere.
+ * post grading and atmosphere.
+ *
+ * BOARD-BRIGHT. The reference is a printed HeroQuest board under room light: saturated colour
+ * fields, everything legible, no large black areas. This table used to fight that from three sides
+ * at once, and all three are pulled back here:
+ *
+ *  · AMBIENT. `ambientScale` ran 0.8-1.0 below the surface, which made the torches the only thing
+ *    keeping a room visible and left an unlit room reading as its own shadow. It now runs 1.5-1.9:
+ *    an unlit room states its colour field on its own, and the torches ADD warmth and shape on top
+ *    of that instead of being the whole exposure. The band's `ground` colour came up hardest of
+ *    all — 0x0a100c at 13-18, a colour with nothing in it — and now sits within about half a stop
+ *    of its own `sky` (13-18 sits flat ON it: there is no sky underground, and that band's rooms
+ *    are the ones that were worst crushed). That gap is not just brightness: every character
+ *    sprite reads the hemisphere as `mix(ground, sky, 0.5 + 0.5*N.y)` and its fake normal peaks in
+ *    N.y down the MIDDLE of the body, so a wide sky-to-ground gap is a bright stripe painted down
+ *    every figure's centre line. Closing it lifts the room and takes the pillow out of the fill in
+ *    the same move.
+ *  · MEMORY. `fogTint` multiplies explored-but-unseen stone. At 0.22-0.3 a remembered room was a
+ *    grey rectangle; at 0.54-0.66 it is the same room with the lamp somewhere else.
+ *  · THE GRADE. Deep levels may still cool and darken — that is the dungeon getting worse — but by
+ *    a fraction of what they did. Saturation bottomed out at 0.82 and contrast peaked at 1.2 with a
+ *    0.72 vignette, which together turned depth 18 into a black-green wash with no field left in
+ *    it. Saturation now never drops below 1.0 (the fields are the point), contrast stays near
+ *    neutral, and the vignette is a frame rather than a tunnel. The COLOUR still moves the whole
+ *    way: cold blue at 6-12, green at 13-18, violet below — the band is told by hue, not by dark.
  * @param {number} depth
  */
 export function depthTint(depth) {
   const c = (h) => new THREE.Color(h);
   if (depth <= 0) return {
-    ambient: c(0x8fb2d8), sky: c(0xa9c4e0), ground: c(0x2a2622), fogTint: new THREE.Color(0.4, 0.42, 0.5), ambientScale: 2.4,
-    grade: { tint: new THREE.Color(1.0, 1.0, 1.04), sat: 1.05, contrast: 1.0, vignette: 0.32, lift: 0.006, shadows: c(0xaebfe0), highlights: c(0xfff4e0) },
+    ambient: c(0x8fb2d8), sky: c(0xa9c4e0), ground: c(0x5d5a52), fogTint: new THREE.Color(0.62, 0.64, 0.7), ambientScale: 2.4,
+    grade: { tint: new THREE.Color(1.0, 1.0, 1.04), sat: 1.06, contrast: 0.98, vignette: 0.24, lift: 0.008, shadows: c(0xb8c6e2), highlights: c(0xfff4e0) },
     atmo: { shaft: c(0xc8dcff), shaftStrength: 0.55, dust: c(0xfff2d8), dustDensity: 0.7 },
   };
   if (depth <= 5) return {
-    ambient: c(0x7a6448), sky: c(0x8a7458), ground: c(0x1a1410), fogTint: new THREE.Color(0.3, 0.3, 0.36), ambientScale: 1,
-    grade: { tint: new THREE.Color(1.05, 1.0, 0.94), sat: 1.08, contrast: 1.04, vignette: 0.5, lift: 0.004, shadows: c(0x9aa4c8), highlights: c(0xffefd6) },
+    ambient: c(0xa08a68), sky: c(0xac9673), ground: c(0x62564a), fogTint: new THREE.Color(0.62, 0.62, 0.68), ambientScale: 1.9,
+    grade: { tint: new THREE.Color(1.03, 1.0, 0.96), sat: 1.12, contrast: 0.99, vignette: 0.28, lift: 0.009, shadows: c(0xa8b0cc), highlights: c(0xffefd6) },
     atmo: { shaft: c(0xb9cbe6), shaftStrength: 0.42, dust: c(0xffe6c0), dustDensity: 1.0 },
   };
   if (depth <= 12) return {
-    ambient: c(0x4d5a70), sky: c(0x5c6d86), ground: c(0x0f1118), fogTint: new THREE.Color(0.26, 0.3, 0.42), ambientScale: 0.92,
-    grade: { tint: new THREE.Color(0.94, 0.98, 1.08), sat: 0.98, contrast: 1.08, vignette: 0.58, lift: 0.003, shadows: c(0x6a7ab0), highlights: c(0xfff0dc) },
+    ambient: c(0x8d9ab4), sky: c(0x96a6c0), ground: c(0x555d6c), fogTint: new THREE.Color(0.56, 0.6, 0.7), ambientScale: 1.74,
+    grade: { tint: new THREE.Color(0.98, 0.99, 1.05), sat: 1.08, contrast: 1.0, vignette: 0.32, lift: 0.008, shadows: c(0x8e9cc4), highlights: c(0xfff0dc) },
     atmo: { shaft: c(0x8fa8d8), shaftStrength: 0.26, dust: c(0xdde8ff), dustDensity: 0.9 },
   };
   if (depth <= 18) return {
-    ambient: c(0x3e5a46), sky: c(0x4a6b52), ground: c(0x0a100c), fogTint: new THREE.Color(0.22, 0.32, 0.3), ambientScale: 0.85,
-    grade: { tint: new THREE.Color(0.9, 1.03, 0.96), sat: 0.88, contrast: 1.14, vignette: 0.66, lift: 0.002, shadows: c(0x4f7a70), highlights: c(0xf4f0dc) },
+    ambient: c(0x84a68e), sky: c(0x8fb098), ground: c(0x8fb098), fogTint: new THREE.Color(0.54, 0.62, 0.58), ambientScale: 1.62,
+    grade: { tint: new THREE.Color(0.97, 1.02, 0.99), sat: 1.04, contrast: 0.94, vignette: 0.34, lift: 0.005, shadows: c(0x86a8a0), highlights: c(0xf4f0dc) },
     atmo: { shaft: c(0x7fb090), shaftStrength: 0.12, dust: c(0xc8e8d0), dustDensity: 0.8 },
   };
   return {
-    ambient: c(0x5a3e58), sky: c(0x6b4a66), ground: c(0x0e0810), fogTint: new THREE.Color(0.34, 0.24, 0.38), ambientScale: 0.8,
-    grade: { tint: new THREE.Color(1.06, 0.9, 1.08), sat: 0.82, contrast: 1.2, vignette: 0.72, lift: 0.002, shadows: c(0x6a3f80), highlights: c(0xffe6f0) },
+    ambient: c(0xa088a0), sky: c(0xa892a4), ground: c(0x5f5262), fogTint: new THREE.Color(0.6, 0.52, 0.64), ambientScale: 1.52,
+    grade: { tint: new THREE.Color(1.03, 0.98, 1.04), sat: 1.0, contrast: 1.03, vignette: 0.36, lift: 0.007, shadows: c(0x9a82b2), highlights: c(0xffe6f0) },
     atmo: { shaft: c(0xb08ad0), shaftStrength: 0.08, dust: c(0xe6c8ff), dustDensity: 0.7 },
   };
 }
@@ -296,7 +334,14 @@ export class Lighting {
     this.hemi = new THREE.HemisphereLight(0x7d6b55, 0x1a1512, 0.3);
     scene.add(this.hemi);
     this.moon = new THREE.DirectionalLight(0x9fb4d8, 0.3);
-    this.moon.position.set(-6, 14, -4);
+    // Raked, not overhead. Every sprite's fake normal peaks at N.y in the MIDDLE of the body
+    // (spriteBillboard: N = forward + up*0.62 + right*sx), so a key coming straight down puts its
+    // brightest value down a body's centre line — the definition of pillow shading, and with the
+    // board-bright ambient behind it the demon in 'deep-level' crossed screenTruth's 15% ceiling at
+    // 17%. Dropping the elevation and widening the throw to the left moves the peak off the centre
+    // line and onto the shoulder the whole cast is painted for. It rakes the wall blocks too, which
+    // is what gives a lit board its relief.
+    this.moon.position.set(-13.5, 8.2, -6.2);
     scene.add(this.moon);
     // Player lantern: a cool shadow-casting spot from above (soft penumbra) plus a local point glow.
     this.spot = new THREE.SpotLight(0xd6e4ff, 24, 26, 0.62, 0.55, 1.5);
@@ -373,7 +418,19 @@ export class Lighting {
     // the band's own key colour, kept so a room's mood can tint it without losing it
     this.moonBase = tint.ambient.clone();
     this.fog.uniforms.fogTint.value.copy(tint.fogTint);
-    this.baseHemi = 0.55 * tint.ambientScale; this.baseMoon = 0.45 * tint.ambientScale;
+    // The room's own light, before any torch is lit. Board-bright: this is the "room light" the
+    // printed reference sits under, so it has to be enough on its own — the torches are relief on
+    // top of it, not the exposure. (Was 0.55/0.45 against ambientScale ~1; the two together are
+    // now about 3x what they were below the surface.)
+    //
+    // AND THE SPLIT MATTERS AS MUCH AS THE SUM. `hemi` is omnidirectional: it raises a room and
+    // models nothing, and a body lit mostly by it has no terminator. Raising both halves in the
+    // old 0.55:0.45 proportion put the demon in 'deep-level' at 17% of its body centre-lit and the
+    // dire wolf at 16%, against screenTruth's 15% ceiling — the ambient lift was landing as flat
+    // fill. The key now carries four times the fill instead of four fifths of it: `moon` is the
+    // directional every sprite in the game is painted for, so the extra light arrives with a
+    // direction in it, and the wolf, the hobgoblin and the spider all came back under the ceiling.
+    this.baseHemi = 0.26 * tint.ambientScale; this.baseMoon = 1.20 * tint.ambientScale;
     if (level.depth === 0) { this.baseHemi = 1.4; this.baseMoon = 1.6; }
     this.hemi.intensity = this.baseHemi; this.moon.intensity = this.baseMoon;
     const candidates = [];
@@ -529,15 +586,23 @@ export class Lighting {
     this.lightScale += (target - this.lightScale) * Math.min(1, dt * 4);
     const s = this.lightScale;
     const sword = state.sword ? 1 : 0;
-    this.spot.position.set(player.x + 2.4, 8.0, player.z + 1.8);
+    // Raked for the same reason as `moon` above: at (2.4, 8.0, 1.8) the lantern reached a sprite
+    // 22 degrees off vertical, which is an overhead light, which is a centre light. Pushed out and
+    // down it arrives at about 40 degrees — it models a body instead of flooding it, and it throws
+    // a longer shadow across the flagstones, which is what a lit board looks like.
+    this.spot.position.set(player.x + 4.2, 6.8, player.z + 3.2);
     this.spot.target.position.set(player.x, 0, player.z);
-    this.spot.intensity = (state.allLit ? 14 : 26) * breathe * (0.75 + 0.25 * s);
+    // THE LANTERN IS RELIEF, NOT THE EXPOSURE. A spot 8 units directly overhead is a centre light
+    // for every sprite under it; at 26 it was carrying the frame, so the frame was pillow-lit and
+    // the room's own colour field only existed inside its pool. With the ambient tripled it can
+    // come down to a third and still be the thing that says where the player is standing.
+    this.spot.intensity = (state.allLit ? 6 : 10) * breathe * (0.75 + 0.25 * s);
     this.spot.distance = 26;
     this.spot.angle = Math.min(1.0, 0.66 * (0.6 + 0.4 * s));
     this.spot.penumbra = 0.55;
     this.spot.color.set(state.lightOn ? 0xdde9ff : 0xd2e2ff);
     this.point.position.set(player.x, 2.6, player.z);
-    this.point.intensity = (state.lightOn ? 6 : 2.0) * breathe * (1 + sword * 0.6);
+    this.point.intensity = (state.lightOn ? 3.6 : 1.3) * breathe * (1 + sword * 0.6);   // ditto: a glow at the player's own centre
     this.point.distance = 6 * s;
     this.point.color.set(state.sword ? 0xc9b0ff : state.lightOn ? 0xcfe4ff : 0xbfd8ff);
     const al = this.activeLights;

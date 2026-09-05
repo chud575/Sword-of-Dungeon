@@ -597,14 +597,15 @@ and a ZX Spectrum homebrew port with its own numbers (not Classic).
   corridors narrower and darker with dripping water particles; rooms get "type" dressing
   (barracks, crypt, cistern, library) purely cosmetic; the sword level is a maze of obsidian
   with violet fog.
-- **Fog of war as darkness**: unexplored = absolute black void (tiles not even rendered);
-  explored-but-not-visible = desaturated, 25 % brightness "memory"; visible = fully lit. Reveal
+- **Fog of war as darkness**: unexplored = unlit bedrock (`render/lighting.js` `bedrock()`), not a
+  black void; explored-but-not-visible = a "memory" that keeps ~3/4 of its saturation at ~60 %
+  brightness, so a walked room still shows its own colour field; visible = fully lit. Reveal
   animates tiles rising out of the void over 200 ms. Magic Map: a wave of light sweeps the level.
 - **Lighting**: player torch (warm point light, flicker noise 8 Hz + 0.5 Hz drift, radius scales
   with Light spell), temple candles (cool white with bloom), gold sparkle, sword glow (cyan-violet
   rim light that pulses with the timer), monster eyes as emissive dots in darkness before their
   bodies are revealed. Bloom, vignette, cheap SSAO-ish contact shadow, colour grading per depth
-  band (warm ochre 1–5, cold blue-grey 6–12, green-black 13–18, red-violet 19+).
+  band (warm ochre 1–5, cold blue-grey 6–12, cold green 13–18, red-violet 19+).
 - **Characters**: stylised low-poly (200–600 tris) procedural meshes with strong silhouettes:
   triangular wolf, barrel ogre, hunched troll, winged gargoyle, long-legged spider, serpentine
   drakes; humans share a rig with weapon props (bow, axe, shield, staff, twin daggers, war shield).

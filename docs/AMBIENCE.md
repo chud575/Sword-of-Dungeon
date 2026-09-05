@@ -100,7 +100,7 @@ Bands are keyed to `depthTint()` in `render/lighting.js` and to `levelStyle()` i
 | **B0** | 0 | daylight blue | `surface` | The temple of Ferrin at the mountain's foot | Open air, one archetype (`courtyard`) |
 | **B1** | 1–5 | warm ochre | `masonry` | The garrison of Umla's men-at-arms: still *used* | Torchlit, swept, furniture intact, banners hung |
 | **B2** | 6–12 | cold blue-grey | `masonry`/`ruin` | The old works: goblinoid squats in a human keep | Half the torches dead, furniture broken and re-used, filth |
-| **B3** | 13–18 | green-black | `ruin`/`cavern` | Older than the keep: crypts, drake dens, water | Cold, wet, fungal; furniture is wreckage; bone everywhere |
+| **B3** | 13–18 | cold green | `ruin`/`cavern` | Older than the keep: crypts, drake dens, water | Cold, wet, fungal; furniture is wreckage; bone everywhere |
 | **B4** | 19+ | red-violet | `cavern` | The demon's floor | Scorched, chained, ember-lit, almost nothing man-made survives |
 | **BS** | sword level (15–19) | as its band | `obsidian` | Where Umla hid the Sword | Violet, silent: tombs, stores, cells and rubble only |
 

@@ -245,7 +245,18 @@ function makeSpriteMaterial(texture, fog) {
     // figures — they belong to the room — while the warm end stays almost untouched so a torch
     // still keys a body with real orange instead of a flat tint.
     uGradeAmb: { value: 0.46 }, uGradeCold: { value: 0.44 }, uGradeWarm: { value: 0.06 },
-    uAmbientGain: { value: 1.15 }, uDirectGain: { value: 1.25 }, uWrap: { value: 0.55 }, uFloor: { value: 0.07 }, uEmissive: { value: 0.9 },
+    // HOW MUCH OF A FIGURE'S VALUE IS LIGHT, AND HOW MUCH IS PAINT. `uFloor` is a flat share of the
+    // albedo that no lamp has to earn; the two gains are what the room's light adds on top of it.
+    // They were 1.15/1.25 against a floor of 0.07 — almost the whole figure was the room's light,
+    // which was fine while the room was a cave and wrong once it was a lit board: the board-bright
+    // ambient (lighting.js `depthTint`) roughly doubled every figure's screen value AND doubled the
+    // spread between its lit and shadow sides with it, and screenTruth's pillow rule is an ABSOLUTE
+    // step on screen (audit.mjs SCREEN_FORM_STEP) — so five of the ten creatures in 'deep-level'
+    // walked up on the ceiling at once. Moving a third of the value from the gains into the floor
+    // holds each figure's median where the brighter room put it and takes the light-driven spread
+    // back down: dimension-spider 0.150 -> 0.108, war-lord 0.135 -> 0.125, demon 0.155 -> 0.144.
+    // This is the "lift the sprite, don't lower the floor" fix — it is the CAST that moved.
+    uAmbientGain: { value: 0.82 }, uDirectGain: { value: 0.88 }, uWrap: { value: 0.55 }, uFloor: { value: 0.20 }, uEmissive: { value: 0.9 },
     // ceiling for non-emissive sprite pixels, kept under the bloom pass threshold so hand-pixelled
     // colour never smears into a glow (renderer.js sets the matching threshold)
     uBloomSafe: { value: 1.2 },
