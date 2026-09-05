@@ -6,9 +6,13 @@
 import * as THREE from 'three';
 import { TILE, DIRS8, DIRS4 } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
-import { createWaterMaterial, createShaftMaterial, CELLS, cellUV, ATLAS, stoneFamily, syncWorldGrid } from './materials.js';
+import { createWaterMaterial, syncWaterLights, createShaftMaterial, CELLS, cellUV, ATLAS, stoneFamily, syncWorldGrid } from './materials.js';
 import { MeshBuilder, slabGeometry, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
 import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
+import { syncSpriteSnap } from './props.js';
+import { loadPropModels } from './props/models.js';
+import { buildModelProp, isModelled } from './props/furniture.js';
+import { FIRELESS_MOODS } from './lighting.js';
 
 const WALL_H = 0.82;      // body top; caps sit on top
 const WALL_BOT = -0.3;    // buried below the floor so gaps never show through
@@ -16,6 +20,11 @@ const CAP_OVER = 0.045;   // capstone overhang on exposed sides
 const MASONRY_U = 0.25;   // masonry strip spans 4 tiles
 const MASONRY_V = 1;      // the masonry strip is exactly one world unit tall (materials.js)
 const HOLE_TILES = new Set([TILE.PIT, TILE.TRAP_PIT, TILE.STAIRS_DOWN]);
+/** The stone kerb around every pool: how far into the water tile it reaches, how proud of the
+ *  flagstones it stands, and how far it laps over the bank so no sliver of abyss shows. */
+const KERB_W = 0.16, KERB_RISE = 0.055, KERB_LAP = 0.03;
+/** Decor that is a FLAME. In a room whose mood never lit one, these show their unlit twin. */
+const FIRE_DECOR = new Set(['brazier', 'hearth', 'candelabra', 'candlestick']);
 /** decor `facing` -> the step from a wall tile into the tile it looks at (docs/AMBIENCE.md §4.1). */
 const DECOR_FACE = { n: { dx: 0, dy: -1 }, e: { dx: 1, dy: 0 }, s: { dx: 0, dy: 1 }, w: { dx: -1, dy: 0 } };
 const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(1, 1, 1), _c = new THREE.Color(), _e = new THREE.Euler();
@@ -94,7 +103,11 @@ function makeGridProbe() {
   const probe = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false }));
   probe.name = 'world-grid-probe';
   probe.frustumCulled = false; probe.renderOrder = -2000; probe.castShadow = false; probe.receiveShadow = false;
-  probe.onBeforeRender = (renderer, scene, camera) => { if (scene && camera && (camera.isPerspectiveCamera || camera.isOrthographicCamera)) syncWorldGrid(renderer, camera); };
+  probe.onBeforeRender = (renderer, scene, camera) => {
+    if (!scene || !camera || !(camera.isPerspectiveCamera || camera.isOrthographicCamera)) return;
+    syncWorldGrid(renderer, camera);     // the world's surfaces
+    syncSpriteSnap(renderer, camera);    // and the lattice every pixel-snapped billboard rounds to
+  };
   return probe;
 }
 
@@ -130,6 +143,8 @@ export class DungeonView {
     this.ownedGeos = [];
     /** every group built from `level.decor` this level (docs/AMBIENCE.md §4.1); emptied by clear() */
     this.decorViews = [];
+    /** the imported prop library once it has inflated, and the one promise that inflates it */
+    this.modelLib = null; this.modelLoad = null;
     this.instanced = [];
     this.gridProbe = makeGridProbe();
     scene.add(this.gridProbe);
@@ -272,7 +287,7 @@ export class DungeonView {
     this.root.add(abyss);
 
     // ---------------------------------------------------------------- water
-    if (waterTiles.length) this.buildWater(waterTiles, shafts);
+    if (waterTiles.length) this.buildWater(waterTiles, shafts, detail, rng);
 
     // ---------------------------------------------------------------- special tiles
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -321,6 +336,7 @@ export class DungeonView {
       tch.traverse((o) => { if (o.userData.flame) this.flames.push(o); });
     }
     this.addDecor(level);
+    this.loadModels();
     this.syncItems(level, true);
     this.syncMarkers(level, true);
   }
@@ -351,7 +367,7 @@ export class DungeonView {
     if (!list || !list.length) return;
     const dropped = new Map();
     for (const d of list) {
-      const o = this.props.decor(d);
+      const o = this.modelFor(d) || this.props.decor(d);
       if (!o) { dropped.set(d.type, (dropped.get(d.type) || 0) + 1); continue; }
       const cls = (o.userData.decor && o.userData.decor.cls) || 'prop';
       if (cls === 'wall') {
@@ -370,6 +386,83 @@ export class DungeonView {
       const names = [...dropped.entries()].map(([t, n]) => (n > 1 ? `${t}x${n}` : t)).join(', ');
       console.warn(`DungeonView: dropped ${[...dropped.values()].reduce((a, b) => a + b, 0)} decor entries this renderer cannot draw: ${names}`);
     }
+  }
+
+  /**
+   * THE IMPORTED PIECE, WHERE THERE IS ONE.
+   *
+   * The owner's brief: prefer a model from the Dungeon Crawlers library (props/models.js) and fall
+   * back to the hand-pixelled piece for everything it does not cover. Three things decide it here
+   * and nothing else does:
+   *
+   *  · has the library finished inflating? Before it has (and forever, if it fails) this returns
+   *    null and the room is furnished in pixel art. NOTHING WAITS FOR IT — see `loadModels`;
+   *  · is this a STANDING prop the library covers? A wall piece and a floor decal are quads with
+   *    contracts of their own (AMBIENCE §5.2/§5.3) and keep their painted versions (furniture.js);
+   *  · is the piece BURNING? A brazier keeps its lit model in a room whose mood is a fire, and
+   *    takes the unlit twin in one whose mood is `dark`, `cold` or `sword` — the same rooms in
+   *    which lighting.js now withholds its flame — or when wear has already put it out (§2.1:
+   *    variant 2 and up is a cold, tipped-over brazier, not a lamp).
+   *
+   * `variant` goes through untouched, so a storeroom of six barrels is six different barrels.
+   */
+  modelFor(d) {
+    if (!this.modelLib || !isModelled(d.type)) return null;
+    return buildModelProp(this.modelLib, d.type, {
+      variant: d.variant | 0, facing: d.facing, blocking: !!d.blocking, lit: this.decorLit(d),
+    });
+  }
+
+  /** Is this piece alight? (See `modelFor`; the rule matches lighting.js `setMoods`.) */
+  decorLit(d) {
+    if (!FIRE_DECOR.has(d.type)) return true;
+    if ((d.variant | 0) > 1) return false;
+    return !FIRELESS_MOODS.has(this.moodAt(d.x, d.y));
+  }
+
+  /** The light mood in force on a tile: its room's, or the plain warm default outside every room. */
+  moodAt(x, y) {
+    if (!this.level || !this.roomOf) return 'torchlit';
+    const i = y * this.level.width + x;
+    const r = i >= 0 && i < this.roomOf.length ? this.roomOf[i] : -1;
+    return (r >= 0 && this.level.rooms[r].lightMood) || 'torchlit';
+  }
+
+  /**
+   * Inflate the imported library ONCE, off the critical path.
+   *
+   * It is ~40 ms of inflate and parse for 114 models, and the first frame must not wait for it: a
+   * level builds and draws in pixel art, and if and when the library arrives the dressing is
+   * rebuilt in place (`rebuildDecor`) on whatever level is standing at that moment. If it never
+   * arrives — an old browser with no DecompressionStream, a corrupt bundle — the warning is printed
+   * once and the dungeon keeps the furniture it painted for itself. The promise is kept either way
+   * so a failure is never retried on every staircase.
+   */
+  loadModels() {
+    if (this.modelLoad) return this.modelLoad;
+    this.modelLoad = loadPropModels(this.fog).then((lib) => {
+      this.modelLib = lib;
+      if (this.level && this.level.decor && this.level.decor.length) this.rebuildDecor();
+      return lib;
+    }).catch((err) => {
+      console.warn('DungeonView: the imported prop library did not load; the dungeon keeps its painted furniture.', err);
+      return null;
+    });
+    return this.modelLoad;
+  }
+
+  /**
+   * Re-stand this level's dressing (after the model library arrives). The decor groups are the only
+   * thing removed: `animated` and `flames` are then filtered down to what is still parented into
+   * the scene, so a rat or a flame that went with the old furniture stops ticking.
+   */
+  rebuildDecor() {
+    for (const o of this.decorViews) this.root.remove(o);
+    this.decorViews = [];
+    const attached = (o) => { for (let p = o; p; p = p.parent) if (p === this.root) return true; return false; };
+    this.animated = this.animated.filter(attached);
+    this.flames = this.flames.filter(attached);
+    this.addDecor(this.level);
   }
 
   /** Generic InstancedMesh from a list + fill callback. */
@@ -477,8 +570,27 @@ export class DungeonView {
     this.wallMesh = mesh;
   }
 
-  /** Water: opaque refracting surface (aShore for foam) plus masonry basin walls. */
-  buildWater(waterTiles, shafts) {
+  /**
+   * WATER IS A PIECE OF FURNITURE, NOT A STICKER.
+   *
+   * The surface itself is `createWaterMaterial` (materials.js carries the shader's reasoning: the
+   * world texel grid, the grout running under it, the room's own light, the depth band). What this
+   * method owes it is the MASONRY: a pool with no edge is a rectangle of colour lying on the floor,
+   * and the single loudest thing about the old water was that it simply stopped, mid-flagstone,
+   * with nothing built around it.
+   *
+   * So every water edge gets a KERB COURSE — a dressed stone lip standing `KERB_RISE` proud of the
+   * flagstones, `KERB_W` wide, mitred at the corners so the ring is one continuous course with no
+   * overlapping (z-fighting) tops and no notch: the N and S runs take the whole tile edge, the E
+   * and W runs give up their ends to them. It overhangs the bank by `KERB_LAP` so no sliver of
+   * abyss shows between the course and the neighbouring slab, and it drops below the water line so
+   * there is no seam where stone meets water. Under it the old basin liner still lines the hole.
+   * @param {{x:number,y:number}[]} waterTiles
+   * @param {import('./dungeonGeo.js').MeshBuilder} shafts the merged masonry builder (M.pitWall)
+   * @param {import('./dungeonGeo.js').MeshBuilder} detail the merged atlas-stone builder (the wall caps' material)
+   * @param {ReturnType<import('../core/rng.js').createRng>} rng the level's build rng
+   */
+  buildWater(waterTiles, shafts, detail, rng) {
     const T = (x, y) => this.tileAt(x, y);
     const wb = new MeshBuilder({ shore: true });
     const isWater = (x, y) => T(x, y) === TILE.WATER;
@@ -499,11 +611,79 @@ export class DungeonView {
         const top = [0.62, 0.66, 0.68], bot = [0.16, 0.22, 0.26];
         shafts.face([A, B, C, D], [-d.dx, 0, -d.dy], [[along(A), 0.02 * MASONRY_V], [along(B), 0.02 * MASONRY_V], [along(C), -0.6 * MASONRY_V], [along(D), -0.6 * MASONRY_V]], [top, top, bot, bot]);
       }
+      this.buildKerb(w, isWater, detail, Y, rng);
     }
     this.waterMat = this.waterMat || createWaterMaterial(this.fog);
     this.water = new THREE.Mesh(this.own(wb.build()), this.waterMat);
     this.water.receiveShadow = false;
     this.root.add(this.water);
+  }
+
+  /**
+   * One water tile's share of the kerb course: a box along every side whose neighbour is not water.
+   * The N/S runs span the whole tile edge and the E/W runs stop short of them, so the four boxes
+   * mitre into one ring — no overlapping top faces (which would z-fight) and no gap at the corner.
+   *
+   * It is cut from the FLAGSTONES' own atlas and the level's own stone family, not from the pit
+   * masonry the basin below it is lined with: a kerb is dressed floor stone stood on edge, and
+   * built out of the pit liner (which is two to four times darker than the floor beside it,
+   * measured off the frame) it read as a black gutter around the pool rather than a course of
+   * stone. The value is stepped like every other slab — top lit, inner face in the water's shade.
+   */
+  buildKerb(w, isWater, b, waterY, rng) {
+    const kw = KERB_W, lap = KERB_LAP, top = KERB_RISE, bot = waterY - 0.05;
+    const nN = !isWater(w.x, w.y - 1), nS = !isWater(w.x, w.y + 1);
+    const F = this.family.tint;
+    const t0 = 0.9 + rng.int(0, 3) * 0.045;
+    const col = (k) => [t0 * k * F[0], t0 * k * F[1], t0 * k * F[2]];
+    const cTop = col(1.04), cLip = col(0.74), cBot = col(0.5);
+    const e0 = 0.02, e1 = 0.07;                       // the cell strip the vertical faces sample
+    for (const d of DIRS4) {
+      if (isWater(w.x + d.dx, w.y + d.dy)) continue;
+      const cell = cellUV(rng.chance(0.18) ? rng.pick(CELLS.cracked) : rng.pick(CELLS.plain));
+      // the strip's footprint in tile-local coordinates
+      let ax0 = -0.5, ax1 = 0.5, az0 = -0.5, az1 = 0.5;
+      if (d.dx === 0) { if (d.dy < 0) { az1 = -0.5 + kw; az0 -= lap; } else { az0 = 0.5 - kw; az1 += lap; } }
+      else {
+        if (d.dx < 0) { ax1 = -0.5 + kw; ax0 -= lap; } else { ax0 = 0.5 - kw; ax1 += lap; }
+        if (nN) az0 = -0.5 + kw;          // the north run already owns this corner
+        if (nS) az1 = 0.5 - kw;
+      }
+      const X0 = w.x + ax0, X1 = w.x + ax1, Z0 = w.y + az0, Z1 = w.y + az1;
+      // uv runs with the tile, so the course is cut from the same 32-texel stone as the floor
+      const U = (x) => x - (w.x - 0.5), V = (z) => z - (w.y - 0.5);
+      b.face([[X0, top, Z0], [X1, top, Z0], [X1, top, Z1], [X0, top, Z1]], [0, 1, 0],
+        [[U(X0), V(Z0)], [U(X1), V(Z0)], [U(X1), V(Z1)], [U(X0), V(Z1)]], [cTop, cTop, cTop, cTop], cell);
+      const wall = (p0, p1, n) => {
+        const a0 = d.dx === 0 ? U(p0[0]) : V(p0[1]), a1 = d.dx === 0 ? U(p1[0]) : V(p1[1]);
+        b.face([[p0[0], top, p0[1]], [p0[0], bot, p0[1]], [p1[0], bot, p1[1]], [p1[0], top, p1[1]]], n,
+          [[a0, e1], [a0, e0], [a1, e0], [a1, e1]], [cLip, cBot, cBot, cLip], cell);
+      };
+      if (d.dx === 0) {
+        wall([X0, d.dy < 0 ? Z1 : Z0], [X1, d.dy < 0 ? Z1 : Z0], [0, 0, -d.dy]);   // toward the pool
+        wall([X0, d.dy < 0 ? Z0 : Z1], [X1, d.dy < 0 ? Z0 : Z1], [0, 0, d.dy]);    // toward the bank
+      } else {
+        wall([d.dx < 0 ? X1 : X0, Z0], [d.dx < 0 ? X1 : X0, Z1], [-d.dx, 0, 0]);
+        wall([d.dx < 0 ? X0 : X1, Z0], [d.dx < 0 ? X0 : X1, Z1], [d.dx, 0, 0]);
+        // ends, only where this run reaches the tile edge (a mitred end is buried in the N/S run)
+        if (!nN) wall([X0, Z0], [X1, Z0], [0, 0, -1]);
+        if (!nS) wall([X0, Z1], [X1, Z1], [0, 0, 1]);
+      }
+    }
+  }
+
+  /**
+   * Point the pool at the room it is standing in. The renderer owns the lighting, so it hands the
+   * water the same `Lighting.activeLights` the dust gets (atmosphere.js) plus the player's own
+   * lamp; the depth band comes off the level. Called once a frame - a pool lit by the torch beside
+   * it this frame and by nothing the next is the whole point (materials.js `createWaterMaterial`).
+   * @param {{x:number,z:number}} player
+   * @param {{x:number,y:number,z:number,r:number,g:number,b:number,i:number}[]} lights
+   */
+  syncWater(player, lights) {
+    if (!this.waterMat) return;
+    this.waterMat.uniforms.uLightPos.value.set(player.x, 0.9, player.z);
+    syncWaterLights(this.waterMat, this.level ? this.level.depth : 1, lights);
   }
 
   /** Same placement rule as Lighting.setLevel so flames and lights coincide. */

@@ -1340,14 +1340,38 @@ function assignArchetypes(level, rng, isSwordLevel) {
   for (const { r } of order) {
     lock(r, rollArchetype(level, r, spaces.get(r), rng, counts, band, isSwordLevel, null));
   }
-  for (const room of level.rooms) room.lightMood = moodFor(room, spaces.get(room), isSwordLevel);
+  for (const room of level.rooms) room.lightMood = moodFor(room, spaces.get(room), isSwordLevel, level.depth);
   return { spaces, counts, band };
 }
 
+/**
+ * THE BAND OWNS A SHALLOW ROOM'S WARMTH (AMBIENCE §2, band B1).
+ *
+ * B1 (depth 1-5) is the garrison of Umla's men-at-arms and the document says what it is: "still
+ * *used*: torchlit, swept, furniture intact". The archetype table (§6.2) hands a store, a larder,
+ * a cell and a collapse the mood `dark` — "0 torches, only the player's lantern; the room is a
+ * hole" — and `ember`, which is exactly right for the abandoned works of B2 and below. Rolled on
+ * depth 1 it put SEVEN of fourteen rooms on zero wall torches (seed 42), the player's own starting
+ * hall among them, and the first frame of the game came back flat, cold and blue-grey with not one
+ * warm pool in it. That is the opposite of the "depth 1-5 warm ochre" this band exists for.
+ *
+ * So in B1, and only in B1, a mood that is an ABSENCE of light lifts back to `torchlit` while the
+ * room is still kept (`decay <= 0.4` — a wrecked room has lost its torches at any depth, §2.1).
+ * The moods that are an IDENTITY — a crypt's `cold`, a wayshrine's `candle`, `hearth`, `forge`,
+ * `water`, `fungal`, `shrine`, `sword` — are never touched at any depth, so a depth-1 crypt is
+ * still cold and every per-room mood the dressing pass chose survives intact.
+ */
+const UNLIT_MOODS = new Set(['dark', 'ember']);
+function bandWarmth(mood, depth, decay) {
+  return depth >= 1 && depth <= 5 && decay <= 0.4 && UNLIT_MOODS.has(mood) ? 'torchlit' : mood;
+}
+
 /** The light mood an assignment implies, once decay and the room's own walls have had their say. */
-function moodFor(room, space, isSwordLevel) {
+function moodFor(room, space, isSwordLevel, depth = 1) {
   const a = ARCHETYPES[room.archetype];
   let mood = isSwordLevel && room.archetype !== 'shrine' ? 'sword' : driftMood(a.mood, room.decay);
+  // the nook keeps its `dark` (§6.2): a two-tile cupboard is not a hall and hangs no torch
+  if (!isSwordLevel && room.archetype !== 'bare') mood = bandWarmth(mood, depth, room.decay);
   // a room lighting.js can hang no torch in may not claim to be torchlit (§6.3 rule 5)
   if (mood === 'torchlit' && !space.wallSide.size) mood = 'ember';
   return mood;
@@ -1421,7 +1445,7 @@ export function placeDecor(level, isSwordLevel = false) {
       const next = rollArchetype(level, room, sp, rng, counts, band, isSwordLevel, room.archetype);
       counts[room.archetype] = Math.max(0, (counts[room.archetype] || 1) - 1);
       room.archetype = next; counts[next] = (counts[next] || 0) + 1;
-      room.lightMood = moodFor(room, sp, isSwordLevel);
+      room.lightMood = moodFor(room, sp, isSwordLevel, level.depth);
       // the last try takes what it is given and stands the signature by hand (§8.4)
       dressed = dressRoom(level, room, sp, tries === 3);
       rerolls++;

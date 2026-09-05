@@ -19,6 +19,8 @@
 // already in the bundle and are inflated once, on first use.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { patchFog } from '../lighting.js';
+import { WORLD_MASK_ALPHA } from '../materials.js';
 import { PROPS_GLB_GZ_B64 } from '../../assets/propsModel.js';
 import { ATLAS_W, ATLAS_H, ATLAS_RGBA_GZ_B64 } from '../../assets/propsAtlas.js';
 
@@ -66,9 +68,15 @@ function inflate(b64) {
 
 /**
  * Inflate and parse the library once. Safe to call repeatedly; later callers await the same promise.
+ *
+ * `fog` is not optional in practice: a prop that does not go through `patchFog` is drawn at full
+ * brightness in a room the player has never entered, which is the same bug the water surface had
+ * (materials.js) and it reads exactly as badly — a lit barrel hanging in unexplored black rock.
+ * It is only defaulted so a test or a tool can parse the library without a scene.
+ * @param {import('../lighting.js').FogOfWar} [fog]
  * @returns {Promise<{meshes:Map<string,THREE.Mesh>, material:THREE.Material}>}
  */
-export function loadPropModels() {
+export function loadPropModels(fog) {
   if (cache) return cache;
   cache = (async () => {
     const [glb, rgbaBuf] = await Promise.all([inflate(PROPS_GLB_GZ_B64), inflate(ATLAS_RGBA_GZ_B64)]);
@@ -81,8 +89,24 @@ export function loadPropModels() {
     tex.flipY = false; // the source atlas is authored top-down; the exporter kept those UVs
     tex.needsUpdate = true;
     const material = new THREE.MeshStandardMaterial({
-      map: tex, roughness: 0.88, metalness: 0.04, alphaTest: 0.5, side: THREE.DoubleSide,
+      // THE LIBRARY IS PAINTED BRIGHTER THAN OUR STONE. Its atlas was authored for a renderer with
+      // a flat white key; dropped into a torchlit room at full albedo the props sit a clear step
+      // above the flagstones beside them and read as cut-outs pasted over the floor. The tint puts
+      // them back inside the dungeon's own value range - the same job `stoneFamily` does for slabs.
+      map: tex, color: 0xc2bab2, roughness: 0.88, metalness: 0.04, alphaTest: 0.5, side: THREE.DoubleSide,
     });
+    if (fog) {
+      patchFog(material, fog);          // the fog of war owns these props like it owns the stone
+      // ...and so does the grain mask: these are 32-texel blocks like the floor (materials.js
+      // WORLD_MASK_ALPHA), so the grading pass must keep its film grain off them too.
+      const fogged = material.onBeforeCompile;
+      material.onBeforeCompile = (shader, renderer) => {
+        fogged(shader, renderer);
+        shader.fragmentShader = shader.fragmentShader
+          .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n gl_FragColor.a = ${WORLD_MASK_ALPHA.toFixed(3)};`);
+      };
+      material.customProgramCacheKey = () => 'fogofwar-v2|propmodels';
+    }
     const gltf = await new GLTFLoader().parseAsync(glb, '');
     const meshes = new Map();
     gltf.scene.traverse((o) => { if (o.isMesh) { o.material = material; meshes.set(key(o.name), o); } });
@@ -111,6 +135,23 @@ export function makePropModel(lib, type, variant = 0, lit = true) {
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   return mesh;
+}
+
+/**
+ * The library's own footprint for a model, in world units: `[width, height, depth]` of its
+ * geometry's bounding box. The caller scales from this to the art box the hand-pixelled piece
+ * occupies, so an imported barrel stands exactly where the painted barrel stood.
+ * @param {THREE.Mesh} mesh from `makePropModel`
+ * @returns {{sx:number, sy:number, sz:number, cx:number, cy:number, cz:number}}
+ */
+export function modelBounds(mesh) {
+  const g = mesh.geometry;
+  if (!g.boundingBox) g.computeBoundingBox();
+  const b = g.boundingBox;
+  return {
+    sx: b.max.x - b.min.x, sy: b.max.y - b.min.y, sz: b.max.z - b.min.z,
+    cx: (b.max.x + b.min.x) / 2, cy: b.min.y, cz: (b.max.z + b.min.z) / 2,
+  };
 }
 
 /** True when this decor type is served by an imported model rather than a hand-pixelled piece. */

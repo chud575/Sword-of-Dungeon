@@ -300,7 +300,7 @@ export class Renderer {
     this.effects.update(dt, { player: g.player, playerPos: ppos, statuses, hasSword: !!g.player.hasSword, goldViews });
     this.lighting.update(dt, { x: ppos.x, z: ppos.z }, { lightOn: g.lightOn(), sword: !!g.player.hasSword, allLit: this.fog.override === 'all' });
     this.atmosphere.update(dt, { x: ppos.x, z: ppos.z }, this.lighting.activeLights);
-    if (this.dungeon.waterMat) { this.dungeon.waterMat.uniforms.uLightPos.value.set(ppos.x, 0.9, ppos.z); }
+    this.dungeon.syncWater(ppos, this.lighting.activeLights);
     this.fog.update(dt);
     // grading uniforms
     const u = this.grading.uniforms;

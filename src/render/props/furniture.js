@@ -49,6 +49,7 @@ import {
   itemPalette, pixelSprite, contactShadow, span, box, ell, topFace, frontFace, model, step,
   shift as tone,
 } from '../props.js';
+import { makePropModel, modelBounds } from './models.js';
 
 // ------------------------------------------------------------------------------- the materials
 // One base colour per material in the dungeon, shared by every piece that is made of it, so the
@@ -991,5 +992,89 @@ export function buildFurniture(type, o = {}) {
   g.add(contactShadow(f.foot, { strength: 0.5, spread: 1.1 }));
   g.userData.decor = { type, variant: v, facing: o.facing || 's' };
   g.userData.blocking = !!o.blocking && !!f.blk;
+  return g;
+}
+
+// ------------------------------------------------------- the imported models (props/models.js)
+/**
+ * THE IMPORTED PIECE STANDS EXACTLY WHERE THE PAINTED ONE STOOD.
+ *
+ * `models.js` holds 114 low-poly models from the Dungeon Crawlers library, and the owner's brief is
+ * that the renderer PREFERS one wherever it covers a decor type. What it must not do is let a
+ * bought asset set its own scale: the library is authored in metres (a table is 1.24 m across, a
+ * chandelier 2.16 m tall) and dropped in raw it would overhang its tile, push through the wall
+ * behind it and stand taller than the hero — every rule in AMBIENCE §1 broken at once by geometry
+ * nobody in this project drew.
+ *
+ * So every model is fitted to the ART BOX of the hand-pixelled piece it replaces (§5.1, in texels,
+ * 32 to the tile). One uniform scale, chosen so the model fits that box in both footprint and
+ * height, and a hard ceiling of 46 texels — the hero's own figure height — on top of that. An
+ * imported barrel therefore occupies exactly the tile-space the painted barrel occupied, and the
+ * two can be swapped in a live frame without anything else in the room moving.
+ *
+ * ONLY STANDING PROPS. A wall piece is a quad lying IN its wall's plane and a decal is a quad in
+ * the floor (§5.2, §5.3, and the measured fact that only a north wall is ever visible); a mesh
+ * cannot honour either contract, so `sconce` and `scree` keep their painted pieces even though the
+ * library covers them.
+ */
+const MODEL_BOX = {
+  barrel: [14, 20], table: [30, 22], tableLong: [32, 22], stool: [12, 14], bench: [26, 12],
+  urn: [14, 20], brazier: [18, 30], hearth: [32, 40], candelabra: [14, 30], candlestick: [8, 22],
+  // NOT `skull`, though the library covers it. Judged in a rendered frame at the play camera
+  // ('default', seed 42, the two skulls north of the start): at the 8x7-texel art box the painted
+  // skull occupies, the imported one comes back as a BLACK ELLIPSE - its UV island lands in a
+  // near-black corner of the 512 atlas (rgba 14,14,14 at its centroid) and there are not enough
+  // texels left at that size to read as bone. Two black holes punched in a lit flagstone are far
+  // worse than no change at all, and the painted skull is the best-value piece in the catalogue
+  // (AMBIENCE §5.1: "the cheapest storytelling"), so it keeps its billboard.
+};
+/** Texels per tile — the one grid (`PX_PER_TILE`, AMBIENCE §1). */
+const BOX_PX = 32;
+/** Nothing standing on the floor may top the hero's own figure height (AMBIENCE §1). */
+const MODEL_MAX_H = 46 / BOX_PX;
+/** A model may not reach into the tile next door, where the wall behind it is. */
+const MODEL_MAX_FOOT = 0.92;
+/** A hair off the flagstone, exactly as `ITEM_PIVOT_Y` lifts a pickup, so nothing z-fights the floor. */
+const MODEL_LIFT = 0.012;
+/** decor `facing` -> yaw for a mesh whose front is +z (`makePropModel`). */
+const MODEL_YAW = { s: 0, w: Math.PI / 2, n: Math.PI, e: -Math.PI / 2 };
+
+/** Is `type` served by an imported model rather than a painted billboard? */
+export function isModelled(type) { return Object.prototype.hasOwnProperty.call(MODEL_BOX, type); }
+
+/**
+ * Build one decor entry as an imported model, ready for DungeonView to drop on its tile.
+ *
+ * The group is arranged like `buildFurniture`'s: the piece, and the same two-lobe contact shadow
+ * welded to the tile under it. The shadow is not optional — these meshes are lit by the room's real
+ * lights and a lit object with nothing under it floats exactly as badly as a billboard does.
+ *
+ * @param {{meshes:Map<string,THREE.Mesh>}} lib from `loadPropModels()`
+ * @param {string} type a decor type in `MODEL_BOX`
+ * @param {{variant?:number, facing?:'n'|'e'|'s'|'w', blocking?:boolean, lit?:boolean}} [o]
+ *   `lit:false` picks the unlit twin — a brazier in a room whose torches went out is not a lamp.
+ * @returns {THREE.Group|null} null when the library cannot serve this type (the caller paints it)
+ */
+export function buildModelProp(lib, type, o = {}) {
+  const box = MODEL_BOX[type];
+  if (!lib || !box) return null;
+  const v = Math.max(0, o.variant | 0);
+  const mesh = makePropModel(lib, type, v, o.lit !== false);
+  if (!mesh) return null;
+  const b = modelBounds(mesh);
+  const wantW = Math.min(box[0] / BOX_PX, MODEL_MAX_FOOT), wantH = Math.min(box[1] / BOX_PX, MODEL_MAX_H);
+  const foot = Math.max(1e-4, Math.max(b.sx, b.sz));
+  const k = Math.min(wantW / foot, wantH / Math.max(1e-4, b.sy));
+  mesh.scale.setScalar(k);
+  // recentre on the tile and stand it on the floor, whatever origin the exporter left behind
+  mesh.position.set(-b.cx * k, -b.cy * k + MODEL_LIFT, -b.cz * k);
+  const g = new THREE.Group();
+  g.add(mesh);
+  // The shadow is the piece's OWN footprint, never a floor value: a minimum of a third of a tile
+  // put a shadow wider than the object under every small piece, which reads as a hole, not contact.
+  g.add(contactShadow(Math.max(0.12, foot * k * 0.9), { strength: 0.5, spread: 1.15 }));
+  g.rotation.y = MODEL_YAW[o.facing] ?? 0;
+  g.userData.decor = { type, variant: v, facing: o.facing || 's', cls: 'prop', model: true };
+  g.userData.blocking = !!o.blocking && !!(FURNITURE[type] && FURNITURE[type].blk);
   return g;
 }

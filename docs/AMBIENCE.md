@@ -122,6 +122,29 @@ It is a **per-room field the renderer reads** and the generator obeys:
 **Variant index convention (law):** for every type, **lower variant = more intact, higher variant =
 more ruined**. An agent painting variants must order them that way or `decay` inverts.
 
+### 2.2 The band's warmth floor — why depth 1 is warm whatever the room is for
+
+`§6.2` gives a store, a larder, a cell and a collapse the mood `dark` ("0 torches, only the player's
+lantern; the room is a hole", §7) and several others `ember`. That is right for B2 and below, which
+is the abandoned works. Rolled on **depth 1** it put seven of fourteen rooms on zero wall torches
+(seed 42), the player's own starting hall among them, and the first frame of the game came back
+flat, cold and blue-grey with not one warm pool in it — the exact opposite of B1's "warm ochre,
+still *used*, torchlit, swept".
+
+So, **in B1 only (depth 1–5), a mood that is an ABSENCE of light lifts back to `torchlit` while the
+room is still kept** (`decay <= 0.4`; a wrecked room has lost its torches at any depth, §2.1):
+
+| Mood | B1, `decay <= 0.4` | Everywhere else |
+|---|---|---|
+| `dark`, `ember` | → `torchlit` | unchanged |
+| every other mood | unchanged | unchanged |
+
+The moods that are an **identity** rather than an absence — a crypt's `cold`, a wayshrine's
+`candle`, `hearth`, `forge`, `water`, `fungal`, `shrine`, `sword` — are never touched at any depth,
+and neither is the nook (`bare`). A depth-1 crypt is still cold, a depth-1 hearth room is still
+warm, and the per-room moods the dressing pass chose all survive. `bandWarmth()` in
+`world/generator.js` is the whole of it, and `lighting.js` reads only `room.lightMood`, as before.
+
 ---
 
 ## 3. THE BARE-CORRIDOR RULE
@@ -553,8 +576,9 @@ for each room in level.rooms:
    RE-ROLL it (up to 4 times, `avoid` = the identity that failed) and dress again. On the
    last try the signature is stood by hand from the relaxed pool (§8.4). It is NEVER
    demoted to 'bare' — that demotion was the single biggest source of empty halls.
-5. room.lightMood = the archetype's mood, drifted by `decay` (§2.1); a room with no wall
-   torch spot from `lighting.js` may not claim `torchlit` — it drifts to `ember`/`dark`
+5. room.lightMood = the archetype's mood, drifted by `decay` (§2.1), then lifted by the
+   band's warmth floor (§2.2); a room with no wall torch spot from `lighting.js` may not
+   claim `torchlit` — it drifts to `ember`/`dark`
 6. there is NO empty-room quota. See §0 and §8.4.
 ```
 

@@ -144,6 +144,19 @@ export function syncWorldGrid(renderer, camera) {
   return GRID.uWorldTexels.value;
 }
 
+/**
+ * THE LIVE GRID UNIFORM, for shaders outside this file.
+ *
+ * `worldGrid()` below is a snapshot and is fine for a probe; a shader needs the uniform OBJECT, so
+ * that when `syncWorldGrid` moves the grid every surface in the frame moves with it in that same
+ * frame. Anything drawn on the floor — the pool a prop casts, the bite of shadow under it — reads
+ * this and steps in whole world texels, for the reason the floor's own grunge does (see the note
+ * above): a soft airbrushed gradient laid over quantised stone is the one smooth thing in the
+ * picture, and it is exactly what makes a hand-pixelled object look pasted onto its tile.
+ * @returns {{value:number}} world texels per world unit, shared by reference
+ */
+export function worldTexelUniform() { return GRID.uWorldTexels; }
+
 /** Read-only snapshot of the world grid (probes, tests, audits). */
 export function worldGrid() {
   return { texelsPerTile: GRID.uWorldTexels.value, texelWorld: 1 / GRID.uWorldTexels.value, mask: GRID.uWorldMask.value };
@@ -951,16 +964,66 @@ export function createShaftMaterial(fog, color = PALETTE.holy, strength = 0.35, 
 }
 
 /**
- * Water surface shader: the basin floor is drawn *through* the surface with a refraction offset
- * driven by an analytic wave normal, plus animated caustics, absorption by depth, a fresnel
- * sky term, shoreline foam (per-vertex `aShore`) and the player's light reflection.
+ * WATER IS A PIECE OF THE DUNGEON, NOT A STICKER ON IT.
+ *
+ * What shipped before this was a full-brightness cyan rectangle: it took no room light, no depth
+ * grade and no grid, so at depth 15-18 a puddle was the BRIGHTEST THING ON SCREEN, out-reading the
+ * hero and the altar, and its "refracted floor" was offset by up to half a tile, which scrubbed the
+ * flagstone joints out of the surface and left the pool floating over a floor it did not belong to.
+ * Four things put it back in the room, and each answers one of those:
+ *
+ *  1. THE GRID. Every lookup is snapped to `uWorldTexels` — the same world texel the flagstones and
+ *     the cast are sampled on ("ONE TEXEL, ONE SIZE" above) — so the water is painted in the same
+ *     size blocks as the stone around it instead of being the one smooth-shaded surface in an
+ *     otherwise hand-pixelled frame. It writes `uWorldMask` into the frame's alpha for the same
+ *     reason the floor does: it is pixel art, and the grain pass must treat it as such.
+ *  2. THE GROUT RUNS UNDER IT. The refraction offset is a couple of texels, not half a tile, the
+ *     wet atlas cell is sampled over its WHOLE face (the old inset of 4% cropped the cell's own
+ *     dark border off, which is precisely where the joint lives), and a one-texel joint is drawn at
+ *     every tile boundary. The courses of the floor continue into the pool and out the other side.
+ *  3. THE ROOM'S OWN LIGHT. `uWLight`/`uWCol` carry the same lights `Lighting.activeLights` hands
+ *     the dust (atmosphere.js), with the same falloff, so a pool is lit by the torch on the wall
+ *     beside it and by nothing else. THE CAUSTICS ARE CLAMPED TO THAT LIGHT: no light, no caustics,
+ *     because a caustic is light bent by water and cannot be brighter than the lamp that casts it.
+ *  4. THE DEPTH BAND. `uBandTint`/`uBandDeep`/`uBandGain` multiply the whole pool by its band
+ *     (`waterBand`), so a B1 cistern is warm-lit green-blue and a B3 one is black-green — dark
+ *     enough that the hero standing beside it is still the brightest thing in the frame.
+ */
+const WATER_LIGHTS = 8;
+
+/**
+ * The depth band a pool is graded by (AMBIENCE §2). `gain` is the light the water keeps with no
+ * lamp on it at all — the shallow works still catch a little of the hall's ambient, the deep ones
+ * are holes in the floor until something is carried up to them.
+ * @param {number} depth
+ */
+export function waterBand(depth) {
+  if (depth <= 0) return { tint: [0.42, 0.62, 0.70], deep: [0.06, 0.16, 0.22], gain: 0.55 };
+  if (depth <= 5) return { tint: [0.34, 0.54, 0.56], deep: [0.045, 0.125, 0.145], gain: 0.30 };
+  if (depth <= 12) return { tint: [0.26, 0.44, 0.50], deep: [0.028, 0.086, 0.115], gain: 0.20 };
+  if (depth <= 18) return { tint: [0.22, 0.42, 0.31], deep: [0.014, 0.048, 0.038], gain: 0.12 };
+  return { tint: [0.30, 0.25, 0.36], deep: [0.030, 0.020, 0.046], gain: 0.12 };
+}
+
+/**
+ * Water surface shader: the basin floor drawn *through* the surface on the world texel grid, its
+ * joints continuing into the pool, caustics driven and clamped by the room's own lights, and the
+ * whole thing multiplied by its depth band. See the note above.
+ * @param {import('./lighting.js').FogOfWar} fog
  */
 export function createWaterMaterial(fog) {
   const T = getTextures();
   const [cu, cv] = cellUV(CELLS.wet[0]);
+  const band = waterBand(1);
   const uniforms = {
     uTime: { value: 0 }, uLightPos: { value: new THREE.Vector3() }, uLightColor: { value: new THREE.Color(0xffc080) },
     uFloor: { value: T.atlas.albedo }, uCaustic: { value: T.caustic }, uCell: { value: new THREE.Vector2(cu, cv) }, uCellScale: { value: new THREE.Vector2(1 / ATLAS.cols, 1 / ATLAS.rows) },
+    uWorldTexels: GRID.uWorldTexels, uWorldMask: GRID.uWorldMask,
+    uBandTint: { value: new THREE.Vector3(...band.tint) },
+    uBandDeep: { value: new THREE.Vector3(...band.deep) },
+    uBandGain: { value: band.gain },
+    uWLight: { value: Array.from({ length: WATER_LIGHTS }, () => new THREE.Vector4(0, -50, 0, 0)) },
+    uWCol: { value: Array.from({ length: WATER_LIGHTS }, () => new THREE.Color(0, 0, 0)) },
     fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint,
   };
   const mat = new THREE.ShaderMaterial({
@@ -976,7 +1039,11 @@ export function createWaterMaterial(fog) {
     fragmentShader: `
       uniform float uTime; uniform vec3 uLightPos; uniform vec3 uLightColor;
       uniform sampler2D uFloor; uniform sampler2D uCaustic; uniform vec2 uCell; uniform vec2 uCellScale;
+      uniform float uWorldTexels; uniform float uWorldMask;
+      uniform vec3 uBandTint; uniform vec3 uBandDeep; uniform float uBandGain;
+      uniform vec4 uWLight[${WATER_LIGHTS}]; uniform vec3 uWCol[${WATER_LIGHTS}];
       varying vec2 vFogXZ; varying vec3 vWorld; varying float vShore;
+      const float CELL = ${ATLAS.cell.toFixed(1)};
       ${fog.glsl()}
       // sum of directional sines; returns height and its xz gradient
       vec3 waves(vec2 p, float t) {
@@ -988,39 +1055,80 @@ export function createWaterMaterial(fog) {
         return r;
       }
       void main() {
-        vec2 p = vWorld.xz;
-        vec3 wv = waves(p, uTime);
-        vec3 n = normalize(vec3(-wv.y * 0.035, 1.0, -wv.z * 0.035));
+        // ---- the world texel grid: the pool is painted in the flagstones' own blocks ----
+        float K = max(8.0, uWorldTexels);
+        vec2 pq = (floor(vWorld.xz * K) + 0.5) / K;
+        vec3 wv = waves(pq, uTime);
+        vec3 n = normalize(vec3(-wv.y * 0.02, 1.0, -wv.z * 0.02));
         vec3 V = normalize(cameraPosition - vWorld);
-        // refracted floor: the wet flagstone cell, tiled per world tile, shifted by the wave normal
-        vec2 ruv = p + 0.5 + n.xz * 1.6;
-        vec2 cell = fract(ruv) * 0.92 + 0.04;
-        vec3 floorCol = texture2D(uFloor, cell * uCellScale + uCell).rgb;
-        // caustics: two scrolling layers multiplied, warped by the wave normal
-        float c1 = texture2D(uCaustic, p * 0.55 + uTime * vec2(0.021, 0.013) + n.xz * 0.4).r;
-        float c2 = texture2D(uCaustic, p * 0.38 - uTime * vec2(0.017, 0.024) - n.xz * 0.3).r;
-        float caustic = min(1.0, c1 * c2 * 0.7);
-        vec3 deep = vec3(0.02, 0.09, 0.13);
-        vec3 tint = vec3(0.22, 0.5, 0.55);
-        float depthK = 0.5 - vShore * 0.15; // more absorption away from the shore
-        vec3 col = mix(floorCol * tint * 1.7, deep, depthK);
-        col += vec3(0.22, 0.42, 0.45) * caustic * (0.9 - depthK * 0.5);
-        // fresnel sky/ambient reflection
+        // ---- the floor through the water, joints and all ----
+        // a couple of texels of refraction (the old 1.6 was half a tile and scrambled the courses)
+        vec2 tile = fract(pq + n.xz * 0.05 + 0.5);
+        vec2 cuv = (tile * (CELL - 1.0) + 0.5) / CELL * uCellScale + uCell;
+        vec3 floorCol = texture2D(uFloor, cuv).rgb;
+        float edge = max(abs(tile.x - 0.5), abs(tile.y - 0.5));
+        float joint = step(0.5 - 1.5 / K, edge);          // the grout, one texel wide, under water
+        floorCol *= mix(1.0, 0.30, joint);
+        // ---- absorption: deepest in the middle of the pool, shallow at the kerb ----
+        float depthK = 0.44 + 0.34 * vShore;
+        vec3 water = mix(floorCol * uBandTint, uBandDeep, depthK);
+        // ---- the room's own lights (Lighting.activeLights, the falloff atmosphere.js uses) ----
+        // The sum SATURATES rather than clamping: a lantern one tile away is worth ten times a
+        // torch across the room, and a pool that multiplies that raw number is the white sheet
+        // this rebuild exists to kill. L is 0..1: how lit this bit of water is, and nothing more.
+        vec3 lit = vec3(0.0);
+        for (int i = 0; i < ${WATER_LIGHTS}; i++) {
+          vec3 d = uWLight[i].xyz - vWorld;
+          lit += uWCol[i] * (uWLight[i].w / (1.0 + dot(d, d) * 1.1));
+        }
+        float peak = max(lit.r, max(lit.g, lit.b));
+        float L = 1.0 - exp(-peak * 0.8);
+        vec3 litN = lit * (L / max(1e-3, peak));
+        vec3 col = water * (uBandGain + litN * 0.85);
+        // ---- caustics, CLAMPED TO THE LIGHT THAT CASTS THEM ----
+        float c1 = texture2D(uCaustic, pq * 0.5 + uTime * vec2(0.021, 0.013) + n.xz * 0.2).r;
+        float c2 = texture2D(uCaustic, pq * 0.33 - uTime * vec2(0.017, 0.024) - n.xz * 0.15).r;
+        float caustic = smoothstep(0.28, 0.85, c1 * c2 * 1.5) * (1.0 - depthK * 0.5);
+        col += (uBandTint * 0.35 + litN * 0.5) * caustic * L * 0.5;
+        // ---- a ceiling, not a sky: the fresnel reflects the room's own dark and its lamps ----
         float fres = pow(1.0 - max(0.0, dot(n, V)), 3.0);
-        col = mix(col, vec3(0.25, 0.33, 0.42), fres * 0.55);
-        // shoreline foam
-        float foam = smoothstep(0.32, 0.0, vShore) * (0.55 + 0.45 * sin(uTime * 1.7 + wv.x * 2.5));
-        col += vec3(0.28, 0.36, 0.38) * foam * 0.35;
-        // player light: diffuse glint + specular
+        col = mix(col, uBandDeep * 1.6 + litN * 0.14, fres * 0.3);
+        // ---- foam where the water meets the kerb ----
+        float foam = smoothstep(0.26, 0.0, vShore) * (0.6 + 0.4 * sin(uTime * 1.7 + wv.x * 2.5));
+        col += (uBandTint * 0.4 + litN * 0.35) * foam * 0.18 * (0.25 + L);
+        // the joint again, over the top of everything: a course of stone the water lies IN, and
+        // caustics do not run across a gap between two flagstones
+        col *= mix(1.0, 0.62, joint);
+        // ---- the lantern's glint, the one specular the pool keeps ----
         vec3 toL = uLightPos - vWorld;
         float d = length(toL);
-        float lit = 1.5 / (1.0 + d * d * 0.3);
+        float glint = 1.5 / (1.0 + d * d * 0.3);
         vec3 H = normalize(normalize(toL) + V);
-        float spec = pow(max(0.0, dot(n, H)), 140.0);
-        col += uLightColor * spec * lit * 0.4;
+        col += uLightColor * pow(max(0.0, dot(n, H)), 140.0) * glint * 0.22;
         col = applyFog(col, vFogXZ);
-        gl_FragColor = vec4(col, 1.0);
+        // stone is pixel art and so is this: the grading pass holds its grain off both
+        gl_FragColor = vec4(col, uWorldMask);
       }`,
   });
   return mat;
+}
+
+/**
+ * Point the pool at its depth band and at the lights actually burning in the room.
+ * @param {THREE.ShaderMaterial} mat from `createWaterMaterial`
+ * @param {number} depth
+ * @param {{x:number,y:number,z:number,r:number,g:number,b:number,i:number}[]} [lights] `Lighting.activeLights`
+ */
+export function syncWaterLights(mat, depth, lights) {
+  const u = mat.uniforms;
+  const b = waterBand(depth);
+  u.uBandTint.value.set(b.tint[0], b.tint[1], b.tint[2]);
+  u.uBandDeep.value.set(b.deep[0], b.deep[1], b.deep[2]);
+  u.uBandGain.value = b.gain;
+  const lp = u.uWLight.value, lc = u.uWCol.value;
+  for (let i = 0; i < WATER_LIGHTS; i++) {
+    const l = lights && lights[i];
+    if (!l || l.i <= 0) { lp[i].set(0, -50, 0, 0); continue; }
+    lp[i].set(l.x, l.y, l.z, l.i); lc[i].setRGB(l.r, l.g, l.b);
+  }
 }

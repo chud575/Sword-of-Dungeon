@@ -8,7 +8,7 @@
 // props register a tick function and Effects.update() calls updateProps() once per frame.
 import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
-import { PALETTE, createShaftMaterial } from './materials.js';
+import { PALETTE, createShaftMaterial, worldTexelUniform } from './materials.js';
 import { glowTexture, glintTexture, sigilTexture, runeCircleTexture, billboard, groundGlow, flame, litMaterial, getFog, updateFlames } from './propFx.js';
 import { paint, outline, toRGBA, Palette, makePix, blit, setPx, keyShade, bounds } from './sprites/pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from './sprites/style.js';
@@ -89,16 +89,45 @@ function pixelTexture(key, art0, pal) {
 
 /** The drawing buffer, shared by every pickup material's snap (see `pixelSnap`). */
 const _snapVp = { value: new THREE.Vector2(1600, 900) };
+/** THE frame's texel size in device pixels, shared by the same materials (see `pixelSnap`). */
+const _snapTexel = { value: 4 };
 
 /**
- * SNAP THE QUAD TO THE DEVICE PIXEL GRID — the other half of "one texel is one texel".
+ * Put every `pixelSnap` material on this frame's lattice, once, before anything draws.
+ *
+ * `syncPixelSprite` sets the same two uniforms, but only for the pickups it is actually drawing: a
+ * level with wall plates and no pickups in shot would otherwise round to the PREVIOUS camera's
+ * texel size. DungeonView's grid probe (render order -2000, the same one that puts the world's
+ * surfaces on the grid) calls this, so the lattice is set for the whole frame either way.
+ * @param {THREE.WebGLRenderer} renderer @param {THREE.Camera} camera
+ */
+export function syncSpriteSnap(renderer, camera) {
+  renderer.getDrawingBufferSize(_snapVp.value);
+  _snapTexel.value = frameTexelSize(renderer, camera, PX_PER_TILE);
+}
+
+/**
+ * SNAP THE QUAD TO THE FRAME'S TEXEL LATTICE — the other half of "one texel is one texel".
  *
  * Sizing a pickup's quad from the shared grid makes one art texel cover S device pixels ON AVERAGE.
  * It does not make texel EDGES land on pixel edges: the quad's anchor projects to some fractional
  * pixel, so a nearest-filtered 16-texel sprite came out as a 3px column, a 5px column, a 4px column
- * — the same mush the character billboards were built in screen space to avoid. So the vertex shader
- * projects the quad's pivot, rounds it to a whole device pixel, and lays the corners out at whole
- * pixel offsets from there. The art is untouched; only where it lands is.
+ * — the same mush the character billboards were built in screen space to avoid. So the vertex
+ * shader rounds the projected quad in device pixels. The art is untouched; only where it lands is.
+ *
+ * IT ROUNDS TO A WHOLE TEXEL, NOT TO A WHOLE PIXEL, and that difference is the whole of this note.
+ * Rounding the anchor to a whole DEVICE PIXEL gives each prop a hard-edged grid OF ITS OWN, at
+ * whatever phase its own tile happened to project to; with S = 2 device pixels per texel, half the
+ * props in a frame sat on the even lattice and half on the odd one. Measured on the PROPS row of
+ * `tools/audit.mjs` — which histograms every colour edge by its position mod S — that is exactly
+ * what it looked like: `edgeAlign` 0.57-0.69 against the hero's 1.00 in the same frames, i.e. the
+ * edges split about evenly between the two possible phases, while each individual sprite was
+ * perfectly crisp. One screen, twelve pickups, two pixel grids.
+ *
+ * Snapping every VERTEX to a multiple of S puts the whole screen on ONE lattice: a prop's texel
+ * boundaries land where the hero's do and where the next prop's do. The quad's size does not
+ * change (its corners differ by an exact multiple of S, so they round the same way); it can move by
+ * up to half a texel, which is the price of the grid and is what the cast pays too.
  *
  * The injection rides on whatever `litMaterial` already installed (the fog patch), never replaces it.
  */
@@ -109,15 +138,15 @@ function pixelSnap(mat) {
   mat.onBeforeCompile = function (shader, renderer) {
     if (prev) prev.call(this, shader, renderer);
     shader.uniforms.uSnapViewport = _snapVp;
-    shader.vertexShader = 'uniform vec2 uSnapViewport;\n' + shader.vertexShader.replace(
+    shader.uniforms.uSnapTexel = _snapTexel;
+    shader.vertexShader = 'uniform vec2 uSnapViewport; uniform float uSnapTexel;\n' + shader.vertexShader.replace(
       '#include <project_vertex>',
       `#include <project_vertex>
       {
-        vec4 aClip = projectionMatrix * modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-        if (aClip.w > 0.0001 && gl_Position.w > 0.0001) {
-          vec2 aPx = (aClip.xy / aClip.w * 0.5 + 0.5) * uSnapViewport;
+        if (gl_Position.w > 0.0001) {
+          float S = max(1.0, uSnapTexel);
           vec2 vPx = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * uSnapViewport;
-          vec2 outPx = floor(aPx + 0.5) + floor(vPx - aPx + 0.5);
+          vec2 outPx = floor(vPx / S + 0.5) * S;
           gl_Position.xy = (outPx / uSnapViewport * 2.0 - 1.0) * gl_Position.w;
         }
       }`);
@@ -159,7 +188,9 @@ function syncPixelSprite(m, renderer, camera) {
   const pxPerWorld = camera.isOrthographicCamera
     ? size.y / Math.max(1e-6, (camera.top - camera.bottom) / (camera.zoom || 1))
     : (size.y * 0.5 * (camera.zoom || 1)) / (Math.tan((camera.fov || 45) * Math.PI / 360) * d);
-  const w = frameTexelSize(renderer, camera, PX_PER_TILE) / pxPerWorld;
+  const S = frameTexelSize(renderer, camera, PX_PER_TILE);
+  _snapTexel.value = S;                 // the lattice every pixelSnap material rounds to
+  const w = S / pxPerWorld;
   const t = m.userData.tex;
   m.scale.set(t.w * w, t.h * w, 1);
   placeArtChildren(m);
@@ -281,15 +312,39 @@ function contactShadowMaterial(strength = 1) {
   let _shadowMat = _shadowMats.get(strength);
   if (_shadowMat) return _shadowMat;
   const fog = getFog();
-  const uniforms = { uCore: { value: 0.62 }, uEdge: { value: 0.1 }, uStrength: { value: strength } };
+  const uniforms = {
+    uCore: { value: 0.62 }, uEdge: { value: 0.1 }, uStrength: { value: strength },
+    // the live world texel grid, shared by reference with the floor (materials.js)
+    uWorldTexels: worldTexelUniform(),
+  };
   if (fog) Object.assign(uniforms, { fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint });
   _shadowMat = new THREE.ShaderMaterial({
     uniforms, transparent: true, depthWrite: false,
-    vertexShader: 'varying vec2 vUv; varying vec2 vFogXZ; void main() { vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vFogXZ = w.xz; gl_Position = projectionMatrix * viewMatrix * w; }',
-    fragmentShader: `uniform float uCore, uEdge, uStrength; varying vec2 vUv; varying vec2 vFogXZ;
+    // `vOrigin` and `vSpan` are the quad's centre and its world size, read straight off the model
+    // matrix, so the fragment shader can put a uv back into WORLD units and snap it to the grid.
+    vertexShader: `varying vec2 vUv; varying vec2 vFogXZ; varying vec2 vOrigin; varying vec2 vSpan;
+      void main() {
+        vUv = uv;
+        vOrigin = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xz;
+        vSpan = vec2(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz));
+        vec4 w = modelMatrix * vec4(position, 1.0); vFogXZ = w.xz;
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: `uniform float uCore, uEdge, uStrength, uWorldTexels;
+      varying vec2 vUv; varying vec2 vFogXZ; varying vec2 vOrigin; varying vec2 vSpan;
       ${fog ? fog.glsl() : 'vec2 fogMask(vec2 xz) { return vec2(1.0); }'}
       void main() {
-        vec2 p = (vUv - 0.5) * 2.0;
+        // THE BITE OF DARK UNDER A PROP STEPS WITH THE STONE. The flagstone this lies on is
+        // sampled on the world texel grid (materials.js "ONE TEXEL, ONE SIZE"), and an airbrushed
+        // ellipse laid over it is the one soft-edged thing in a hand-pixelled frame -- measured on
+        // the PROPS row of tools/audit.mjs, it was most of what dragged their edge alignment to
+        // 0.57 against the hero's 1.00, because a smooth ramp has no edges on any grid at all.
+        // Snapping the SHAPE (never the colour) to the same texels the floor uses costs nothing
+        // and puts the shadow on the picture's one grid.
+        float K = max(8.0, uWorldTexels);
+        vec2 world = vOrigin + (vUv - 0.5) * vSpan;
+        vec2 uq = ((floor(world * K) + 0.5) / K - vOrigin) / max(vec2(1e-4), vSpan) + 0.5;
+        vec2 p = (uq - 0.5) * 2.0;
         // the core drifts a hair down-right, away from the house key light (top-left)
         float rc = length((p - vec2(0.06, -0.06)) / max(0.05, uCore));
         float core = 1.0 - smoothstep(1.0 - uEdge, 1.0 + uEdge, rc);

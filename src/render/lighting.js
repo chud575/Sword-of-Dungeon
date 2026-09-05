@@ -189,6 +189,10 @@ export const LIGHT_MOODS = {
 export const MOOD_KEYS = Object.keys(LIGHT_MOODS);
 const MOOD_INDEX = new Map(MOOD_KEYS.map((k, i) => [k, i]));
 
+/** The decor lights that are an actual FLAME, and the moods in which nobody has lit one. */
+const FIRE_KINDS = new Set(['fire', 'forge', 'candle']);
+export const FIRELESS_MOODS = new Set(['dark', 'cold', 'sword']);
+
 /**
  * The decor that is literally alight, and what it throws. `maxV`/`minV` gate on the piece's variant,
  * because AMBIENCE §2.1 runs wear UP with the index: a brazier at v3 is cold and tipped over, and a
@@ -428,12 +432,22 @@ export class Lighting {
       }
     }
     const src = [];
+    const moodOf = (x, y) => {
+      const mi = x >= 0 && y >= 0 && x < level.width && y < level.height ? this.moodTiles[y * level.width + x] : -1;
+      return mi >= 0 ? MOOD_KEYS[mi] : 'torchlit';
+    };
     for (const d of level.decor || []) {
       const spec = DECOR_LIGHTS[d.type];
       if (!spec) continue;
       const v = d.variant | 0;
       if (spec.maxV !== undefined && v > spec.maxV) continue;
       if (spec.minV !== undefined && v < spec.minV) continue;
+      // A FIRE NEEDS SOMEBODY TO HAVE LIT IT. `dark` is "the room is a hole" and `cold` is
+      // "nobody has been down to light it" (AMBIENCE §7), so a brazier burning happily in one of
+      // them contradicts its own room. The renderer draws the piece's UNLIT twin there
+      // (render/props/models.js), and the light has to go out with the flame. Fungus and
+      // alchemy keep their glow: neither of those needs a match.
+      if (FIRE_KINDS.has(spec.kind) && FIRELESS_MOODS.has(moodOf(d.x, d.y))) continue;
       src.push({ x: d.x, y: spec.y, z: d.y, color: spec.color, intensity: spec.intensity, radius: spec.radius, kind: spec.kind, phase: rng.float(0, 100) });
     }
     // A flooded room throws its own reflected light: one rippling source over the water it holds.
