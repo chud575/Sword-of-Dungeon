@@ -25,10 +25,12 @@
 //     Nothing here is a closed rectangle: every edge is broken and stippled, because a hard alpha
 //     edge on a floor is the other way a decal reads as a sticker.
 //
-//   · WALL-MOUNTED — a `pixelSprite` whose bottom art row sits at the type's `mountY` on the wall
-//     face, placed by the caller at `(x + dx*0.5, y + dy*0.5)` exactly as `lighting.js` places its
-//     torch spots. Screen-aligned like everything else, and nudged two centimetres out of the
-//     masonry so it cannot z-fight with it.
+//   · WALL-MOUNTED — a quad IN THE WALL'S OWN PLANE, bottom art row at the type's `mountY`, placed
+//     by the caller at `(x + dx*0.5, y + dy*0.5)` exactly as `lighting.js` places its torch spots,
+//     and STRETCHED VERTICALLY BY 1/sin(camera tilt) so its art lands on the shared texel grid at
+//     true size. Without that stretch the whole visible face of a 0.82-unit wall is seven and a
+//     half texels of screen and every hung piece is a smudge; with it a shield is twenty-four
+//     texels of shield. See `wallPlate()` — it is the argument of this whole class.
 //
 // THE RULES THAT ARE EASY TO BREAK HERE (and the reason each one exists):
 //
@@ -43,17 +45,22 @@ import { createRng } from '../../core/rng.js';
 import { makePix, setPx, getPx, line } from '../sprites/pixelPainter.js';
 import { INK_DEEP } from '../sprites/style.js';
 import { groundGlow, litMaterial } from '../propFx.js';
-import { PX_PER_TILE, texelGrid } from '../sprites/spriteBillboard.js';
+import { PX_PER_TILE, texelGrid, frameTexelSize } from '../sprites/spriteBillboard.js';
 import {
-  itemPalette, pixelSprite, pixelTexture, floorDecal, contactShadow, span, box, ell, topFace,
-  frontFace, model, step, animate,
+  itemPalette, pixelSprite, pixelTexture, pixelSnap, floorDecal, contactShadow, span, box, ell,
+  topFace, frontFace, model, step, animate,
 } from '../props.js';
 
 // ------------------------------------------------------------------------------- the materials
 // The same convention as furniture.js: one base colour per material, shared by every piece made of
 // it, so the bone of a skull and the bone of an ossuary shelf are the same bone.
 const RAMP = {
-  bone: '#c2b499',       // bone, teeth, parchment
+  // NEAR-WHITE BONE, AND ITS HUE HELD UNDER `LIGHT_HUE` ON PURPOSE. `ramp()` cools a shadow UP the
+  // wheel for any hue between amber and violet and the SHORT way round for anything below it, so a
+  // bone one point too yellow (hue 0.120) drops its two dark steps into GRASS GREEN — measured, and
+  // it painted the ossuary's floor line lime. Held at hue 0.110 the shadows fall through warm red
+  // instead, which is what old bone actually does.
+  bone: '#dccdb0',       // bone, teeth, parchment: reads WHITE against the flagstone's mid tan
   stone: '#8b8274',      // the dungeon's own masonry — matches the flagstone atlas
   slate: '#6e6d78',      // cold tomb stone
   grit: '#7c7266',       // chips, scree, dust
@@ -84,7 +91,11 @@ const RAMP = {
   fungus: '#93ad6e',     // fungal mat, bracket fungus
   cap: '#b8a6c8',        // pale mushroom caps
   web: '#a9a6b6',        // cobweb, chalk, rime
-  hide: '#574b47',       // rat fur: a shade off the flagstone, or the rat is a bread roll
+  // RAT FUR, DESATURATED ON PURPOSE. `ramp()` GAINS saturation on the way down for any base over
+  // 8% saturation, so a warm brown fur came out of the plate with a maroon belly and a white back —
+  // a rat painted in raw liver. Held under that threshold the ramp is a clean warm grey and the
+  // whole animal can sit in its middle, dark against the flagstone, with the key only on its spine.
+  hide: '#544f49',       // rat fur: a shade off the flagstone, or the rat is a bread roll
   glass: '#7ea6b6',      // bottles
 };
 
@@ -179,21 +190,36 @@ function flameTip(p, cx, yBase, h, keys) {
 /**
  * One skull. The cheapest storytelling in the catalogue, and the piece that carries the crypt.
  *
- * THE SHADING IS DELIBERATELY SHALLOW (`mid` high, `gain` low). Bone's ramp cools the short way
- * round the wheel — its two dark steps are a saturated red-violet — and a ten-texel object shaded
- * at the cast's usual contrast puts a third of itself down there, which comes out of the torchlight
- * as a red lump rather than a bone in shadow. Measured in the 'dressing' plate at 14x.
+ * FOURTEEN TEXELS ACROSS — nearly half a tile, and twice what shipped. HeroQuest puts TEN of these
+ * on a board that has twelve pieces of furniture, and it can do that because each one is a chunky,
+ * instantly-named shape you read from a metre away. The first pass drew it ten texels wide with
+ * two-texel sockets and it measured, in the 'dressing' plate at 6x, as floor grit.
+ *
+ * THE SHADING IS DELIBERATELY SHALLOW (`mid` high, `gain` low), and the bone base is near-white:
+ * the skull has to sit ABOVE the flagstone's mid value or it is a pebble, and bone's ramp saturates
+ * hard on the way down, so a skull shaded at the cast's usual contrast puts a third of itself into
+ * a coloured dark. The sockets and the gaps between the teeth carry the contrast instead, in ink.
  */
 function skullPix(v, keys = 'FGHIJ') {
-  const p = makePix(10, 10);
-  ell(p, 4.5, 3.6, 3.7, 3.2, 'H');
-  box(p, 3, 5, 6, 7, 'H');                                  // the muzzle
-  const q = model(p, keys, { up: 0.75, gain: 0.4, mid: 0.66, dome: 0.14, local: 0.3 });
-  for (const x of [2, 3, 6, 7]) setPx(q, x, 4, '%');        // the two sockets
-  setPx(q, 4, 6, '%'); setPx(q, 5, 6, '%');                 // the nose
-  for (const x of [3, 5, 7]) setPx(q, x, 7, '%');           // the gaps between the teeth
-  if (v >= 1) { setPx(q, 6, 1, '%'); setPx(q, 6, 2, '%'); setPx(q, 7, 3, '%'); }   // a crack
-  if (v >= 2) { for (let x = 2; x <= 7; x++) setPx(q, x, 7, 0); span(q, 3, 6, 6, keys, 2, 0); }
+  const p = makePix(16, 15);
+  ell(p, 7.5, 5.8, 6.6, 5.4, 'H');                          // the cranium
+  box(p, 4, 9, 11, 12, 'H');                                // the muzzle
+  box(p, 5, 13, 10, 13, 'H');                               // the jaw
+  const q = model(p, keys, { up: 0.75, gain: 0.4, mid: 0.7, dome: 0.14, local: 0.3 });
+  for (const ox of [2, 9]) {                                // the sockets: FIVE texels of hole each
+    box(q, ox, 5, ox + 4, 7, '%');
+    span(q, ox, ox + 4, 4, keys, 4, 0);                     // the brow over each, taking the key light
+    setPx(q, ox + 1, 8, '%'); setPx(q, ox + 3, 8, '%');     // the cheekbone's shadow under it
+  }
+  box(q, 7, 9, 8, 10, '%');                                 // the nose
+  span(q, 5, 10, 11, keys, 4, 0);                           // the lit ridge over the teeth
+  for (const x of [4, 6, 8, 10]) { setPx(q, x, 12, '%'); setPx(q, x, 13, '%'); }   // between the teeth
+  if (v >= 1) for (const [x, y] of [[10, 1], [11, 2], [12, 3], [12, 4]]) setPx(q, x, y, '%');   // a crack
+  if (v >= 2) {                                             // the jaw is gone and the crown is stove in
+    for (let x = 4; x <= 11; x++) { setPx(q, x, 12, 0); setPx(q, x, 13, 0); }
+    span(q, 5, 10, 11, keys, 2, 0);
+    for (const [x, y] of [[3, 1], [4, 0], [5, 1], [11, 0]]) setPx(q, x, y, 0);
+  }
   return q;
 }
 function artSkull(v) { return wear(skullPix(v), v, 'FGHIJ', `skull${v}`, 0.4); }
@@ -205,9 +231,9 @@ function artSkull(v) { return wear(skullPix(v), v, 'FGHIJ', `skull${v}`, 0.4); }
  * has depth.
  */
 function artSkullPile(v) {
-  const p = makePix(20, 16), F = 'FGHIJ';
+  const p = makePix(30, 24), F = 'FGHIJ';
   const one = skullPix(Math.min(2, v));
-  const stack = [[0, 6, 0], [9, 6, 0], [4, 1, 1], [5, 8, -1]];
+  const stack = [[0, 9, 0], [13, 9, 0], [6, 0, 1], [8, 12, -1]];
   const n = v >= 2 ? 3 : 4;
   for (let i = 0; i < n; i++) {
     const [ox, oy, lift] = stack[i];
@@ -218,100 +244,131 @@ function artSkullPile(v) {
       setPx(p, x + ox, y + oy, idx >= 0 ? step(F, idx + lift) : k);
     }
   }
-  span(p, 1, 18, 15, F, 1, 0);                              // the heap meets the floor
+  span(p, 1, 28, 23, F, 2, 0);                              // the heap meets the floor
   return wear(p, v, F, `skullPile${v}`, 0.5);
 }
 
 /**
  * A rat. Scatter, never an entity, never fought — a shape that moves in the corner of the eye.
  *
- * The first one was a lozenge: a rat drawn in the floor's own tan, shaded as one soft form, is a
- * bread roll. It reads now because three things break the blob — the HUNCH of the back, the naked
- * TAIL curling off it in a lighter tone, and the ear and eye that give it a front end.
+ * TWENTY-FOUR TEXELS LONG, three quarters of a tile, and drawn twice over. The version before this
+ * one was measured at the play camera and named, exactly, "an unidentifiable beige lozenge": it was
+ * a shaded ellipse in the floor's own tan with the details too small and too pale to survive. See
+ * the four things inside that fix that, and the note on which way it faces.
  */
 function artRat(v) {
-  const p = makePix(15, 10), H = 'abcdefg';
-  ell(p, 6.5, 5.5, 4.4, 2.8, 'd');                          // body
-  span(p, 4, 9, 2, H, 4, 0);                                // the hunch of the back
-  for (let x = 4; x <= 9; x++) setPx(p, x, 3, 'e');
-  ell(p, 11, 5, 2.4, 2.0, 'd');                             // head
-  setPx(p, 13, 5, 'c'); setPx(p, 13, 6, 'c');               // snout
-  setPx(p, 9, 2, 'e'); setPx(p, 10, 2, 'e'); setPx(p, 9, 3, 'd');   // the ear
-  const q = model(p, H, { up: 0.7, gain: 0.5, mid: 0.56, dome: 0.12, local: 0.45 });
-  line(q, 3, 7, 0, 3, 'f');                                 // the tail, curling up and pale
-  setPx(q, 1, 4, 'g'); setPx(q, 2, 6, 'g');
-  setPx(q, 11, 4, '%');                                     // the eye
-  setPx(q, 12, 4, 'f');
-  for (const x of [5, 8]) { setPx(q, x, 8, 'b'); setPx(q, x + 1, 8, 'a'); }   // feet
-  if (v >= 1) { setPx(q, 6, 2, 0); setPx(q, 7, 3, 'b'); }   // a mangier back
+  const p = makePix(24, 16), H = 'abcdefg';
+  // FOUR THINGS MAKE A RAT AND NOT A BREAD ROLL, and the first pass had none of them: a HUNCHED BACK
+  // drawn as a curve rather than an ellipse, a HEAD slung below the shoulder with a tapering snout,
+  // one ROUND EAR on the crown, and a long bare TAIL trailing off the rump.
+  //
+  // IT FACES LEFT, WHICH IS NOT AN ARBITRARY CHOICE. The house key light is top-LEFT on every piece
+  // (style.js `LIT`), so a rat drawn nose-right puts its whole head in the shade and comes out of
+  // the plate as a dark smear with a lit rump — measured. Nose-left, the muzzle, the brow and the
+  // ear take the key and the tail end is the part that falls away.
+  const back = [7, 6, 5, 5, 5, 5, 6, 6, 7, 7, 8, 8];        // the back's top row at x = 8..19
+  for (let i = 0; i < back.length; i++) for (let y = back[i]; y <= 12; y++) setPx(p, 8 + i, y, 'd');
+  ell(p, 18, 10, 2.8, 2.6, 'd');                            // the rump
+  ell(p, 5.5, 9.5, 3.8, 2.8, 'd');                          // the head
+  for (let x = 0; x <= 2; x++) for (let y = 9 + (2 - x) * 0; y <= 11 - (2 - x); y++) setPx(p, x, y, 'd');  // the snout
+  ell(p, 7.5, 5.6, 2.1, 2.1, 'd');                          // the ear on the crown
+  // SHADED DOWN, not up: at twenty-four texels on a lit tan flagstone the rat has to be the DARK
+  // shape and its spine the light one, or it is a beige lozenge again whatever else is drawn on it.
+  const q = model(p, H, { up: 0.7, gain: 0.5, mid: 0.26, dome: 0.1, local: 0.24 });
+  for (let i = 0; i < back.length; i++) {                   // the lit ridge that draws the hunch
+    setPx(q, 8 + i, back[i], step(H, 6)); setPx(q, 8 + i, back[i] + 1, step(H, 4));
+  }
+  for (let x = 1; x <= 19; x++) setPx(q, x, 12, step(H, 0));   // the belly, in shadow under it
+  for (let x = 1; x <= 5; x++) setPx(q, x, 8, step(H, 6));     // the lit top of the muzzle
+  setPx(q, 6, 8, step(H, 5)); setPx(q, 2, 9, step(H, 5));
+  ell(q, 7.5, 5.6, 1.0, 1.0, step(H, 0));                     // the ear's hollow
+  setPx(q, 6, 4, step(H, 6)); setPx(q, 7, 3, step(H, 6)); setPx(q, 8, 4, step(H, 5));   // its lit rim
+  setPx(q, 4, 9, '%'); setPx(q, 3, 9, step(H, 6));            // the eye, and the glint before it
+  setPx(q, 0, 10, '%');                                       // the nose
+  for (const x of [7, 13]) { setPx(q, x, 13, step(H, 1)); setPx(q, x, 14, '%'); setPx(q, x + 1, 14, '%'); }
+  // THE TAIL: a bare rope trailing off the rump and lifting at its tip. Drawn after the modelling so
+  // it holds one clean value, and STEPPED rather than ruled — a one-texel diagonal comes out of the
+  // outline pass as a checkerboard.
+  for (const [x, y] of [[20, 11], [21, 11], [22, 11], [23, 10], [23, 9], [23, 8]]) setPx(q, x, y, step(H, 3));
+  for (const [x, y] of [[21, 10], [22, 10]]) setPx(q, x, y, step(H, 4));
+  if (v >= 1) { setPx(q, 13, 5, 0); setPx(q, 14, 5, 0); setPx(q, 15, 6, step(H, 2)); }   // a mangier back
   return q;
 }
 
 /** A candlestick, guttering. v0 tall and lit, v1 burnt down, v2 a cold stub in a pool of wax. */
 function artCandlestick(v) {
-  const p = makePix(9, 24), M = 'mnopq', W = 'FGHIJ', A = 'ABCDE';
-  const h = v === 0 ? 8 : v === 1 ? 13 : 18;                // the wax burns DOWN as v rises
-  ell(p, 4, 22, 3.4, 1.6, 'o');                             // the foot
-  span(p, 1, 7, 21, M, 4, 1);
-  for (let y = 16; y <= 21; y++) span(p, 3, 5, y, M, 3, 1);  // the stem
-  span(p, 2, 6, 16, M, 5, 1);                               // the drip pan
-  for (let y = h; y <= 15; y++) span(p, 3, 5, y, W, 3, 1);   // the candle
-  span(p, 3, 5, h, W, 4, 1);
-  for (const [x, y] of [[3, h + 3], [5, h + 6], [2, h + 2]]) { setPx(p, x, y, step(W, 4)); setPx(p, x, y + 1, step(W, 4)); }
-  if (v < 2) flameTip(p, 4, h - 1, 4, A);
+  const p = makePix(12, 30), M = 'mnopq', W = 'FGHIJ', A = 'ABCDE';
+  const h = v === 0 ? 9 : v === 1 ? 15 : 22;                 // the wax burns DOWN as v rises
+  ell(p, 5.5, 27, 4.6, 2.2, 'o');                            // the foot
+  span(p, 1, 10, 26, M, 4, 1); span(p, 2, 9, 25, M, 5, 1);
+  for (let y = 20; y <= 25; y++) span(p, 4, 7, y, M, 3, 1);   // the stem
+  span(p, 2, 9, 19, M, 5, 1); span(p, 3, 8, 20, M, 3, 1);     // the drip pan
+  for (let y = h; y <= 18; y++) span(p, 4, 7, y, W, 3, 1);    // the candle
+  span(p, 4, 7, h, W, 4, 1);
+  for (const [x, y] of [[3, h + 4], [8, h + 7], [3, h + 9], [8, h + 2]]) {   // the runs of spilt wax
+    setPx(p, x, y, step(W, 4)); setPx(p, x, y + 1, step(W, 3)); setPx(p, x, y + 2, step(W, 2));
+  }
+  if (v < 2) flameTip(p, 5, h - 1, 6, A);
   return wear(p, v, W, `candlestick${v}`, 0.3);
 }
 
 /** Bottles: the guardroom's real furniture. v2 is one tipped over and two empty. */
 function artBottles(v) {
-  const p = makePix(16, 14), G = 'ABCDE', K = 'FGHIJ';
-  const bottle = (cx, top, tall) => {
-    for (let y = top + 3; y <= 12; y++) span(p, cx - 2, cx + 2, y, G, 2, 1);   // the body
-    for (let y = top; y <= top + 2; y++) span(p, cx - 1, cx + 1, y, G, 3, 1);  // the neck
-    span(p, cx - 1, cx + 1, top, K, 3, 1);                                     // a wax stopper
-    setPx(p, cx - 2, top + 4, step(G, 4));                                     // the catch-light
-    if (tall) setPx(p, cx - 2, top + 5, step(G, 4));
+  const p = makePix(22, 20), G = 'ABCDE', K = 'FGHIJ';
+  const bottle = (cx, top) => {
+    for (let y = top + 6; y <= 18; y++) span(p, cx - 3, cx + 3, y, G, 2, 1);        // the body
+    span(p, cx - 3, cx + 3, top + 5, G, 3, 1);                                      // the shoulder
+    for (let y = top + 2; y <= top + 4; y++) span(p, cx - 1, cx + 1, y, G, 3, 1);   // the neck
+    span(p, cx - 2, cx + 2, top, K, 3, 1); span(p, cx - 2, cx + 2, top + 1, K, 2, 1);  // a wax stopper
+    for (let y = top + 7; y <= 16; y++) setPx(p, cx - 3, y, step(G, 4));            // the catch-light
+    setPx(p, cx - 2, top + 6, step(G, 4));
   };
-  bottle(4, 3, true);
-  bottle(10, 5, false);
-  if (v <= 1) bottle(7, 2, true);
-  if (v >= 2) {                                             // the tipped one
-    for (let x = 8; x <= 14; x++) span(p, x, x, 11, G, 2, 0);
-    span(p, 8, 14, 12, G, 1, 0);
+  bottle(5, 3);
+  bottle(16, 6);
+  if (v <= 1) bottle(10, 0);
+  if (v >= 2) {                                                                     // the tipped one
+    for (let x = 11; x <= 20; x++) { span(p, x, x, 15, G, 2, 0); span(p, x, x, 16, G, 3, 0); span(p, x, x, 17, G, 1, 0); }
+    span(p, 11, 13, 14, K, 3, 0);
   }
-  span(p, 1, 14, 13, G, 1, 0);
+  span(p, 1, 20, 19, G, 1, 0);
   return wear(p, v, G, `bottles${v}`, 0.35);
 }
 
 /** Two tankards, one on its side, with the ale still in one of them. */
 function artTankards(v) {
-  const p = makePix(16, 12), I = 'hijkl', A = 'ABCDE';
+  const p = makePix(22, 20), I = 'hijkl', A = 'ABCDE';
   const mug = (cx, y0) => {
-    const lip = topFace(p, cx, y0, 7, 5, I, { base: 5, taper: 0.92 });
-    for (let y = y0; y <= lip; y++) span(p, cx - 2, cx + 2, y, A, 1, 0);      // the dark ale in it
-    span(p, cx - 3, cx + 3, y0, I, 5, 1);                                     // the rim
-    span(p, cx - 3, cx + 3, lip + 1, I, 6, 1);
-    frontFace(p, cx, lip + 2, y0 + 8, 7, I, { base: 3, fall: 1 });
-    for (let y = lip + 3; y <= y0 + 7; y++) { setPx(p, cx + 4, y, step(I, 2)); setPx(p, cx + 5, y, step(I, 1)); }
-    setPx(p, cx + 4, lip + 2, step(I, 3)); setPx(p, cx + 4, y0 + 8, step(I, 2));   // the handle
+    for (let y = y0 + 2; y <= y0 + 13; y++) span(p, cx - 5, cx + 5, y, I, 3, 1);     // the barrel of it
+    ell(p, cx, y0 + 13, 5.4, 2.0, step(I, 1));                                       // the foot
+    ell(p, cx, y0 + 2, 5.4, 2.4, step(I, 5));                                        // the rim, seen from above
+    ell(p, cx, y0 + 2, 3.6, 1.4, step(A, 1));                                        // and the dark ale in it
+    for (const y of [y0 + 5, y0 + 10]) span(p, cx - 5, cx + 5, y, I, 5, 1);          // two iron bands
+    for (const [dx, dy] of [[6, 0], [7, 1], [7, 2], [7, 3], [6, 4]]) {               // a C HANDLE, standing off it
+      setPx(p, cx + dx, y0 + 5 + dy, step(I, 5)); setPx(p, cx + dx - 1, y0 + 5 + dy, step(I, 2));
+    }
   };
-  mug(4, 1);
-  if (v === 0) mug(11, 3);
-  else { for (let x = 9; x <= 15; x++) span(p, x, x, 9, I, 3, 0); span(p, 9, 15, 10, I, 1, 0); }
+  mug(6, 1);
+  if (v === 0) mug(14, 6);
+  else {                                                                             // the second one, on its side
+    for (let x = 12; x <= 21; x++) { span(p, x, x, 14, I, 3, 0); span(p, x, x, 15, I, 5, 0); span(p, x, x, 16, I, 2, 0); }
+    ell(p, 12, 15, 1.6, 2.4, step(I, 4));
+  }
   return wear(p, v, I, `tankards${v}`, 0.3);
 }
 
-/** Bone dice and the cup they were thrown from. Six texels of somebody's evening. */
+/** Bone dice and the cup they were thrown from: fifteen texels of somebody's evening. */
 function artDice(v) {
-  const p = makePix(10, 7), F = 'FGHIJ', I = 'hijkl';
+  const p = makePix(15, 11), F = 'FGHIJ', I = 'hijkl';
   const die = (x, y) => {
-    topFace(p, x, y, 3, 3, F, { base: 5, taper: 0.9 });
-    frontFace(p, x, y + 2, y + 3, 3, F, { base: 3, fall: 1 });
-    setPx(p, x, y + 1, '%'); setPx(p, x - 1, y + 3, '%'); setPx(p, x + 1, y + 3, '%');
+    topFace(p, x, y, 5, 5, F, { base: 5, taper: 0.88 });
+    frontFace(p, x, y + 3, y + 5, 5, F, { base: 3, fall: 1 });
+    setPx(p, x, y + 1, '%');                                  // one pip on the top face
+    setPx(p, x - 1, y + 4, '%'); setPx(p, x + 1, y + 5, '%'); // two on the face toward us
   };
-  die(2, 1); die(6, 2);
-  if (v >= 1) {                                             // the cup, spilled
-    for (let x = 6; x <= 9; x++) span(p, x, x, 6, I, 3, 0);
+  die(3, 0); die(9, 3);
+  if (v >= 1) {                                               // the cup they were thrown from, spilled
+    for (let x = 9; x <= 14; x++) { span(p, x, x, 9, I, 3, 0); span(p, x, x, 10, I, 1, 0); }
+    span(p, 9, 11, 8, I, 5, 0);
   }
   return p;
 }
@@ -731,256 +788,322 @@ function artDrainGrate(v) {
 }
 
 // =============================================================================== WALL DRESSING
-// Upright, screen-aligned, bottom art row at the type's `mountY` on the wall face.
+// Upright, in the wall's own plane, bottom art row at the type's `mountY` — and painted to FILL the
+// band `wallPlate()` wins back for it (see the essay there). Two rules hold this whole section
+// together, and the previous pass broke both:
+//
+//   1. PAINT BIG. A hung piece is drawn on the same texel grid as the hero, so an 8x8 ring is eight
+//      texels of a forty-six-texel figure: a smudge. Nothing here is under fourteen texels in its
+//      long direction, and most fill twenty-plus.
+//   2. LIGHT IT OFF THE ROOM'S KEY. Stone is a mid value and iron is a dark one, so a bracket
+//      painted honestly is a dark shape on a dark shape. Every fixture below ends with `rimLit()`,
+//      which sets its top-left border to the top of its own ramp — the one mark that carries a
+//      shield or a skull niche off the masonry at any zoom.
+
+/**
+ * THE KEY LIGHT, WELDED TO THE SILHOUETTE. Walks the drawing and sets every texel whose up or left
+ * neighbour is empty to the brightest step of the piece's ramp. Ink is never bleached (a socket
+ * stays a hole); the outline pass then lays the house contour outside that.
+ */
+function rimLit(p, keys) {
+  const src = p.d.slice();
+  const at = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : src[y * p.w + x]);
+  const top = step(keys, keys.length - 1), ink = '%'.charCodeAt(0), star = '*'.charCodeAt(0);
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+    const k = at(x, y);
+    if (!k || k === ink || k === star) continue;
+    if (!at(x - 1, y) || !at(x, y - 1)) setPx(p, x, y, top);
+  }
+  return p;
+}
 
 /** An UNLIT iron bracket. The lit torches belong to lighting.js; this is what is left when it dies. */
 function artSconce(v) {
-  const p = makePix(12, 20), I = 'hijkl';
-  for (let y = 4; y <= 15; y++) span(p, 3, 7, y, I, 3, 1);   // the back plate
-  span(p, 2, 8, 4, I, 5, 1); span(p, 2, 8, 15, I, 1, 1);
-  setPx(p, 4, 6, '%'); setPx(p, 6, 13, '%');                 // the two spikes that hold it
-  for (let y = 2; y <= 6; y++) span(p, 7 + (y < 4 ? 0 : 1), 8 + (y < 4 ? 0 : 1), y, I, 2, 1);  // the arm
-  for (let a = 0; a < Math.PI; a += 0.22) {                   // the cup
-    const x = Math.round(9 + Math.cos(a) * 2.6), y = Math.round(2 - Math.sin(a) * 1.8);
-    setPx(p, x, y, step(I, 4)); setPx(p, x, y + 1, step(I, 2));
+  const p = makePix(16, 26), I = 'hijkl';
+  for (let y = 13; y <= 24; y++) span(p, 4, 11, y, I, 3, 1);        // the back plate, run down the wall
+  span(p, 3, 12, 13, I, 5, 1); span(p, 3, 12, 14, I, 4, 1);         // its flared head
+  span(p, 3, 12, 23, I, 2, 1); span(p, 3, 12, 24, I, 1, 1);         // and its foot
+  setPx(p, 6, 17, '%'); setPx(p, 9, 20, '%');                       // the two spikes that hold it
+  for (let y = 8; y <= 13; y++) span(p, 6, 9, y, I, 2, 1);          // the stem
+  for (let j = 0; j < 7; j++) {                                     // the cup: a basket of iron staves
+    const w = Math.round(6 - j * 0.55);
+    span(p, 7 - w, 8 + w, 1 + j, I, j < 2 ? 5 : 3, 1);
   }
-  if (v >= 1) { for (let y = 2; y <= 4; y++) setPx(p, 11, y, 0); setPx(p, 10, 1, step(I, 1)); }  // bent
-  if (v >= 2) { for (let y = 0; y <= 4; y++) for (let x = 7; x <= 12; x++) setPx(p, x, y, 0); } // cup gone
-  return wear(p, v, I, `sconce${v}`, 0.3);
+  for (const x of [2, 5, 10, 13]) for (let y = 2; y <= 6; y++) setPx(p, x, y, step(I, 1));   // the staves' gaps
+  span(p, 1, 14, 1, I, 5, 1);                                       // the rim
+  if (v >= 1) { for (let y = 1; y <= 5; y++) { setPx(p, 14, y, 0); setPx(p, 13, y, 0); } }   // bent
+  if (v >= 2) { for (let y = 0; y <= 7; y++) for (let x = 0; x <= 15; x++) setPx(p, x, y, 0); }  // cup gone
+  return rimLit(wear(p, v, I, `sconce${v}`, 0.3), I);
 }
 
 /** Hanging cloth with a device on it. v3 is three rags on a rod. */
 function artBanner(v) {
-  const p = makePix(22, 36), C = 'ABCDE', M = 'mnopq';
-  for (let x = 1; x <= 20; x++) setPx(p, x, 0, step(M, 3));  // the rod
-  span(p, 1, 20, 1, M, 2, 1);
+  const p = makePix(24, 34), C = 'ABCDE', M = 'mnopq';
+  for (let x = 1; x <= 22; x++) { setPx(p, x, 0, step(M, 4)); setPx(p, x, 1, step(M, 2)); }   // the rod
+  for (const x of [0, 23]) { setPx(p, x, 0, step(M, 3)); setPx(p, x, 1, step(M, 1)); }        // its finials
   for (let y = 2; y <= 28; y++) {
-    const w = y > 26 ? 20 - (y - 26) * 4 : 20;
-    span(p, 1 + (20 - w) / 2 | 0, 1 + ((20 - w) / 2 | 0) + w - 2, y, C, 2, 1);
+    const w = y > 25 ? 22 - (y - 25) * 5 : 22;
+    span(p, 1 + ((22 - w) / 2 | 0), ((22 - w) / 2 | 0) + w, y, C, 2, 1);
   }
-  for (let y = 3; y <= 27; y += 6) span(p, 3, 18, y, C, 3, 0);   // the folds catch the light
-  for (let j = 0; j <= 5; j++) {                                 // a chevron device
-    setPx(p, 10 - j, 12 + j, step(M, 3)); setPx(p, 11 + j, 12 + j, step(M, 3));
-    setPx(p, 10 - j, 13 + j, step(M, 2)); setPx(p, 11 + j, 13 + j, step(M, 2));
+  for (let y = 4; y <= 27; y += 5) span(p, 3, 20, y, C, 3, 0);      // the folds catch the light
+  for (let j = 0; j <= 7; j++) {                                    // a chevron device, big enough to see
+    for (const d of [0, 1]) {
+      setPx(p, 11 - j, 11 + j + d, step(M, 4 - d)); setPx(p, 12 + j, 11 + j + d, step(M, 4 - d));
+    }
   }
-  for (let i = 0; i < 4; i++) { setPx(p, 8 + i * 2, 29 + (i % 2), step(M, 3)); }  // the fringe
-  return wear(p, v, C, `banner${v}`, 0.8);
+  for (let i = 0; i < 5; i++) { setPx(p, 6 + i * 3, 29 + (i % 2), step(M, 3)); setPx(p, 6 + i * 3, 30 + (i % 2), step(M, 1)); }
+  return rimLit(wear(p, v, C, `banner${v}`, 0.8), C);
 }
 
-/** A woven scene: border, a tree, and a figure under it, all at four texels of resolution. */
+/** A woven scene: border, a tree, and a figure under it, all at five texels of resolution. */
 function artTapestry(v) {
-  const p = makePix(30, 38), C = 'ABCDE', M = 'mnopq', F = 'FGHIJ';
-  for (let x = 1; x <= 28; x++) setPx(p, x, 0, step(F, 2));         // the pole
-  for (let y = 1; y <= 35; y++) span(p, 1, 28, y, C, 2, 1);
-  for (let y = 2; y <= 34; y++) { setPx(p, 2, y, step(M, 3)); setPx(p, 27, y, step(M, 2)); }  // border
-  span(p, 2, 27, 2, M, 3, 0); span(p, 2, 27, 34, M, 1, 0);
-  for (let y = 8; y <= 24; y++) span(p, 14, 15, y, F, 2, 1);        // the tree's trunk
-  for (let i = 0; i < 5; i++) ell(p, 14.5 + (i % 2 ? 4 : -4), 10 + i * 2, 5 - i * 0.5, 2.4, step(C, 3));
-  ell(p, 14.5, 27, 2.4, 3.4, step(M, 2));                          // a figure beneath it
-  setPx(p, 14, 24, step(F, 4)); setPx(p, 15, 24, step(F, 3));
-  for (let i = 0; i < 5; i++) setPx(p, 6 + i * 5, 36, step(C, 3));  // fringe
-  return wear(p, v, C, `tapestry${v}`, 0.7);
+  const p = makePix(30, 34), C = 'ABCDE', M = 'mnopq', F = 'FGHIJ';
+  for (let x = 1; x <= 28; x++) { setPx(p, x, 0, step(F, 3)); setPx(p, x, 1, step(F, 1)); }   // the pole
+  for (let y = 2; y <= 32; y++) span(p, 1, 28, y, C, 2, 1);
+  for (let y = 3; y <= 31; y++) { setPx(p, 2, y, step(M, 4)); setPx(p, 27, y, step(M, 2)); }  // the border
+  span(p, 2, 27, 3, M, 4, 0); span(p, 2, 27, 31, M, 1, 0);
+  for (let y = 12; y <= 26; y++) span(p, 14, 16, y, F, 2, 1);                                 // the tree's trunk
+  for (let i = 0; i < 5; i++) ell(p, 15 + (i % 2 ? 5 : -5), 12 + i * 2.6, 6 - i * 0.6, 2.8, step(C, 3));
+  ell(p, 15, 28, 3.0, 3.6, step(M, 2));                                                       // a figure beneath it
+  ell(p, 15, 24.5, 1.8, 1.8, step(F, 4));
+  for (let i = 0; i < 6; i++) { setPx(p, 4 + i * 4, 33, step(C, 3)); setPx(p, 5 + i * 4, 33, step(C, 1)); }
+  return rimLit(wear(p, v, C, `tapestry${v}`, 0.7), C);
 }
 
 /** A shield hung flat on the wall: boss, rim, and somebody's device. */
 function artHungShield(v) {
-  const p = makePix(20, 20), I = 'hijkl', M = 'mnopq', C = 'ABCDE';
-  ell(p, 9.5, 9.5, 8.6, 8.6, 'j');
+  const p = makePix(24, 24), I = 'hijkl', M = 'mnopq', C = 'ABCDE';
+  ell(p, 11.5, 11.5, 10.6, 10.6, 'j');
   const q = model(p, I, { up: 0.65, dome: 0.16, local: 0.2 });
-  for (let a = 0; a < Math.PI * 2; a += 0.05) {                     // the rim
-    const x = Math.round(9.5 + Math.cos(a) * 8.4), y = Math.round(9.5 + Math.sin(a) * 8.4);
-    setPx(q, x, y, step(I, Math.cos(a + 2.4) > 0 ? 1 : 4));
+  for (let a = 0; a < Math.PI * 2; a += 0.04) {                     // the rim, two texels of iron
+    const c = Math.cos(a), sn = Math.sin(a), k = step(I, Math.cos(a + 2.4) > 0 ? 1 : 4);
+    for (const r of [10.4, 9.4]) setPx(q, Math.round(11.5 + c * r), Math.round(11.5 + sn * r), k);
   }
-  for (let j = -4; j <= 4; j++) { setPx(q, 9 + j, 9 - Math.abs(j) + 2, step(C, 3)); setPx(q, 10 + j, 9 - Math.abs(j) + 2, step(C, 2)); }
-  ell(q, 9.5, 9.5, 2.4, 2.4, step(M, 3));                          // the boss
-  setPx(q, 8, 8, step(M, 4)); setPx(q, 11, 11, step(M, 1));
-  if (v >= 2) { for (let i = 0; i < 7; i++) setPx(q, 5 + i, 4 + i, '%'); }   // a blow that split it
-  return wear(q, v, I, `hungShield${v}`, 0.5);
+  for (let j = -6; j <= 6; j++) for (const d of [0, 1]) {           // a chevron device across the face
+    setPx(q, 11 + j, 12 - Math.abs(j) + 4 + d, step(C, 3 - d));
+  }
+  ell(q, 11.5, 11.5, 3.2, 3.2, step(M, 3));                        // the boss
+  ell(q, 11.5, 11.5, 1.4, 1.4, step(M, 4));
+  setPx(q, 9, 9, step(M, 4)); setPx(q, 14, 14, step(M, 1));
+  if (v >= 2) for (let i = 0; i < 10; i++) setPx(q, 6 + i, 4 + i, '%');   // a blow that split it
+  return rimLit(wear(q, v, I, `hungShield${v}`, 0.5), I);
 }
 
 /** Crossed arms over a plate: the armoury's signature on a bare wall. */
 function artTrophyArms(v) {
-  const p = makePix(26, 24), W = 'abcdefg', S = 'hijkl';
-  for (let i = 0; i < 22; i++) {                                    // two hafts, crossed
-    setPx(p, 2 + i, 2 + i, step(W, 3)); setPx(p, 2 + i, 3 + i, step(W, 1));
-    setPx(p, 23 - i, 2 + i, step(W, 3)); setPx(p, 23 - i, 3 + i, step(W, 1));
+  const p = makePix(28, 26), W = 'abcdefg', S = 'hijkl';
+  for (const bx of [1, 21]) {                                       // two leaf blades, one per top corner
+    for (let j = 0; j < 11; j++) {
+      const w = Math.max(0, Math.round(3.2 * Math.sin(((j + 0.6) / 11) * Math.PI)));
+      span(p, bx + 3 - w, bx + 3 + w, j, S, 3 + (j < 4 ? 1 : -1), 1);
+    }
   }
-  for (const [cx, cy, dir] of [[4, 4, 1], [21, 4, -1]]) {           // the two heads
-    for (let j = 0; j < 5; j++) span(p, cx, cx + dir * (4 - Math.abs(j - 2)), cy - 2 + j, S, 3 + (j < 2 ? 1 : -1), 1);
+  for (let i = 0; i < 20; i++) {                                    // and the two hafts, crossed under them
+    const y = 9 + Math.round(i * 0.85);
+    for (const d of [0, 1]) {
+      setPx(p, 4 + i, y + d, step(W, d ? 1 : 4)); setPx(p, 23 - i, y + d, step(W, d ? 1 : 4));
+    }
   }
-  ell(p, 12.5, 13, 4.2, 4.2, step(S, 2));                           // the boss plate
-  setPx(p, 11, 11, step(S, 4)); setPx(p, 14, 15, step(S, 1));
-  return wear(p, v, W, `trophyArms${v}`, 0.5);
+  ell(p, 13.5, 17, 6.2, 6.2, step(S, 2));                           // the boss plate they cross over
+  for (let a = 0; a < Math.PI * 2; a += 0.08) {                      // its rim
+    setPx(p, Math.round(13.5 + Math.cos(a) * 6.0), Math.round(17 + Math.sin(a) * 6.0), step(S, Math.cos(a + 2.4) > 0 ? 1 : 4));
+  }
+  ell(p, 13.5, 17, 2.4, 2.4, step(S, 4));
+  setPx(p, 11, 14, step(S, 4)); setPx(p, 16, 20, step(S, 1));
+  return rimLit(wear(p, v, W, `trophyArms${v}`, 0.5), W);
 }
 
 /** Chain hanging from a ring: three links wide, thirty texels of hopelessness. */
 function artChains(v) {
-  const p = makePix(10, 32), I = 'hijkl';
-  for (let a = 0; a < Math.PI * 2; a += 0.3) setPx(p, Math.round(4 + Math.cos(a) * 2.2), Math.round(2 + Math.sin(a) * 2), step(I, 3));
-  chainRun(p, 3, 4, 30 - v * 7, I);
-  if (v >= 1) { setPx(p, 3, 30 - v * 7 + 1, step(I, 1)); setPx(p, 5, 30 - v * 7 + 2, step(I, 2)); }  // the broken end
-  return p;
+  const p = makePix(12, 32), I = 'hijkl';
+  for (let a = 0; a < Math.PI * 2; a += 0.16) {                     // the ring it hangs from
+    for (const r of [3.0, 2.2]) setPx(p, Math.round(5 + Math.cos(a) * r), Math.round(3 + Math.sin(a) * r * 0.9), step(I, 3));
+  }
+  chainRun(p, 3, 6, 30 - v * 7, I);
+  chainRun(p, 7, 8, 27 - v * 7, I);                                 // a second fall beside it
+  if (v >= 1) { setPx(p, 3, 31 - v * 7, step(I, 1)); setPx(p, 5, 32 - v * 7, step(I, 2)); }   // the broken end
+  return rimLit(p, I);
 }
 
 /** Two cuffs on short chains. Nothing else says what a room is for so quickly. */
 function artManacles(v) {
-  const p = makePix(16, 16), I = 'hijkl';
-  for (let a = 0; a < Math.PI * 2; a += 0.4) setPx(p, Math.round(7.5 + Math.cos(a) * 1.8), Math.round(1.5 + Math.sin(a) * 1.5), step(I, 3));
-  chainRun(p, 4, 3, 8, I); chainRun(p, 10, 3, 8, I);
-  for (const cx of [4.5, 10.5]) {                                   // the cuffs
-    for (let a = 0.5; a < Math.PI * 2 - 0.5; a += 0.22) {
-      setPx(p, Math.round(cx + Math.cos(a) * 3), Math.round(12 + Math.sin(a) * 2.6), step(I, Math.cos(a + 2.4) > 0 ? 1 : 4));
+  const p = makePix(20, 22), I = 'hijkl';
+  for (let a = 0; a < Math.PI * 2; a += 0.2) {                      // the pin they both hang from
+    setPx(p, Math.round(9.5 + Math.cos(a) * 2.6), Math.round(2.5 + Math.sin(a) * 2.2), step(I, 3));
+  }
+  chainRun(p, 4, 4, 12, I); chainRun(p, 13, 4, 12, I);
+  for (const cx of [5, 14]) {                                       // the cuffs, four texels of iron thick
+    for (let a = 0.4; a < Math.PI * 2 - 0.4; a += 0.14) {
+      const k = step(I, Math.cos(a + 2.4) > 0 ? 1 : 4);
+      for (const r of [4.2, 3.2]) setPx(p, Math.round(cx + Math.cos(a) * r), Math.round(17 + Math.sin(a) * r * 0.95), k);
     }
   }
-  if (v >= 1) { for (let y = 9; y <= 14; y++) setPx(p, 12, y, 0); }
-  return p;
+  if (v >= 1) { for (let y = 13; y <= 20; y++) { setPx(p, 14, y, 0); setPx(p, 15, y, 0); } }
+  return rimLit(p, I);
 }
 
 /** A corner web: radial threads to the corner, and the spiral hung between them. */
 function artCobweb(v) {
-  const p = makePix(22, 22), W = 'ABCDE';
+  const p = makePix(26, 26), W = 'ABCDE';
   const r = createRng(`dressing:cobweb:${v}`);
-  const rad = 20 - v * 3, spokes = 7;
+  const rad = 25 - v * 3, spokes = 8;
   for (let i = 0; i <= spokes; i++) {                               // the radials, from the corner
     const a = (i / spokes) * (Math.PI / 2);
     for (let d = 2; d < rad; d++) {
-      if (!r.chance(0.88)) continue;
-      setPx(p, Math.round(Math.cos(a) * d), Math.round(Math.sin(a) * d), step(W, d < rad * 0.5 ? 3 : 2));
+      if (!r.chance(0.9)) continue;
+      setPx(p, Math.round(Math.cos(a) * d), Math.round(Math.sin(a) * d), step(W, d < rad * 0.5 ? 4 : 3));
     }
   }
-  for (let ring = 4; ring < rad; ring += 3 + v) {                   // the spiral
-    for (let a = 0; a <= Math.PI / 2; a += 0.06) {
-      if (!r.chance(0.7 - v * 0.1)) continue;
-      const rr = ring + a * 0.9;
-      setPx(p, Math.round(Math.cos(a) * rr), Math.round(Math.sin(a) * rr), step(W, 2));
+  for (let ring = 5; ring < rad; ring += 3 + v) {                   // the spiral
+    for (let a = 0; a <= Math.PI / 2; a += 0.05) {
+      if (!r.chance(0.78 - v * 0.1)) continue;
+      const rr = ring + a * 1.1;
+      setPx(p, Math.round(Math.cos(a) * rr), Math.round(Math.sin(a) * rr), step(W, 3));
     }
   }
-  if (v >= 2) for (let i = 0; i < 20; i++) setPx(p, r.int(0, 21), r.int(0, 21), 0);  // torn through
+  if (v >= 2) for (let i = 0; i < 26; i++) setPx(p, r.int(0, 25), r.int(0, 25), 0);  // torn through
   return p;
 }
 
 /** A skull in a carved recess. The recess is the point: it is cut INTO the wall, not stuck on it. */
 function artSkullNiche(v) {
-  const p = makePix(16, 18), S = 'rstuv', F = 'FGHIJ';
-  for (let y = 3; y <= 16; y++) span(p, 2, 13, y, S, 0, 0);         // the dark of the recess
-  for (let a = 0; a <= Math.PI; a += 0.1) {                          // the arch
-    const x = Math.round(7.5 + Math.cos(a) * 6), y = Math.round(4 - Math.sin(a) * 3.4);
-    setPx(p, x, y, step(S, a > 1.9 ? 4 : 1));
+  const p = makePix(22, 26), S = 'rstuv';
+  for (let y = 5; y <= 23; y++) span(p, 3, 18, y, S, 0, 0);          // the dark of the recess
+  for (let a = 0; a <= Math.PI; a += 0.06) {                         // the arch over it
+    const x = Math.round(10.5 + Math.cos(a) * 9), y = Math.round(6 - Math.sin(a) * 5.2);
+    for (const d of [0, 1, 2]) setPx(p, x, y - d, step(S, a > 1.9 ? 4 : 1));
   }
-  for (let y = 4; y <= 16; y++) { setPx(p, 1, y, step(S, 4)); setPx(p, 14, y, step(S, 1)); }
-  span(p, 1, 14, 17, S, 3, 1);                                       // the sill
+  for (let y = 6; y <= 23; y++) for (const [x, k] of [[1, 4], [2, 3], [19, 2], [20, 1]]) setPx(p, x, y, step(S, k));
+  span(p, 1, 20, 24, S, 4, 1); span(p, 1, 20, 25, S, 2, 1);          // the sill
   const sk = artSkull(Math.min(2, v));
-  for (let y = 0; y < sk.h; y++) for (let x = 0; x < sk.w; x++) { const k = sk.d[y * sk.w + x]; if (k) setPx(p, x + 3, y + 6, k); }
-  return p;
+  for (let y = 0; y < sk.h; y++) for (let x = 0; x < sk.w; x++) { const k = sk.d[y * sk.w + x]; if (k) setPx(p, x + 3, y + 8, k); }
+  return rimLit(p, S);
 }
 
 /** Stacked bone on a stone shelf: long bones end-on, and one skull looking out. */
 function artOssuaryShelf(v) {
-  const p = makePix(30, 20), S = 'rstuv', F = 'FGHIJ';
-  span(p, 0, 29, 15, S, 5, 0); span(p, 0, 29, 16, S, 3, 0); span(p, 0, 29, 17, S, 1, 0);  // the shelf
+  const p = makePix(32, 26), S = 'rstuv', F = 'FGHIJ';
+  for (const [y, k] of [[20, 5], [21, 4], [22, 2], [23, 1]]) span(p, 0, 31, y, S, k, 0);   // the shelf
   const r = createRng(`dressing:ossuaryShelf:${v}`);
-  for (let i = 0; i < 11 - v; i++) {                                 // the bone ends
-    const x = 1 + i * 2 + r.int(0, 1), y = 8 + r.int(0, 4);
-    for (let yy = y; yy <= 14; yy++) span(p, x, x + 1, yy, F, 3, 1);
-    setPx(p, x, y, step(F, 4)); setPx(p, x + 1, y, step(F, 2));
+  for (let i = 0; i < 11 - v; i++) {                                 // the bone ends, stacked on it
+    const x = 1 + i * 3 + r.int(0, 1), y = 8 + r.int(0, 5);
+    for (let yy = y; yy <= 19; yy++) span(p, x, x + 2, yy, F, 3, 1);
+    span(p, x, x + 2, y, F, 4, 1);
   }
   const sk = artSkull(Math.min(2, v));
-  for (let y = 0; y < sk.h; y++) for (let x = 0; x < sk.w; x++) { const k = sk.d[y * sk.w + x]; if (k) setPx(p, x + 19, y + 5, k); }
-  return wear(p, v, F, `ossuaryShelf${v}`, 0.4);
+  for (let y = 0; y < sk.h; y++) for (let x = 0; x < sk.w; x++) { const k = sk.d[y * sk.w + x]; if (k) setPx(p, x + 15, y + 4, k); }
+  return rimLit(wear(p, v, F, `ossuaryShelf${v}`, 0.4), F);
 }
 
-/** A tether ring on a plate. Eight texels, and the room is suddenly about restraint. */
+/** A tether ring on a plate. Sixteen texels, and the room is suddenly about restraint. */
 function artIronRing(v) {
-  const p = makePix(10, 10), I = 'hijkl';
-  ell(p, 4.5, 3, 2.4, 2, step(I, 3));
-  for (let a = 0; a < Math.PI * 2; a += 0.25) setPx(p, Math.round(4.5 + Math.cos(a) * 3.4), Math.round(5.5 + Math.sin(a) * 3), step(I, Math.cos(a + 2.4) > 0 ? 1 : 4));
-  ell(p, 4.5, 5.5, 1.6, 1.4, 0);
-  if (v >= 1) setPx(p, 7, 3, 0);
-  return p;
+  const p = makePix(16, 16), I = 'hijkl';
+  for (let y = 1; y <= 5; y++) span(p, 4, 11, y, I, 3, 1);           // the plate it is bolted through
+  span(p, 4, 11, 1, I, 5, 1); span(p, 4, 11, 5, I, 1, 1);
+  setPx(p, 6, 3, '%'); setPx(p, 9, 3, '%');                          // its two bolts
+  for (let a = 0; a < Math.PI * 2; a += 0.1) {                       // the ring, three texels of iron
+    const k = step(I, Math.cos(a + 2.4) > 0 ? 1 : 4);
+    for (const r of [6.0, 5.0]) setPx(p, Math.round(7.5 + Math.cos(a) * r), Math.round(9.5 + Math.sin(a) * r * 0.95), k);
+  }
+  if (v >= 1) { for (let y = 12; y <= 15; y++) setPx(p, 12, y, 0); }
+  return rimLit(p, I);
 }
 
 /** A carved head with its mouth open, and the stain the water made below it. */
 function artGargoyleSpout(v) {
-  const p = makePix(20, 18), S = 'rstuv', W = 'ABCDE';
-  ell(p, 9.5, 7, 7, 5.4, 't');
-  box(p, 5, 8, 14, 13, 't');
+  const p = makePix(24, 22), S = 'rstuv', W = 'ABCDE';
+  ell(p, 11.5, 8, 8.6, 6.6, 't');
+  box(p, 6, 9, 17, 16, 't');
+  for (const x of [3, 20]) for (let y = 4; y <= 9; y++) setPx(p, x, y, 't');   // the two horns
   const q = model(p, S, { up: 0.7, dome: 0.16, local: 0.35 });
-  for (const x of [6, 12]) { setPx(q, x, 5, '%'); setPx(q, x + 1, 5, '%'); setPx(q, x, 4, step(S, 4)); }  // brows and eyes
-  box(q, 7, 11, 12, 13, '%');                                         // the mouth
-  for (const x of [7, 9, 11]) setPx(q, x, 11, step(S, 4));            // teeth
-  for (let i = 0; i < 4 - v; i++) setPx(q, 9 + (i % 2), 14 + i, step(W, 3));   // the drip
-  return wear(q, v, S, `gargoyle${v}`, 0.4);
+  for (const x of [7, 15]) {                                          // the brows and the eyes under them
+    box(q, x, 5, x + 2, 6, '%'); span(q, x - 1, x + 3, 4, S, 4, 0);
+  }
+  box(q, 8, 12, 15, 15, '%');                                         // the mouth, open
+  for (const x of [8, 10, 12, 14]) { setPx(q, x, 12, step(S, 4)); setPx(q, x, 15, step(S, 3)); }   // teeth
+  for (let i = 0; i < 6 - v; i++) { setPx(q, 11 + (i % 2), 17 + i, step(W, 3)); }                 // the drip
+  return rimLit(wear(q, v, S, `gargoyle${v}`, 0.4), S);
 }
 
 /** A plank on two pegs, with the jars and boxes somebody left on it. */
 function artWallShelf(v) {
-  const p = makePix(26, 16), W = 'abcdefg', G = 'ABCDE', F = 'FGHIJ';
-  span(p, 0, 25, 10, W, 5, 0); span(p, 0, 25, 11, W, 3, 0); span(p, 0, 25, 12, W, 1, 0);
-  for (const x of [3, 21]) for (let y = 13; y <= 15; y++) span(p, x, x + 1, y, W, 2, 1);   // pegs
-  if (v <= 1) { for (let y = 4; y <= 9; y++) span(p, 3, 6, y, G, 2, 1); span(p, 3, 6, 4, F, 3, 1); }   // a jar
-  for (let y = 6; y <= 9; y++) span(p, 9, 13, y, F, 3, 1);                                   // a box
-  span(p, 9, 13, 6, F, 4, 1);
-  if (v === 0) { for (let y = 5; y <= 9; y++) span(p, 16, 18, y, G, 3, 1); setPx(p, 16, 5, step(G, 4)); }
-  return wear(p, v, W, `wallShelf${v}`, 0.5);
+  const p = makePix(28, 22), W = 'abcdefg', G = 'ABCDE', F = 'FGHIJ';
+  for (const [y, k] of [[14, 5], [15, 4], [16, 2], [17, 1]]) span(p, 0, 27, y, W, k, 0);   // the plank
+  for (const x of [3, 22]) for (let y = 18; y <= 21; y++) span(p, x, x + 2, y, W, 2, 1);   // the pegs
+  if (v <= 1) { for (let y = 4; y <= 13; y++) span(p, 3, 8, y, G, 2, 1); span(p, 3, 8, 4, F, 3, 1); span(p, 4, 7, 3, F, 4, 1); }
+  for (let y = 7; y <= 13; y++) span(p, 11, 18, y, F, 3, 1);                                // a box
+  span(p, 11, 18, 6, F, 4, 1); span(p, 11, 18, 7, F, 5, 1);
+  if (v === 0) { for (let y = 6; y <= 13; y++) span(p, 21, 25, y, G, 3, 1); setPx(p, 21, 5, step(G, 4)); span(p, 22, 24, 5, G, 4, 1); }
+  return rimLit(wear(p, v, W, `wallShelf${v}`, 0.5), W);
 }
 
 /** A carved tablet whose name nobody can read any more. */
 function artPlaque(v) {
-  const p = makePix(20, 14), S = 'rstuv';
-  for (let y = 1; y <= 12; y++) span(p, 1, 18, y, S, 3, 1);
-  span(p, 1, 18, 1, S, 5, 1); span(p, 1, 18, 12, S, 1, 1);
+  const p = makePix(24, 18), S = 'rstuv';
+  for (let y = 1; y <= 16; y++) span(p, 1, 22, y, S, 3, 1);
+  span(p, 1, 22, 1, S, 5, 1); span(p, 1, 22, 2, S, 4, 1);
+  span(p, 1, 22, 15, S, 2, 1); span(p, 1, 22, 16, S, 1, 1);
   const r = createRng(`dressing:plaque:${v}`);
   for (let row = 0; row < 3; row++) {                                 // three lines of chiselled text
-    let x = 3;
-    while (x < 16) {
-      const w = r.int(1, 3);
-      if (r.chance(0.85 - v * 0.2)) for (let i = 0; i < w; i++) { setPx(p, x + i, 4 + row * 3, '%'); setPx(p, x + i, 3 + row * 3, step(S, 4)); }
+    let x = 4;
+    while (x < 20) {
+      const w = r.int(2, 4);
+      if (r.chance(0.85 - v * 0.2)) for (let i = 0; i < w && x + i < 20; i++) {
+        setPx(p, x + i, 5 + row * 3, '%'); setPx(p, x + i, 6 + row * 3, '%'); setPx(p, x + i, 4 + row * 3, step(S, 4));
+      }
       x += w + r.int(1, 2);
     }
   }
-  return wear(p, v, S, `plaque${v}`, 0.4);
+  return rimLit(wear(p, v, S, `plaque${v}`, 0.4), S);
 }
 
 /** A crack running up the masonry, with the lit lip on the light side and the grit it shed. */
 function artWallCrack(v) {
-  const p = makePix(26, 30), S = 'rstuv';
+  const p = makePix(28, 32), S = 'rstuv';
   const r = createRng(`dressing:wallCrack:${v}`);
-  let x = 12;
-  for (let y = 29; y >= 0; y--) {
-    setPx(p, x, y, '%');
-    setPx(p, x - 1, y, step(S, 4));                                   // the top-left lip
-    setPx(p, x + 1, y, step(S, 1));
-    if (r.chance(0.3)) { setPx(p, x + 1, y, '%'); setPx(p, x + 2, y, step(S, 1)); }
-    x += r.int(-1, 1); x = Math.max(2, Math.min(23, x));
-    if (v >= 1 && y === 18) { let bx = x; for (let by = 18; by < 26; by++) { setPx(p, bx, by, '%'); setPx(p, bx - 1, by, step(S, 4)); bx += r.int(0, 1); } }
+  let x = 13;
+  for (let y = 31; y >= 0; y--) {
+    setPx(p, x, y, '%'); setPx(p, x + 1, y, '%');
+    setPx(p, x - 1, y, step(S, 5));                                   // the top-left lip, taking the key
+    setPx(p, x - 2, y, step(S, 3));
+    setPx(p, x + 2, y, step(S, 1));
+    if (r.chance(0.3)) { setPx(p, x + 2, y, '%'); setPx(p, x + 3, y, step(S, 1)); }
+    x += r.int(-1, 1); x = Math.max(3, Math.min(23, x));
+    if (v >= 1 && y === 19) {
+      let bx = x;
+      for (let by = 19; by < 28; by++) { setPx(p, bx, by, '%'); setPx(p, bx + 1, by, '%'); setPx(p, bx - 1, by, step(S, 5)); bx += r.int(0, 1); }
+    }
   }
-  for (let i = 0; i < 6 + v * 6; i++) setPx(p, r.int(4, 21), r.int(24, 29), step(S, r.int(1, 3)));
+  for (let i = 0; i < 10 + v * 8; i++) setPx(p, r.int(4, 23), r.int(25, 31), step(S, r.int(2, 4)));
   return p;
 }
 
 /** Damp bloom: no edge anywhere, because damp does not have one. */
 function artMould(v) {
-  const p = makePix(26, 26), G = 'ABCDE';
+  const p = makePix(28, 28), G = 'ABCDE';
   const r = createRng(`dressing:mould:${v}`);
-  for (let i = 0; i < 3 + v; i++) blot(p, r.int(6, 19), r.int(6, 19), r.float(5, 9), r.float(5, 9), G, r, { base: 1, grad: 1, edge: 0.28 });
-  for (let i = 0; i < 40; i++) setPx(p, r.int(0, 25), r.int(0, 25), step(G, r.chance(0.4) ? 3 : 0));
+  for (let i = 0; i < 4 + v; i++) blot(p, r.int(6, 21), r.int(6, 21), r.float(6, 10), r.float(6, 10), G, r, { base: 2, grad: 1, edge: 0.28 });
+  for (let i = 0; i < 60; i++) setPx(p, r.int(0, 27), r.int(0, 27), step(G, r.chance(0.4) ? 4 : 1));
   return p;
 }
 
 /** Bracket fungus: half-discs stepping out of the wall, each with a lit upper edge. */
 function artFungusShelf(v) {
-  const p = makePix(22, 16), G = 'ABCDE';
-  const shelves = [[7, 12, 6.5], [14, 8, 5], [5, 5, 4]];
+  const p = makePix(26, 20), G = 'ABCDE';
+  const shelves = [[9, 15, 8.5], [17, 10, 6.5], [6, 6, 5.5]];
   for (let i = 0; i < 3 - Math.max(0, v - 1); i++) {
     const [cx, cy, rr] = shelves[i];
-    for (let a = Math.PI; a <= Math.PI * 2; a += 0.05) {
+    for (let a = Math.PI; a <= Math.PI * 2; a += 0.04) {
       for (let d = 0; d <= rr; d += 0.5) {
-        setPx(p, Math.round(cx + Math.cos(a) * d), Math.round(cy + Math.sin(a) * d * 0.55), step(G, d > rr - 1.2 ? 1 : 2));
+        setPx(p, Math.round(cx + Math.cos(a) * d), Math.round(cy + Math.sin(a) * d * 0.62), step(G, d > rr - 1.6 ? 1 : 2));
       }
     }
-    for (let x = Math.round(cx - rr); x <= Math.round(cx + rr); x++) setPx(p, x, Math.round(cy - Math.sqrt(Math.max(0, 1 - ((x - cx) / rr) ** 2)) * rr * 0.55), step(G, 4));
+    for (let x = Math.round(cx - rr); x <= Math.round(cx + rr); x++) {
+      const y = Math.round(cy - Math.sqrt(Math.max(0, 1 - ((x - cx) / rr) ** 2)) * rr * 0.62);
+      setPx(p, x, y, step(G, 4)); setPx(p, x, y + 1, step(G, 3));
+    }
   }
-  return wear(p, v, G, `fungusShelf${v}`, 0.4);
+  return rimLit(wear(p, v, G, `fungusShelf${v}`, 0.4), G);
 }
 
 // ================================================================================== the registry
@@ -1055,6 +1178,13 @@ export function dressingClass(type) { return DRESSING[type] ? DRESSING[type].cls
 export function dressingVariants(type) { return DRESSING[type] ? DRESSING[type].v : 0; }
 /** The world y a wall piece's bottom art row hangs at (0 for anything else). */
 export function dressingMountY(type) { return (DRESSING[type] && DRESSING[type].mount) || 0; }
+/** The palette a piece is painted with, for tests and the debug plates. @returns {object|null} */
+export function dressingPalette(type, variant = 0) {
+  const d = DRESSING[type];
+  if (!d) return null;
+  const v = Math.max(0, Math.min(d.v - 1, variant | 0));
+  return palOf(`${type}:${v}`, d.pal);
+}
 /** The painted art for a piece, for tests and the debug plates. @returns {object|null} a Pix */
 export function dressingArt(type, variant = 0) {
   const d = DRESSING[type];
@@ -1063,44 +1193,91 @@ export function dressingArt(type, variant = 0) {
 
 const FACE = { n: { dx: 0, dy: -1 }, e: { dx: 1, dy: 0 }, s: { dx: 0, dy: 1 }, w: { dx: -1, dy: 0 } };
 const TURN = { n: 0, e: 1, s: 2, w: 3 };
-/** Nothing hung on a wall may top this (AMBIENCE §5.3: the walls are 1.2 units tall). */
-const WALL_CEIL = 1.15;
+/**
+ * THE WALL BAND IS SEVEN TEXELS TALL, AND THAT IS THE WHOLE PROBLEM.
+ *
+ * Measured, not reasoned: the dungeon's walls are `WALL_H = 0.82` units of stone (dungeon.js) and
+ * the play camera is 17 degrees off vertical, so a world-upright surface keeps only `sin(17°) = 0.29`
+ * of its height on screen. A wall's whole visible FACE is therefore `0.82 * 0.29 = 0.24` of a tile
+ * — SEVEN AND A HALF TEXELS. A quad drawn honestly in that plane at `artH/32` units tall gives a
+ * 20-texel sconce five texels of screen and an 8-texel ring two, which is exactly the smudge the
+ * art director measured: sixteen of the seventeen wall types rendered as nothing at all.
+ *
+ * The two failed answers, for the record:
+ *   · A SCREEN-ALIGNED BILLBOARD (the first attempt) grows along the camera's up vector, which here
+ *     is `(0, 0.29, -0.96)` — almost due NORTH, into the masonry. The wall swallowed every one.
+ *   · AN HONEST IN-PLANE QUAD (the second attempt, and what shipped) is depth-correct and legible
+ *     at seven texels, which is to say not legible.
+ *
+ * What actually works is the third thing, and it is the floor decal's own bargain read one surface
+ * up: KEEP THE QUAD IN THE WALL'S PLANE, AND STRETCH IT VERTICALLY BY `1 / sin(tilt)` SO THAT ITS
+ * ART LANDS ON THE SHARED TEXEL GRID AT TRUE SIZE. A 24-row sconce is drawn on a plate 2.57 units
+ * tall; the camera foreshortens it back to 24 texels of screen. The horizontal is snapped to the
+ * same grid, so every wall piece is finally painted at exactly the resolution the hero is.
+ *
+ * The stretched plate is taller than the wall it hangs on, and that is not a bug — it is the only
+ * geometry that reads. Work the depth through: a plate at `z = wallFace + 0.04` and the wall's top
+ * face are equal in view depth exactly at `y = WALL_H`, so the plate is OCCLUDED BY ITS OWN WALL
+ * below the wall's top edge and VISIBLE ABOVE IT, painting over the wall's top surface — the same
+ * band of screen the torch brackets already reach into. It therefore steals nothing: a prop
+ * standing on the floor in front is clipped by the wall face long before it gets that high, so the
+ * piece cannot draw over the cast, and nothing that stands behind the wall is on screen at all.
+ *
+ * The foreshortening is read off the LIVE camera (the tilt is a settings slider, 0–45 degrees), so
+ * a player who flattens the view gets shorter plates and the same square texels.
+ *
+ * WHAT THE CAMERA STILL COSTS US, honestly: this view looks from the south, so a piece on a room's
+ * NORTH wall reads fully, one on an east or west wall is edge-on, and one on a south wall is behind
+ * its own stone (AMBIENCE §5.3 — `wallReads()` only ever hangs them facing 's').
+ */
+/** How far above the wall base a hung piece may reach, in tiles of SCREEN height. A one-tile-thick
+ *  wall shows 1.21 tiles of itself (face band + top face); stay inside it and a plate never spills
+ *  past its own masonry onto whatever lies beyond. 34 art rows is the practical ceiling. */
+const WALL_SCREEN_TILES = 1.15;
+/** sin(17°): what a world-upright surface keeps of its height at the DEFAULT play tilt. Only a seed
+ *  for the first frame's bounds — the live value is read off the camera every frame below. */
+const PLAN_FORESHORTEN = 0.2924;
+/** A world-upright surface keeps this much of its height on screen at the tilt the camera is at. */
+const _wpUp = new THREE.Vector3(), _wpBuf = new THREE.Vector2(), _wpPos = new THREE.Vector3(), _wpFwd = new THREE.Vector3();
+function wallForeshorten(camera) {
+  _wpUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+  return Math.min(1, Math.max(0.14, Math.abs(_wpUp.y)));
+}
 let _wallGeo = null;
 
-/**
- * A WALL PIECE LIVES IN THE WALL'S OWN PLANE, and this is the whole argument of the feature.
- *
- * The first version hung these as screen-aligned billboards, like the furniture. Measured in the
- * 'dressing' plate: EVERY ONE OF THEM VANISHED. A screen-aligned quad grows along the camera's up
- * vector, which under a 17-degree plan view is `(0, 0.29, -0.96)` — that is, almost entirely
- * NORTHWARD, straight into the masonry it is supposed to be hanging on. The wall swallowed all of
- * them but the top two rows. Pushing them toward the camera far enough to clear the wall (about 1.2
- * units) puts them in front of anything standing within two tiles of that wall, which is worse.
- *
- * So a wall piece is built the way a floor decal is built, one surface up: a quad IN THE SURFACE,
- * sized in world units straight off the art (`artW/32` tiles wide), yawed to its wall, and lifted a
- * couple of centimetres clear of the stone. It therefore inherits the wall's perspective, its
- * foreshortening and its pixel treatment for free — exactly the bargain that makes the floor decals
- * sit IN the floor instead of on top of it — and it cannot be occluded by its own wall.
- *
- * WHAT THE CAMERA THEN COSTS US, honestly: this view looks from the south, so a piece on a room's
- * NORTH wall reads fully, one on an east or west wall is edge-on, and one on a south wall is behind
- * its own stone. That is what a plan view of a room does to the things hanging in it, and it is the
- * same reason the wall torches only ever show their brackets on the far wall.
- */
 function wallPlate(key, art, pal, mount, o = {}) {
   const tex = pixelTexture(key, art, pal);
   const size = tex.userData.size;
-  const mat = litMaterial(`wallplate:${key}`, {
+  const mat = pixelSnap(litMaterial(`wallplate:${key}`, {
     map: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide, roughness: 1, metalness: 0,
     emissiveMap: tex, emissive: new THREE.Color(o.emissive ?? 0xffffff), emissiveIntensity: (o.glow ?? 0.06) * 0.5,
-  });
+  }));
   if (!_wallGeo) _wallGeo = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
   const m = new THREE.Mesh(_wallGeo, mat);
-  const w = size.w / PX_PER_TILE;
-  const h = Math.min(size.h / PX_PER_TILE, Math.max(0.1, WALL_CEIL - mount));
-  m.scale.set(w, h, 1);
+  // Seeded at the stretch the PLAY camera asks for, not at the art's own world size: `onBeforeRender`
+  // does not run on a culled object, so a plate that starts too small to pass the frustum test would
+  // never get the chance to grow. Three culls on the PREVIOUS frame's scale, which after frame one
+  // is the right one, so the piece can keep its culling and the level keeps its draw-call budget.
+  m.scale.set(size.w / PX_PER_TILE, size.h / PX_PER_TILE / PLAN_FORESHORTEN, 1);
   m.castShadow = false; m.receiveShadow = true;
+  m.onBeforeRender = (renderer, scene, camera) => {
+    const vp = renderer.getDrawingBufferSize(_wpBuf);
+    m.getWorldPosition(_wpPos);
+    _wpFwd.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    const d = Math.max(0.5, (_wpPos.x - camera.position.x) * _wpFwd.x + (_wpPos.y - camera.position.y) * _wpFwd.y
+      + (_wpPos.z - camera.position.z) * _wpFwd.z);
+    const pxPerWorld = camera.isOrthographicCamera
+      ? vp.y / Math.max(1e-6, (camera.top - camera.bottom) / (camera.zoom || 1))
+      : (vp.y * 0.5 * (camera.zoom || 1)) / (Math.tan((camera.fov || 45) * Math.PI / 360) * d);
+    const w = frameTexelSize(renderer, camera, PX_PER_TILE) / pxPerWorld;   // world units per texel
+    const f = wallForeshorten(camera);
+    // world height that lands `size.h` TEXELS on screen, capped so the plate stays on its own wall
+    const h = Math.min(size.h * w / f, Math.max(0.1, WALL_SCREEN_TILES / f - mount));
+    m.scale.set(size.w * w, h, 1);
+    m.updateMatrix();
+    if (m.parent) m.matrixWorld.multiplyMatrices(m.parent.matrixWorld, m.matrix);
+    else m.matrixWorld.copy(m.matrix);
+  };
   return m;
 }
 
@@ -1158,7 +1335,7 @@ export function buildDressing(type, o = {}) {
       const f = FACE[facing] || FACE.s;
       const m = wallPlate(key, () => d.art(v), pal, d.mount, { glow: d.glow, emissive: d.emissive });
       m.rotation.y = Math.atan2(f.dx, f.dy);               // the quad's normal looks into the room
-      m.position.set(f.dx * 0.03, d.mount, f.dy * 0.03);   // and sits clear of the masonry
+      m.position.set(f.dx * 0.04, d.mount, f.dy * 0.04);   // and sits clear of the masonry
       g.add(m);
       g.userData.mountY = d.mount;
     } else {

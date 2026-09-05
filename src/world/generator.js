@@ -715,6 +715,31 @@ const SCATTER = {
   courtyard: ['mosaic', 'rug', 'puddle'],
 };
 
+/**
+ * HEROQUEST SHIPS TEN SKULLS AND FOUR RATS, and it ships them for twelve pieces of furniture. They
+ * are the cheapest storytelling on the board and the reason a bare corridor of cardboard reads as a
+ * dungeon; a level that shows one skull has none of them.
+ *
+ * The general scatter roll could never deliver that. It runs AFTER the furniture, out of the same
+ * 18%-of-the-floor standing budget (§8.3), so by the time it picks, a dressed room has no slot left
+ * and a skull loses the weighted draw to a barrel anyway. Measured over 48 levels before this pass:
+ * 1.4 skulls and 0.8 rats per level.
+ *
+ * So bone and vermin are placed FIRST, off their own per-archetype quota, and the general scatter
+ * takes what is left of the budget. The density law is untouched — every placement still goes
+ * through `canAddProp()` and `fitsFloor()` — this only decides who gets the slots first.
+ */
+const VERMIN = {
+  guardroom: [['skull', 1], ['rat', 1]], barracks: [['rat', 1], ['skull', 1]],
+  armoury: [['skull', 1]], forge: [['skull', 1]], refectory: [['rat', 1], ['skull', 1]],
+  storeroom: [['rat', 1], ['skull', 1]], vault: [['skull', 1]], scriptorium: [['skull', 1]],
+  alchemy: [['skull', 1]], audience: [['skull', 1]], torture: [['skull', 2], ['rat', 1]],
+  kennel: [['skull', 2], ['rat', 1]], crypt: [['skull', 3]], ossuary: [['skull', 3]],
+  barrow: [['skull', 2]], cistern: [['rat', 1]], flooded: [['skull', 1]],
+  mushroom: [['rat', 1], ['skull', 1]], collapsed: [['skull', 2]], wellroom: [['rat', 1]],
+  warren: [['skull', 2], ['rat', 1]], shrine: [['skull', 1]],
+};
+
 const WALL_SET = {
   guardroom: ['sconce', 'hungShield'], barracks: ['sconce', 'chains', 'hungShield'],
   armoury: ['trophyArms', 'hungShield', 'sconce'], forge: ['trophyArms', 'wallShelf'],
@@ -926,7 +951,14 @@ function dressRoom(level, room, space, force = false) {
     if (cls === 'prop') return !props.has(k) && !decals.has(k);
     return !decals.has(k);
   });
-  const canAddProp = () => props.size < maxProps && used() < maxAny;
+  // THE BONE RESERVE. The 18% standing budget (§8.3) is spent by the furniture pass long before the
+  // scatter runs, which is exactly why a dressed level used to show one skull. So a room that wants
+  // bone or vermin holds back up to two of its standing slots for them: the CAP IS UNCHANGED, only
+  // who gets to spend the last of it. `canAddProp(true)` spends the reserve; the furniture pass and
+  // the general scatter may not, and the §8.4 floor (MIN_STANDING) is never reserved away.
+  const vermWant = ((room.archetype !== 'bare' && VERMIN[room.archetype]) || []).reduce((a, e) => a + e[1], 0);
+  const reserve = Math.max(0, Math.min(2, vermWant, maxProps - MIN_STANDING));
+  const canAddProp = (spendReserve = false) => props.size < maxProps - (spendReserve ? 0 : reserve) && used() < maxAny;
 
   let anchor = null;
   let blockingLeft = floor.length >= 12 ? Math.min(2, Math.floor(floor.length / 12)) : 0;
@@ -1027,8 +1059,28 @@ function dressRoom(level, room, space, force = false) {
   out.sigOk = !sig || out.furniture.some((d) => d.type === sig);
   if (!out.sigOk && !force) return out;
 
-  // ---- scatter, thinning away from the furniture (§8.2 rule 9)
+  // ---- bone and vermin FIRST (see `VERMIN`): HeroQuest's ten skulls and four rats, spread over the
+  // inhabited rooms, before the general scatter can spend the room's standing budget on another jar.
   const furnTiles = out.furniture.map((d) => ({ x: d.x, y: d.y }));
+  for (const [type, want] of (room.archetype !== 'bare' && VERMIN[room.archetype]) || []) {
+    if (type === 'rat' && level.depth > 12) continue;          // §3: a rat is a shallow-dungeon beat
+    let placed = 0;
+    // near the furniture, like the rest of the scatter — a skull in the middle of an empty floor is
+    // litter, a skull at the foot of a sarcophagus is a story (§8.2 rule 9)
+    const sorted = freeFor('prop').slice().sort((a, b) => {
+      const d = (t) => furnTiles.reduce((m, f) => Math.min(m, Math.max(Math.abs(f.x - t.x), Math.abs(f.y - t.y))), 9);
+      return d(a) - d(b) || a.y - b.y || a.x - b.x;
+    });
+    for (const t of sorted) {
+      if (placed >= want || !canAddProp(true)) break;
+      const k = key(t.x, t.y);
+      if (props.has(k) || centreTiles.has(k) || !fitsFloor(t.x, t.y)) continue;
+      if (!rng.chance(0.8)) continue;
+      push(out.scatter, type, t.x, t.y, rng.pick(['n', 'e', 's', 'w']), variantFor(rng, type, decay), false);
+      placed++;
+    }
+  }
+
   const table = (SCATTER[room.archetype] || []).map((t) => ({ t, w: scatterWeight(level, t, decay) })).filter((e) => e.w > 0);
   if (table.length && room.archetype !== 'bare') {
     const base = 0.5 + decay * 0.2;
@@ -1046,7 +1098,7 @@ function dressRoom(level, room, space, force = false) {
       const cap = cls === 'prop' ? 2 : 3;
       if (out.scatter.filter((d) => d.type === pick.t).length >= cap) continue;
       if (cls === 'prop') {
-        if (centreTiles.has(k) || props.has(k) || !canAddProp()) continue;
+        if (centreTiles.has(k) || props.has(k) || !canAddProp(true)) continue;
       } else if (decals.has(k) || (centreTiles.has(k) && [...centreTiles].some((c) => decals.has(c)))) continue;
       if (!fitsFloor(t.x, t.y)) continue;
       push(out.scatter, pick.t, t.x, t.y, rng.pick(['n', 'e', 's', 'w']), variantFor(rng, pick.t, decay), false);

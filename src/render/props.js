@@ -718,7 +718,7 @@ const bookPal = (() => {
 // chest, which is exactly the fault the pickups above were rebuilt to fix. One projection, one
 // grid, one key light, for the loot and for the furniture it is standing on.
 export {
-  itemPalette, pixelSprite, pixelTexture, floorDecal, contactShadow, onArt,
+  itemPalette, pixelSprite, pixelTexture, pixelSnap, floorDecal, contactShadow, onArt,
   span, box, ell, topFace, frontFace, shift, model, step,
   SQUASH, ITEM_PIVOT_Y,
 };
