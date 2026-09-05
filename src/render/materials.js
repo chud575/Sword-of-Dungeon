@@ -14,13 +14,13 @@
 // So every dungeon surface texture is now authored at `TEXELS_PER_TILE` (32) texels per world unit
 // and SAMPLED ON THE CAST'S OWN GRID — see "ONE TEXEL, ONE SIZE" below — uploaded with
 // NearestFilter and a crisp base level:
-//  - the flagstone ATLAS is 8x4 cells of 32x32 TEXELS (256x128 in all). Every texel is placed by
-//    hand-style rules — a grout ring, a one-texel bevel, mottle quantised to a seven-step house
-//    ramp (sprites/style.js `ramp`), then two or three WEAR MARKS drawn from nine families
-//    (crack, chip, spall, pits, scuff, stain, chisel, hollow, inset) with seeded parameters. The
-//    old atlas had ONE crack generator and two cracked cells, so the same worm-shaped decal landed
-//    on the floor fourteen times a screen. Nine families x 30 slabs x four quarter turns does not
-//    repeat inside a room.
+//  - the FLOOR ATLAS is 8x12 cells of 32x32 TEXELS. A cell is not a slab any more, it is a FIELD:
+//    the HeroQuest board's vocabulary (tiles.js) — basketweave planks, running-bond brick, a
+//    cracked polygon field, harlequin diamonds, a checkerboard, the pale corridor cobble, the pale
+//    wall-top block — every style at four variant cells so a field does not read as one tile
+//    stamped in a grid, plus two reserved cells for the temple's mosaic and its cut marble. Each
+//    room takes ONE field and the CHANGE of field at a doorway is what says you have entered
+//    somewhere new; the variants never change a room's identity.
 //  - a continuous masonry strip, 128x32 texels = 4 tiles wide and exactly one world unit tall,
 //    mapped in WORLD units along wall runs so brick courses flow around corners.
 //  - a tileable world-space grunge map, sampled on the same 1/32-world texel grid (see
@@ -37,6 +37,10 @@ import { patchFog } from './lighting.js';
 import { ramp } from './sprites/style.js';
 import { toRgb } from './sprites/pixelPainter.js';
 import { frameTexelSize, texelGrid, PX_PER_TILE } from './sprites/spriteBillboard.js';
+// The board's floor vocabulary. NOTE this import is circular (tiles.js reads TEXELS_PER_TILE from
+// here): nothing in this module's TOP LEVEL may touch a tiles.js binding, so the atlas layout below
+// is a fixed number of rows and the style->cell lookup is built lazily on first use.
+import { TILE_STYLES, VARIANTS, paintTile } from './tiles.js';
 
 /** Palette used by the renderer (linear-space friendly hex values). */
 export const PALETTE = {
@@ -54,15 +58,50 @@ export const PALETTE = {
  */
 export const TEXELS_PER_TILE = 32;
 
-/** Atlas layout shared by materials.js (texture) and dungeon.js (cell choice). 8x4 cells of 32x32 texels. */
-export const ATLAS = { cols: 8, rows: 4, cell: TEXELS_PER_TILE };
 /**
- * Named atlas cells (index = row * cols + col). Eighteen plain slabs, each carrying its own
- * seeded pick of wear marks, is what keeps a room from reading as one decal stamped over and over.
+ * THE ATLAS LAYOUT, shared by materials.js (which paints it) and dungeon.js (which picks cells).
+ * Every style in the board's vocabulary gets `VARIANTS` cells of 32x32 texels, laid out 8 across;
+ * the last two cells of the sheet are reserved for the temple's mosaic medallion and cut marble.
+ * 22 styles x 4 variants = 88, + 2 reserved = 90, so 8 x 12 holds it with a little slack.
+ */
+export const ATLAS = { cols: 8, rows: 12, cell: TEXELS_PER_TILE };
+/** Cells that are not a field: the temple dressing, at the very end of the sheet. */
+export const SPECIAL_CELLS = { mosaic: ATLAS.cols * ATLAS.rows - 2, marble: ATLAS.cols * ATLAS.rows - 1 };
+
+let _styleCells = null;
+/**
+ * style id -> the atlas cell indices of its variants. Built on first use, never at module load:
+ * tiles.js and this module import each other (see the import note above).
+ * @returns {Object<string, number[]>}
+ */
+export function styleCellMap() {
+  if (_styleCells) return _styleCells;
+  const m = {};
+  Object.keys(TILE_STYLES).forEach((id, s) => {
+    m[id] = Array.from({ length: VARIANTS }, (_, v) => s * VARIANTS + v);
+  });
+  const last = Object.keys(TILE_STYLES).length * VARIANTS;
+  if (last > SPECIAL_CELLS.mosaic) throw new Error(`tile atlas too small: ${last} field cells need more than ${SPECIAL_CELLS.mosaic} rows x ${ATLAS.cols}`);
+  _styleCells = m;
+  return m;
+}
+/** The variant cells of one style ('corridor' if the id is unknown, so the floor is never black). */
+export function styleCells(id) {
+  const m = styleCellMap();
+  return m[id] || m.corridor;
+}
+/**
+ * The few cells the renderer names directly. Fields belong to rooms now (dungeon.js cellFor), so
+ * these are only the mortar of the level: the pale corridor cobble that stair treads, pool kerbs
+ * and pit lips are cut from, the pale wall-top block, and the temple's two special cells.
  */
 export const CELLS = {
-  plain: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
-  cracked: [18, 19, 20, 21], mossy: [22, 23, 24, 25], wet: [26, 27, 28, 29], mosaic: 30, marble: 31,
+  get corridor() { return styleCells('corridor'); },
+  get wallTop() { return styleCells('wallTop'); },
+  get plain() { return styleCells('corridor'); },
+  get cracked() { return styleCells('slabGrey'); },
+  get mosaic() { return SPECIAL_CELLS.mosaic; },
+  get marble() { return SPECIAL_CELLS.marble; },
 };
 /** UV offset of an atlas cell. */
 export function cellUV(i) { return [(i % ATLAS.cols) / ATLAS.cols, 1 - (Math.floor(i / ATLAS.cols) + 1) / ATLAS.rows]; } // canvas textures are Y-flipped on upload
@@ -277,165 +316,22 @@ const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t 
 /** hex -> [r,g,b] in 0..1. */
 const unit = (h) => toRgb(h).map((c) => c / 255);
 
-/**
- * THE dungeon stone: seven house-law steps (sprites/style.js `ramp`), darkest first. A floor is not
- * allowed the sprites' full value range — it would compete with the cast — so the band is narrowed
- * and the hue drift softened: shadows cool a little, they never go violet. Every flagstone in the
- * game is painted out of THIS array and nothing else, which is what makes a room read as one
- * quarry instead of a random tint per slab.
- */
-const STONE = ramp('#8b8274', 7, { range: 0.34, step: 0.05, hueShift: 0.018, satShift: 0.012 }).map(unit);
-/** The ramp step a clean slab face sits on; wear pulls down from here, polish pushes up. */
-const STONE_MID = 4;
 /** Wall stone: the same family, a shade cooler and darker so walls sit behind the floor. */
 const WALLSTONE = ramp('#7c7a76', 7, { range: 0.36, step: 0.05, hueShift: 0.02, satShift: 0.012 }).map(unit);
 /** The obsidian re-skin for the sword level: same relief, violet-black glass. */
 const GLASSSTONE = ramp('#544a63', 7, { range: 0.4, step: 0.05, hueShift: 0.02, satShift: 0.03 }).map(unit);
 /** The dark between the slabs. Never pure black — the same law the sprite ink obeys. */
 const GROUT = unit('#2b2529');
-/** Damp growth in the hollows, five steps. */
-const MOSS = ramp('#5d7a3a', 5, { range: 0.3, step: 0.05, hueShift: 0.02, satShift: 0.03 }).map(unit);
 /** Pale cut marble for the temple slabs. */
 const MARBLE = ramp('#c9c3b4', 7, { range: 0.3, step: 0.05, hueShift: 0.02, satShift: 0.01 }).map(unit);
 
 /**
- * NINE FAMILIES OF WEAR. The old atlas had exactly one crack generator and two cracked cells, so a
- * single worm-shaped decal landed on the floor a dozen-plus times a screen and the eye counted it
- * instantly. Every slab now takes two or three DIFFERENT families with seeded parameters, and there
- * are thirty slabs; with the quarter-turn each instance also gets, a repeat is not findable.
- */
-const WEAR_MARKS = ['crack', 'chip', 'spall', 'pits', 'scuff', 'stain', 'chisel', 'hollow', 'inset'];
-
-/**
- * Paint the wear on ONE slab, in texels. `dv` is a shift in RAMP STEPS (negative = darker), `dh` a
- * relief delta; nothing here writes a colour, so every mark lands on the same seven-step ramp and
- * the normal map agrees with the albedo by construction.
- * @param {import('../core/rng.js').Rng} r
- * @param {number} S cell size in texels
- * @param {string[]} marks which families this slab carries (may repeat)
- */
-function paintWear(r, S, marks) {
-  const dv = new Float32Array(S * S), dh = new Float32Array(S * S);
-  const inside = (x, y) => x >= 1 && y >= 1 && x < S - 1 && y < S - 1;
-  const put = (x, y, v, h) => { if (!inside(x, y)) return; const i = y * S + x; dv[i] += v; dh[i] += h; };
-  const DIR8 = (a) => { const k = Math.round(a / (Math.PI / 4)) * (Math.PI / 4); return [Math.round(Math.cos(k)), Math.round(Math.sin(k))]; };
-
-  /** A hairline fracture: an eight-direction WALK, one texel wide, so it is a drawn line and not a resampled curve. */
-  const crack = (len) => {
-    let x = r.int(3, S - 4), y = r.int(3, S - 4), a = r.float(0, Math.PI * 2);
-    for (let i = 0; i < len; i++) {
-      put(x, y, -2.4, -0.55);
-      if (r.chance(0.17)) put(x + (r.chance(0.5) ? 1 : -1), y, -0.8, -0.15);
-      if (r.chance(0.08)) {                                  // a short branch off the main run
-        let bx = x, by = y, ba = a + (r.chance(0.5) ? 1.15 : -1.15);
-        for (let j = r.int(3, 7); j > 0; j--) {
-          put(bx, by, -1.7, -0.32);
-          const [sx, sy] = DIR8(ba); bx += sx; by += sy; ba += r.float(-0.6, 0.6);
-          if (!inside(bx, by)) break;
-        }
-      }
-      a += r.float(-0.85, 0.85);
-      const [sx, sy] = DIR8(a); x += sx; y += sy;
-      if (!inside(x, y)) break;
-    }
-  };
-
-  /** A corner bitten clean off, with a jagged fracture line. */
-  const chip = () => {
-    const cx = r.chance(0.5) ? 0 : S - 1, cy = r.chance(0.5) ? 0 : S - 1, rad = r.float(4, 8.5), seed = r.float(0, 30);
-    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      const jag = rad * (0.76 + 0.4 * N.noise(x * 0.62 + seed, y * 0.62 + seed));
-      if (Math.hypot(x - cx, y - cy) < jag) { const i = y * S + x; dv[i] -= 2.8; dh[i] -= 0.85; }
-    }
-  };
-
-  /** A spall: a shallow bite out of the middle of one edge. */
-  const spall = () => {
-    const side = r.int(0, 3), run = r.int(5, 10), t0 = r.int(2, Math.max(3, S - 3 - run)), amp = r.float(1.4, 3.6);
-    for (let t = t0; t < Math.min(S - 2, t0 + run); t++) {
-      const deep = 1 + Math.round(Math.sin(((t - t0 + 0.5) / run) * Math.PI) * amp);
-      for (let d = 0; d < deep; d++) {
-        const x = side === 2 ? d : side === 3 ? S - 1 - d : t;
-        const y = side === 0 ? d : side === 1 ? S - 1 - d : t;
-        if (x < 0 || y < 0 || x >= S || y >= S) continue;
-        const i = y * S + x; dv[i] -= 2.3; dh[i] -= 0.7;
-      }
-    }
-  };
-
-  /** Pocks: a shower of single dark texels where the face has crumbled. */
-  const pits = () => {
-    const cx = r.int(6, S - 7), cy = r.int(6, S - 7), spread = r.float(3, 7.5);
-    for (let i = r.int(4, 10); i > 0; i--) {
-      const x = cx + Math.round(r.float(-spread, spread)), y = cy + Math.round(r.float(-spread, spread));
-      put(x, y, -1.9, -0.4);
-      if (r.chance(0.35)) put(x + 1, y, -1.4, -0.28);
-      if (r.chance(0.2)) put(x, y + 1, -1.1, -0.22);
-    }
-  };
-
-  /** Drag marks: parallel pale streaks where boots and dragged crates polished the stone. */
-  const scuff = () => {
-    const dir = r.int(0, 3), dx = [1, 1, 1, 0][dir], dy = [0, 1, -1, 1][dir];
-    const x0 = r.int(4, S - 13), y0 = r.int(6, S - 13);
-    for (let k = r.int(2, 4); k > 0; k--) {
-      const ox = x0 + (dir === 3 ? k * 2 : 0), oy = y0 + (dir === 3 ? 0 : k * 2);
-      for (let i = r.int(4, 11); i > 0; i--) put(ox + dx * i, oy + dy * i, 1.15, 0.06);
-    }
-  };
-
-  /** A damp shadow, DITHERED at the rim: a pixel-art edge, never a soft gradient. */
-  const stain = () => {
-    const cx = r.int(6, S - 7), cy = r.int(6, S - 7), rad = r.float(3.5, 7.5), depth = r.float(0.7, 1.5), seed = r.float(0, 30);
-    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      const d = Math.hypot(x - cx, y - cy) / (rad * (0.8 + 0.45 * N.noise(x * 0.3 + seed, y * 0.3 + seed)));
-      if (d < 0.78) put(x, y, -depth, 0);
-      else if (d < 1 && ((x + y) & 1) === 0) put(x, y, -depth * 0.7, 0);
-    }
-  };
-
-  /** The mason's claw: parallel tool ridges, a lit texel with an ink texel behind it. */
-  const chisel = () => {
-    const along = r.chance(0.5), gap = r.int(3, 5), o0 = r.int(3, 8), a = r.int(2, 6);
-    for (let k = r.int(3, 6); k > 0; k--) {
-      const o = o0 + k * gap; if (o >= S - 3) continue;
-      const b = Math.min(S - 2, a + r.int(10, S - 8));
-      for (let t = a; t < b; t++) {
-        put(along ? t : o, along ? o : t, 0.75, 0.05);
-        put(along ? t : o + 1, along ? o + 1 : t, -0.6, -0.05);
-      }
-    }
-  };
-
-  /** A dish worn pale in the middle of the slab by a century of feet. */
-  const hollow = () => {
-    const cx = r.float(10, S - 10), cy = r.float(10, S - 10), rad = r.float(7, 12);
-    for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
-      const d = Math.hypot(x - cx, y - cy) / rad;
-      if (d < 1) put(x, y, (1 - d) * 1.3, (1 - d) * 0.1);
-    }
-  };
-
-  /** Pebbles set into the slab: a lit block with the ink tucked under its lower-right, house key light. */
-  const inset = () => {
-    for (let k = r.int(2, 4); k > 0; k--) {
-      const x = r.int(3, S - 7), y = r.int(3, S - 7), w = r.int(2, 3), h = r.int(2, 3);
-      for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, 1.25, 0.28);
-      for (let i = 0; i < w; i++) put(x + i, y + h, -1.7, -0.1);
-      for (let j = 0; j < h; j++) put(x + w, y + j, -1.4, -0.1);
-    }
-  };
-
-  const draw = { crack: () => crack(r.int(9, 20)), chip, spall, pits, scuff, stain, chisel, hollow, inset };
-  for (const m of marks) draw[m]();
-  return { dv, dh };
-}
-
-/**
- * THE FLAGSTONE ATLAS, painted texel by texel: 32 slabs of 32x32 texels (256x128 in all), which is
- * exactly `TEXELS_PER_TILE` across a world tile — the sprite grid. Albedo, normal and roughness all
- * come off one height/step field so they agree, and every colour is a step of `STONE` (or `MOSS`,
- * `MARBLE`) so the floor cannot drift out of the family.
+ * THE FLOOR ATLAS, painted texel by texel. Every field in the board's vocabulary (tiles.js
+ * `TILE_STYLES`) gets `VARIANTS` cells of 32x32 texels — exactly `TEXELS_PER_TILE` across a world
+ * tile, the sprite grid — plus two reserved cells for the temple's mosaic medallion and its cut
+ * marble. `paintTile` writes albedo and a height field; the normal map and the roughness are
+ * derived from that ONE height field, so relief, lighting and sheen can never disagree, and the
+ * sword level's obsidian re-skin is the same relief read out of a violet-black glass ramp.
  * Returns { albedo, normal, rough, obsidian } textures.
  */
 function flagstoneAtlas() {
@@ -445,26 +341,38 @@ function flagstoneAtlas() {
   const alb = new Float32Array(W * H * 3);
   const rgh = new Float32Array(W * H);
   const obs = new Float32Array(W * H * 3);
-  const kindOf = (i) => CELLS.plain.includes(i) ? 'plain' : CELLS.cracked.includes(i) ? 'cracked'
-    : CELLS.mossy.includes(i) ? 'mossy' : CELLS.wet.includes(i) ? 'wet' : i === CELLS.mosaic ? 'mosaic' : 'marble';
+  // which field (and which of its variants) each cell carries
+  const map = styleCellMap();
+  const owner = new Array(N_CELLS).fill(null);
+  Object.keys(map).forEach((id, s) => map[id].forEach((c, v) => { owner[c] = { id, v, s }; }));
 
   for (let idx = 0; idx < N_CELLS; idx++) {
-    const kind = kindOf(idx);
+    const special = idx === SPECIAL_CELLS.mosaic ? 'mosaic' : idx === SPECIAL_CELLS.marble ? 'marble' : null;
     const cx0 = (idx % ATLAS.cols) * S, cy0 = Math.floor(idx / ATLAS.cols) * S;
     const seed = r.float(0, 90);
-    // this slab's own value (never hue) offset, and its own pick of wear
-    const lift = r.float(-0.4, 0.4);
-    const pool = [...WEAR_MARKS]; r.shuffle(pool);
-    const marks = pool.slice(0, r.int(2, 3));
-    if (kind === 'cracked') marks.splice(0, marks.length, 'crack', 'crack', r.chance(0.5) ? 'chip' : 'spall', 'pits');
-    else if (kind === 'plain' && r.chance(0.34)) marks[0] = 'crack';
-    const wear = kind === 'mosaic' || kind === 'marble' ? null : paintWear(r, S, marks);
-    const mossSeed = r.float(0, 40);
+
+    if (!special) {
+      // A FIELD, not a slab: the whole cell is one style, painted by the approved vocabulary.
+      // Spare cells past the last style repeat the corridor cobble so nothing samples black.
+      const o = owner[idx] || { id: 'corridor', v: idx % VARIANTS, s: 0 };
+      paintTile({ alb, hgt, W, x0: cx0, y0: cy0, S, style: TILE_STYLES[o.id], seed: o.s * 101 + o.v * 7 + 1 });
+      for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
+        const gi = (cy0 + py) * W + cx0 + px;
+        const h = hgt[gi];
+        // roughness off the SAME height field: a grout line is matte, a lit unit face is smoother
+        rgh[gi] = clamp01(0.97 - h * 0.3);
+        // the obsidian re-skin: the field's own value read out of the glass ramp, hue discarded
+        const lum = clamp01(alb[gi * 3] * 0.3 + alb[gi * 3 + 1] * 0.59 + alb[gi * 3 + 2] * 0.11);
+        const oc = GLASSSTONE[Math.max(0, Math.min(GLASSSTONE.length - 1, Math.round(lum * (GLASSSTONE.length - 1))))];
+        obs[gi * 3] = oc[0]; obs[gi * 3 + 1] = oc[1]; obs[gi * 3 + 2] = oc[2];
+      }
+      continue;
+    }
 
     for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
-      const i = py * S + px, gi = (cy0 + py) * W + cx0 + px;
-      let col, h, rough, ti = STONE_MID;
-      if (kind === 'mosaic') {
+      const gi = (cy0 + py) * W + cx0 + px;
+      let col, h, rough, ti = 4;
+      if (special === 'mosaic') {
         // 8x8 tesserae of 4 texels with a one-texel grout line between them: a radial medallion
         const iu = px >> 2, iv = py >> 2, grout = (px & 3) === 3 || (py & 3) === 3;
         const dc = Math.hypot(iu + 0.5 - 4, iv + 0.5 - 4);
@@ -478,45 +386,18 @@ function flagstoneAtlas() {
         const k = 1 + jit * 0.08;
         col = grout ? GROUT : [tc[0] * k, tc[1] * k, tc[2] * k];
         h = grout ? 0.15 : 0.85; rough = grout ? 0.9 : 0.42;
-      } else if (kind === 'marble') {
+      } else {
         const e = Math.min(px, py, S - 1 - px, S - 1 - py);
         const vein = Math.abs(Math.sin((px / S * 2.6 + N.fbm(px / 6 + seed, py / 6 + seed, 3) * 2.6) * Math.PI));
         const grain = Math.round((N.fbm(px / 5 + seed, py / 5 + seed, 3) - 0.5) * 2);
         ti = e < 1 ? 0 : vein > 0.94 ? 2 : vein > 0.84 ? 3 : Math.max(4, Math.min(6, 5 + grain));
         col = e < 1 ? GROUT : MARBLE[ti];
         h = e < 1 ? 0.05 : e === 1 ? 0.72 : 0.9; rough = 0.4 + (e < 1 ? 0.4 : 0);
-      } else {
-        const e = Math.min(px, py, S - 1 - px, S - 1 - py);
-        // ragged one-texel outline: the slab's edge is chewed, not ruled
-        const rag = N.noise(px * 1.55 + seed, py * 1.55 + seed) < 0.3;
-        const inGrout = e < 1 || (e < 2 && rag);
-        // mottle: a low band of grain plus a fine per-texel speckle — both quantised with the tone
-        const mot = (N.fbm(px / 6.5 + seed, py / 6.5 + seed, 3) - 0.5) * 1.9
-          + (N.noise(px * 1.7 + seed, py * 1.7 + seed) - 0.5) * 0.45;
-        if (inGrout) {
-          col = GROUT; h = 0.04; rough = 0.95; ti = 0;
-        } else {
-          ti = Math.max(0, Math.min(STONE.length - 1, Math.round(STONE_MID + lift + mot + wear.dv[i])));
-          col = STONE[ti];
-          h = clamp01(0.68 + wear.dh[i] + (e === 1 ? -0.16 : e === 2 ? -0.05 : 0) + mot * 0.05);
-          rough = 0.9 - (ti - STONE_MID) * 0.02;
-          if (kind === 'mossy') {
-            const mv = N.fbm(px / 7 + mossSeed, py / 7 + mossSeed, 3);
-            if (mv > 0.58 || (mv > 0.51 && ((px + py) & 1) === 0)) {
-              col = MOSS[Math.max(0, Math.min(MOSS.length - 1, 1 + Math.round(mot * 0.9)))];
-              rough = 0.78;
-            }
-          } else if (kind === 'wet') {
-            col = mix(col, [0.26, 0.31, 0.35], 0.45);
-            rough = 0.24 + (1 - h) * 0.3;
-          }
-        }
       }
       hgt[gi] = h;
       alb[gi * 3] = col[0]; alb[gi * 3 + 1] = col[1]; alb[gi * 3 + 2] = col[2];
       rgh[gi] = clamp01(rough);
-      // the sword level's obsidian re-skin: the same steps, read out of a violet-black glass ramp
-      const oc = kind === 'mosaic' ? mix(GLASSSTONE[5], [0.55, 0.42, 0.2], 0.45) : GLASSSTONE[ti];
+      const oc = special === 'mosaic' ? mix(GLASSSTONE[5], [0.55, 0.42, 0.2], 0.45) : GLASSSTONE[ti];
       obs[gi * 3] = oc[0]; obs[gi * 3 + 1] = oc[1]; obs[gi * 3 + 2] = oc[2];
     }
   }
@@ -643,8 +524,8 @@ function grungeTexture() {
 /**
  * ONE STONE FAMILY PER DEPTH. The dungeon's colour story is told by the depth bands (lighting.js
  * `depthTint`) and the torches; the quarry the level was cut from moves with it, but only as a
- * gentle family multiplier over the single `STONE` ramp — never as a per-slab hue, which is what
- * made a room read as noise. dungeon.js folds this into the per-instance tint.
+ * gentle family multiplier over the room's own field (tiles.js) — never as a per-slab hue, which
+ * is what made a room read as noise. dungeon.js folds this into the per-instance tint.
  * @param {number} depth
  * @returns {{name:string, tint:number[], moss:number}}
  */
@@ -1013,7 +894,7 @@ export function waterBand(depth) {
  */
 export function createWaterMaterial(fog) {
   const T = getTextures();
-  const [cu, cv] = cellUV(CELLS.wet[0]);
+  const [cu, cv] = cellUV(CELLS.corridor[0]);
   const band = waterBand(1);
   const uniforms = {
     uTime: { value: 0 }, uLightPos: { value: new THREE.Vector3() }, uLightColor: { value: new THREE.Color(0xffc080) },

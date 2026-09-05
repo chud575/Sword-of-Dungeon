@@ -52,7 +52,13 @@ export class Level {
     this.tiles = new Uint8Array(width * height); // TILE.WALL = 0
     this.explored = new Uint8Array(width * height);
     this.visible = new Uint8Array(width * height);
-    /** @type {{x:number,y:number,w:number,h:number,type:string,cx:number,cy:number}[]} */
+    /**
+     * Rooms. `tileStyle` is the room's FIELD (render/tiles.js): every floor tile in the room is
+     * painted from it and the change of field at a doorway is what says you have entered somewhere
+     * new. It is a plain string on the room record, so `serialize`'s spread carries it through a
+     * save and back with the rest of the room.
+     * @type {{x:number,y:number,w:number,h:number,type:string,cx:number,cy:number,tileStyle?:string}[]}
+     */
     this.rooms = [];
     /** @type {object[]} monsters (and the player while present) */
     this.entities = [];

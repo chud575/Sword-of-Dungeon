@@ -12,10 +12,57 @@ import { digTunnel, digStub, thinCorridors, ensureConnectivity } from './tunnels
 import { rollMonster } from '../game/monsters.js';
 import { goldValue, rollTreasure, rollTrap } from '../game/items.js';
 import { swordDepthForSeed, placeSword } from '../game/quest.js';
+import { ROOM_STYLE_IDS } from '../render/tiles.js';
 
 const MASONRY_TYPES = ['crypt', 'library', 'barracks', 'vault', 'cistern'];
 /** Rooms that are not part of the main run of the level (never get stairs, pits or pools). */
 const SIDE_ROOMS = new Set(['temple', 'shrine', 'alcove']);
+
+/**
+ * ONE FIELD PER ROOM (render/tiles.js). On the board every room is a single flat field and it is
+ * the CHANGE of field at a doorway that says you have entered somewhere new — so a level has to
+ * show a SPREAD of fields, not one repeated. Styles are dealt from a shuffled deck and the deck is
+ * only refilled when it runs dry, which makes a repeat impossible until every field has been used
+ * once. Where a room type has an obvious field it takes it, if it is still in the deck: a vault is
+ * gold brick, a cistern teal tile, a cave a cracked polygon field. So the fields MEAN something as
+ * well as differ.
+ */
+const STYLE_AFFINITY = {
+  vault: ['goldBrick', 'goldBar', 'goldCross'],
+  library: ['plank', 'tanBrick'],
+  barracks: ['tanBrick', 'redCheck', 'plank'],
+  crypt: ['greyStone', 'slabGrey', 'greyBrick'],
+  cistern: ['tealTile', 'tealDiamond'],
+  temple: ['paleCheck', 'paleSpeck'],
+  shrine: ['tealDiamond', 'paleCheck'],
+  surface: ['paleSpeck', 'greyStone'],
+  cave: ['redCrack', 'greenCrack', 'oliveCrack', 'emberCrack'],
+  grotto: ['greenCrack', 'limeCrack', 'oliveCrack'],
+  hall: ['slabGrey', 'greyBrick', 'oliveBlock'],
+  alcove: ['rustSpeck', 'redCheck'],
+};
+
+/**
+ * Give every room its field. Seeded off the LEVEL SEED ALONE and off its own rng stream, so the
+ * same level always shows the same rooms however the rest of generation changes, and the styles
+ * ride along in `serialize()` with the rest of the room record.
+ * @param {import('./level.js').Level} level
+ */
+function assignRoomStyles(level) {
+  const rng = createRng(seedFrom(level.seed, 'tilestyle'));
+  let deck = [];
+  const refill = () => { deck = ROOM_STYLE_IDS.slice(); rng.shuffle(deck); };
+  refill();
+  for (const room of level.rooms) {
+    if (!deck.length) refill();
+    let at = -1;
+    for (const want of STYLE_AFFINITY[room.type] || []) {
+      const k = deck.indexOf(want);
+      if (k >= 0) { at = k; break; }
+    }
+    room.tileStyle = deck.splice(at >= 0 ? at : 0, 1)[0];
+  }
+}
 
 /**
  * Generate a level.
@@ -31,7 +78,7 @@ export function generateLevel(seed, depth, opts = {}) {
   const levelSeed = seedFrom(seed, 'level', depth);
   const rng = createRng(levelSeed);
   const level = new Level({ depth, width, height, seed: levelSeed });
-  if (depth === 0) { generateSurface(level, rng); placeDecor(level, false); return level; }
+  if (depth === 0) { generateSurface(level, rng); assignRoomStyles(level); placeDecor(level, false); return level; }
   const isSwordLevel = depth === swordDepth;
   const style = levelStyle(depth, rng, isSwordLevel);
   level.debug.style = style.name;
@@ -46,6 +93,7 @@ export function generateLevel(seed, depth, opts = {}) {
   placeAlcoves(level, rng, style);
   // anything above could only add walkable tiles attached to open space, but be certain:
   level.debug.connectivityFixes += ensureConnectivity(level, rng, { x: hub.cx, y: hub.cy });
+  assignRoomStyles(level);   // every room is one field; the change at a doorway is the read
   placeStairs(level, rng);
   placeTemples(level, rng, isSwordLevel);
   placeWater(level, rng, style);

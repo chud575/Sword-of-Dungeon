@@ -6,7 +6,8 @@
 import * as THREE from 'three';
 import { TILE, DIRS8, DIRS4 } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
-import { createWaterMaterial, syncWaterLights, createShaftMaterial, CELLS, cellUV, ATLAS, stoneFamily, syncWorldGrid } from './materials.js';
+import { createWaterMaterial, syncWaterLights, createShaftMaterial, CELLS, cellUV, ATLAS, styleCells, stoneFamily, syncWorldGrid } from './materials.js';
+import { TILE_STYLES } from './tiles.js';
 import { MeshBuilder, slabGeometry, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
 import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
 import { syncSpriteSnap } from './props.js';
@@ -20,6 +21,16 @@ const CAP_OVER = 0.045;   // capstone overhang on exposed sides
 const MASONRY_U = 0.25;   // masonry strip spans 4 tiles
 const MASONRY_V = 1;      // the masonry strip is exactly one world unit tall (materials.js)
 const HOLE_TILES = new Set([TILE.PIT, TILE.TRAP_PIT, TILE.STAIRS_DOWN]);
+/**
+ * Which variant of a field a PLACE shows. A field's variants exist only so it does not read as one
+ * cell stamped in a grid, so the choice has to be a property of the tile, not of the order the
+ * builder happened to walk in — hash the position and the level seed and be done with it.
+ */
+function tileHash(x, y, s) {
+  let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(s | 0, 2246822519);
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return (h ^ (h >>> 16)) >>> 0;
+}
 /** The stone kerb around every pool: how far into the water tile it reaches, how proud of the
  *  flagstones it stands, and how far it laps over the bank so no sliver of abyss shows. */
 const KERB_W = 0.16, KERB_RISE = 0.055, KERB_LAP = 0.03;
@@ -156,6 +167,28 @@ export class DungeonView {
   /** Tile lookup with out-of-bounds treated as rock. */
   tileAt(x, y) { return this.level.inBounds(x, y) ? this.level.get(x, y) : TILE.WALL; }
 
+  /**
+   * The FIELD a tile stands in: its room's style, the pale corridor cobble for a corridor or for
+   * anything outside a room, falling back to the cobble if a level predates room styles.
+   * @param {number} x @param {number} y @param {number} t tile kind
+   */
+  styleAt(x, y, t) {
+    if (t === TILE.CORRIDOR) return 'corridor';
+    const ri = this.roomOf ? this.roomOf[y * this.level.width + x] : -1;
+    const id = ri >= 0 ? this.level.rooms[ri].tileStyle : null;
+    return id && TILE_STYLES[id] ? id : 'corridor';
+  }
+
+  /**
+   * One atlas cell of that field, picked by the tile's own position so the field breaks up without
+   * ever changing identity. `k` varies the sub-cobbles of a split tile off the same hash.
+   * @param {number} x @param {number} y @param {number} t tile kind @param {number} [k]
+   */
+  cellFor(x, y, t, k = 0) {
+    const cells = styleCells(this.styleAt(x, y, t));
+    return cells[tileHash(x * 3 + (k & 1), y * 3 + ((k >> 1) & 1), this.styleSeed + k) % cells.length];
+  }
+
   /** Rebuild everything for a level. */
   build(level) {
     this.clear();
@@ -176,6 +209,7 @@ export class DungeonView {
     const roomOf = new Int16Array(W * H).fill(-1);
     level.rooms.forEach((r, i) => { for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) if (level.inBounds(x, y)) roomOf[y * W + x] = i; });
     this.roomOf = roomOf;
+    this.styleSeed = (level.seed | 0) ^ 0x5bf03635;   // the field variants ride on the level seed
     const T = (x, y) => this.tileAt(x, y);
 
     const floors = [], walls = [], waterTiles = [];
@@ -214,13 +248,15 @@ export class DungeonView {
       }
       const corridor = f.t === TILE.CORRIDOR;
       const templeRoom = rt === 'temple' || rt === 'shrine';
-      // layout: whole slab, two halves or four cobbles
+      // A ROOM IS ONE FIELD, so its tiles are whole slabs: breaking them into halves and quarters
+      // samples a corner of the cell and turns it, which is exactly how you shred the pattern the
+      // room is recognised by. Corridors and rubble are the exception — their cobble lattice and
+      // their shards are symmetric under a half-cell offset and a quarter turn, so the small pieces
+      // there read as broken paving, which is what the board's corridors are.
       let layout = 'full';
       const lr = rng.next();
       if (f.t === TILE.RUBBLE) layout = 'quarter';
-      else if (templeRoom) layout = 'full';
       else if (corridor) layout = lr < 0.3 ? 'quarter' : lr < 0.5 ? 'half' : 'full';
-      else layout = lr < 0.05 ? 'quarter' : lr < 0.19 ? 'half' : 'full';
       // VALUE only, in readable steps — a slab is lighter or darker than its neighbour, never a
       // different colour. Room character is carried by brightness (a crypt is dim, a vault is
       // bright) and the level's stone family, not by a per-tile hue.
@@ -228,44 +264,35 @@ export class DungeonView {
       if (corridor) base *= 0.86;
       if (rt === 'crypt') base *= 0.89; else if (rt === 'cistern') base *= 0.93; else if (rt === 'library') base *= 1.03; else if (rt === 'vault') base *= 1.07;
       if (templeRoom) base *= 1.05;
-      if (nearWater) base *= 0.82;          // the wet atlas cells already carry the cool cast
+      if (nearWater) base *= 0.82;          // the bank of a pool sits in the water's shade
       if (f.t === TILE.TEMPLE) base *= 1.08;
       const shade = base * (1 - Math.min(0.38, ao * 0.075)) * (nearHole ? 0.92 : 1);
       const color = [fam.tint[0] * shade, fam.tint[1] * shade, fam.tint[2] * shade];
-      // cell choice
-      const pickCell = () => {
-        if (f.t === TILE.RUBBLE) return rng.pick(CELLS.cracked);
-        if (templeRoom) {
-          const t2 = T(f.x, f.y);
-          if (t2 === TILE.TEMPLE) return CELLS.mosaic;
-          let adj = false;
-          for (const d of DIRS8) if (T(f.x + d.dx, f.y + d.dy) === TILE.TEMPLE) adj = true;
-          return adj ? CELLS.mosaic : CELLS.marble;
-        }
-        if (nearWater) return rng.pick(CELLS.wet);
-        const p = rng.next();
-        if (corridor) return p < 0.22 ? rng.pick(CELLS.mossy) : p < 0.34 ? rng.pick(CELLS.cracked) : rng.pick(CELLS.plain);
-        const mossP = rt === 'cistern' ? 0.28 : rt === 'crypt' ? 0.14 : 0.06;
-        if (p < mossP) return rng.pick(CELLS.mossy);
-        if (p < mossP + 0.08) return rng.pick(CELLS.cracked);
-        return rng.pick(CELLS.plain);
-      };
-      const cell = pickCell();
+      // THE FIELD. A tile has no look of its own any more: it takes its ROOM's field (generator.js
+      // `tileStyle`), a corridor takes the pale cobble, a wall top the pale block. The only thing left
+      // to choose is WHICH of that field's variant cells this tile reads, and that is a hash of the
+      // tile's own position — so a room does not read as one cell stamped across a grid, and the
+      // same tile shows the same stone every time the level is built.
+      const cell = f.t === TILE.TEMPLE ? CELLS.mosaic : this.cellFor(f.x, f.y, f.t);
       const yJ = () => rng.float(-0.006, 0.004);
       const tilt = () => rng.float(-0.014, 0.014);
       // `sub` picks WHICH quarter of the atlas cell a half/quarter cobble reads, so the small
       // pieces are not all the same corner of the same slab (see buildSlabs).
       const push = (kind, x, z, rot, c) => pieces[kind].push({ x, y: yJ(), z, rot, tx: tilt(), tz: tilt(), cell: c, sub: rng.int(0, 3), color });
-      if (layout === 'full') push('full', f.x, f.y, rng.int(0, 3) * Math.PI / 2, cell);
+      // A FIELD MUST NOT BE TURNED. A brick course, a plank run and a bar field have a DIRECTION;
+      // a quarter turn per tile shreds the room into confetti. Only the symmetric paving — corridor
+      // cobble and rubble shards — keeps its random turn.
+      const turn = () => (corridor || f.t === TILE.RUBBLE ? rng.int(0, 3) * Math.PI / 2 : 0);
+      if (layout === 'full') push('full', f.x, f.y, turn(), cell);
       else if (layout === 'half') {
         const along = rng.int(0, 1);
         for (const s of [-1, 1]) {
-          const c2 = rng.chance(0.5) ? cell : pickCell();
+          const c2 = rng.chance(0.5) ? cell : this.cellFor(f.x, f.y, f.t, s + 2);
           if (along) push('half', f.x + s * 0.25, f.y, Math.PI / 2 + (rng.chance(0.5) ? Math.PI : 0), c2);
           else push('half', f.x, f.y + s * 0.25, rng.chance(0.5) ? Math.PI : 0, c2);
         }
       } else {
-        for (const sx of [-1, 1]) for (const sz of [-1, 1]) push('quarter', f.x + sx * 0.25, f.y + sz * 0.25, rng.int(0, 3) * Math.PI / 2, rng.chance(0.4) ? cell : pickCell());
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) push('quarter', f.x + sx * 0.25, f.y + sz * 0.25, turn(), rng.chance(0.4) ? cell : this.cellFor(f.x, f.y, f.t, 2 + sx + sz * 2));
       }
       // dirt bed under the slab
       const x0 = f.x - 0.5, z0 = f.y - 0.5;
@@ -548,8 +575,9 @@ export class DungeonView {
       const x0 = w.x - 0.5 - (ex.w ? CAP_OVER : 0), x1 = w.x + 0.5 + (ex.e ? CAP_OVER : 0);
       const z0 = w.y - 0.5 - (ex.n ? CAP_OVER : 0), z1 = w.y + 0.5 + (ex.s ? CAP_OVER : 0);
       const capT = 0.06 + rng.float(0, 0.06), top = WALL_H + capT, bot = WALL_H - 0.02;
-      const cellIdx = rng.chance(0.12) ? rng.pick(CELLS.cracked) : rng.chance(0.1) ? rng.pick(CELLS.mossy) : rng.pick(CELLS.plain);
-      const cell = cellUV(cellIdx);
+      // EVERY wall top is the board's pale block, its variant hashed off the wall's own position.
+      const capCells = styleCells('wallTop');
+      const cell = cellUV(capCells[tileHash(w.x, w.y, this.styleSeed + 7) % capCells.length]);
       const t = w.tint * 0.82;
       const col = (k) => [t * k * F[0], t * k * F[1], t * k * F[2]];
       const rot = rng.int(0, 3);
