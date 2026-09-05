@@ -182,7 +182,12 @@ void main() {
  */
 const DECOR_AIR = {
   hearth: { n: 14, kind: 0, size: 0.075, y: 0.42, halo: 1.9, color: 0xff8a3a, maxV: 1 },
-  forge: { n: 18, kind: 0, size: 0.080, y: 0.40, halo: 2.1, color: 0xff6a20, maxV: 0 },
+  // 2.1 was the widest halo in this table and it sat over the widest fire, and the two together
+  // rubbed the forge out: in a rendered frame at the play camera its tile was a white block, and it
+  // stayed a white block with every decor group hidden — because this halo is not a decor group.
+  // A furnace mouth still wants to be the brightest thing in the room; it does not want to be the
+  // only thing. See lighting.js DECOR_LIGHTS.forge for the other half of the same measurement.
+  forge: { n: 18, kind: 0, size: 0.080, y: 0.40, halo: 1.4, color: 0xff6a20, maxV: 0 },
   brazier: { n: 12, kind: 0, size: 0.070, y: 0.62, halo: 1.5, color: 0xff7a2a, maxV: 1 },
   candelabra: { n: 4, kind: 0, size: 0.045, y: 0.80, halo: 0.8, color: 0xffe6b0, maxV: 1 },
   candlestick: { n: 3, kind: 0, size: 0.040, y: 0.55, halo: 0.6, color: 0xffe6b0, maxV: 1 },

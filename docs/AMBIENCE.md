@@ -367,6 +367,20 @@ learns to distrust the whole screen.
 
 `mountY` is the world y of the art's **bottom row**. Walls are 1.2 units tall; nothing may top 1.15.
 
+**ONE OF A ROOM'S FOUR WALLS CAN BE SEEN, AND IT IS ALWAYS THE SAME ONE.** A hung piece is a quad
+lying IN its wall's plane. The camera is orthographic, never rotates, and looks from the south, so
+its view direction has no x component — which projects an east or west wall to *exactly zero area*.
+Measured off the canvas at the play camera, hiding one piece at a time and diffing the frame: a
+piece hung `facing:'s'` (the room's **north** wall) paints 71–610 px; `facing:'e'` and `facing:'w'`
+paint **0 px, every type, every time**; `facing:'n'` (the room's south wall, behind its own stone)
+paints 0–173 px of mirrored top edge. Before this was measured, 72 % of the wall dressing on a level
+was generated, textured, drawn and never seen.
+
+So **`facing` on a wall piece is always `'s'`** (`wallReads()` in `world/generator.js`), and a room's
+hung dressing bunches on its north wall the way a stage set does. This is the fixed camera's law,
+not an art preference — it is the same reason `lighting.js` only ever shows its torch brackets on
+the far wall.
+
 | type | W×H | V | mountY | Reads as |
 |---|---|---|---|---|
 | `sconce` | 10×18 | 3 | 0.62 | **unlit** iron bracket (lit torches are `lighting.js`) |

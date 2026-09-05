@@ -653,10 +653,20 @@ export async function auditScenarios(names, opts = {}) {
   const b = await launchBrowser({ width, height });
   const reports = {}, unknown = [];
   try {
-    await b.page.goto(server.url + `?debug=1&seed=${seed}`, { waitUntil: 'load' });
-    await waitReady(b.page);
     for (const run of runs) {
-      // every run re-runs its scenario from scratch, so a sabotaged frame cannot leak into the next
+      // ONE PAGE PER SCENARIO, and this is a correctness fix, not tidiness.
+      //
+      // Re-running a scenario resets the GAME, but it does not reset the RENDERER: its clock keeps
+      // running from page load, and the free RAF frames between load and the first measurement are
+      // wall-clock-long, so every scenario after the first was being sampled at an animation phase
+      // that depended on how busy the machine was. Measured: `node tools/audit.mjs --scenario
+      // combat` gives byte-identical reports three runs in a row (hobgoblin pillow 0.138 every
+      // time), while the same scenario inside a multi-scenario session came back 0.138 on some runs
+      // and 0.250 on others — flipping tests/screenTruth.test.js's pillow gate at random, on both
+      // sides of a change. An instrument that answers differently to the same input cannot fail
+      // anyone honestly. A fresh page per run costs a few seconds each and buys reproducibility.
+      await b.page.goto(server.url + `?debug=1&seed=${seed}`, { waitUntil: 'load' });
+      await waitReady(b.page);
       const ok = await b.page.evaluate(async ({ n, s }) => window.__game.debug.runScenario(n, { seed: s }), { n: run.scenario, s: seed });
       if (ok === false) { unknown.push(run.scenario); continue; }
       await advance(b.page, wait);

@@ -128,6 +128,8 @@ export class DungeonView {
     this.swordDepth = -1;
     /** geometries created for the current level only (disposed on clear; shared ones live on the instance/prop cache) */
     this.ownedGeos = [];
+    /** every group built from `level.decor` this level (docs/AMBIENCE.md §4.1); emptied by clear() */
+    this.decorViews = [];
     this.instanced = [];
     this.gridProbe = makeGridProbe();
     scene.add(this.gridProbe);
@@ -334,16 +336,23 @@ export class DungeonView {
    *     has no direction of its own (a rug keeps the way it was laid, bones do not care);
    *   · everything else stands on its tile like a pickup.
    *
-   * An id the renderer cannot draw is DROPPED with one warning for the whole level, never an
-   * exception: a level that will not build is worse than a level with a missing skull in it.
+   * An id the renderer cannot draw is DROPPED with one warning for the whole level, NAMING the ids,
+   * never an exception: a level that will not build is worse than a level with a missing skull in
+   * it — but a silent hole is worse than both, and "dropped 7 entries" does not tell the next agent
+   * which seven.
+   *
+   * Every group it builds is also kept in `decorViews`, which `clear()` empties along with the rest
+   * of the level. The list is not needed to draw anything (the groups are children of `root` and go
+   * with it); it exists so a level's dressing can be COUNTED against `level.decor` from outside —
+   * `data === built` is what proves the whole chain, generator to frame, is wired.
    */
   addDecor(level) {
     const list = level.decor;
     if (!list || !list.length) return;
-    let dropped = 0;
+    const dropped = new Map();
     for (const d of list) {
       const o = this.props.decor(d);
-      if (!o) { dropped++; continue; }
+      if (!o) { dropped.set(d.type, (dropped.get(d.type) || 0) + 1); continue; }
       const cls = (o.userData.decor && o.userData.decor.cls) || 'prop';
       if (cls === 'wall') {
         const f = DECOR_FACE[d.facing] || DECOR_FACE.s;
@@ -355,8 +364,12 @@ export class DungeonView {
         this.addAt(o, d.x, d.y);
         if (cls === 'decal') this.turnDecal(o, d.x, d.y);
       }
+      this.decorViews.push(o);
     }
-    if (dropped) console.warn(`DungeonView: dropped ${dropped} decor entries this renderer cannot draw`);
+    if (dropped.size) {
+      const names = [...dropped.entries()].map(([t, n]) => (n > 1 ? `${t}x${n}` : t)).join(', ');
+      console.warn(`DungeonView: dropped ${[...dropped.values()].reduce((a, b) => a + b, 0)} decor entries this renderer cannot draw: ${names}`);
+    }
   }
 
   /** Generic InstancedMesh from a list + fill callback. */
@@ -919,6 +932,10 @@ export class DungeonView {
     this.wallMesh = null;
     for (const g of this.ownedGeos) g.dispose();
     this.ownedGeos = [];
+    // the decor groups went with root's children above; drop the handles so the next level's count
+    // starts from zero and nothing keeps a dead level's furniture alive (props.js prunes its own
+    // animation set by parent, so a rat removed here stops ticking on the next frame)
+    this.decorViews = [];
     this.itemViews.clear(); this.animated = []; this.flames = []; this.water = null; this.pickups = [];
     this.beaconView = null; this.beaconKey = null; this.climbViews = [];
     this.level = null;

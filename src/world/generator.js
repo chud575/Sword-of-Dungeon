@@ -701,6 +701,30 @@ function driftMood(mood, decay) {
   return mood;
 }
 
+/**
+ * WHICH OF A WALL'S FOUR FACES THIS CAMERA CAN SEE — measured, not reasoned.
+ *
+ * The camera is an ORTHOGRAPHIC plan view tilted 17 degrees off vertical and it never rotates
+ * (ARCHITECTURE.md, render/camera.js). A wall piece is a quad lying IN its wall's plane
+ * (render/props/dressing.js `wallPlate`, and the comment there explains why it cannot be a
+ * billboard). An orthographic view direction with no x component projects a quad whose normal is
+ * ±x to EXACTLY ZERO AREA, so a piece hung on a room's east or west wall paints nothing at all;
+ * one hung on the room's SOUTH wall (`facing:'n'`) is behind its own stone, and all the player can
+ * ever get of it is a back-to-front sliver poking over the capstone.
+ *
+ * Counted off the canvas by hiding one piece at a time and diffing the frame, at the play camera,
+ * in the guardroom hall: `facing:'s'` painted 71-610 px per piece; `'e'` and `'w'` painted 0 px,
+ * every type, every time; `'n'` painted 0-173 px of mirrored top edge. Nearly half of all the wall
+ * dressing on a level was therefore being generated, textured, drawn and never seen.
+ *
+ * So a hung piece goes on the wall face that looks SOUTH into the room — the room's north wall,
+ * the same far wall `lighting.js` is talking about when it says the wall torches only ever show
+ * their brackets on the far side. This is the fixed camera's own law, not an art preference, and it
+ * is the reason the dressing bunches on one wall of a room the way a stage set does.
+ * @param {'n'|'e'|'s'|'w'} facing
+ */
+function wallReads(facing) { return facing === 's'; }
+
 /** The room's own floor tiles (never corridor, never another room's). */
 function roomFloor(level, room) {
   const out = [];
@@ -952,6 +976,7 @@ function dressRoom(level, room, space) {
       if (level.get(wx, wy) !== TILE.WALL) continue;
       // `facing` runs from the wall tile into the tile that looks at it (§4.1 coordinate law)
       const facing = d.dx === 1 ? 'w' : d.dx === -1 ? 'e' : d.dy === 1 ? 'n' : 's';
+      if (!wallReads(facing)) continue;
       wallSpots.push({ x: wx, y: wy, facing });
     }
   }
@@ -1067,7 +1092,7 @@ function dressCorridors(level, rng) {
     const cls = DECOR_TYPES[type].cls;
     if (cls === 'wall') {
       const opts = DIRS4.map((d) => ({ x: t.x + d.dx, y: t.y + d.dy, facing: d.dx === 1 ? 'w' : d.dx === -1 ? 'e' : d.dy === 1 ? 'n' : 's' }))
-        .filter((w) => level.get(w.x, w.y) === TILE.WALL);
+        .filter((w) => level.get(w.x, w.y) === TILE.WALL && wallReads(w.facing));
       // `facing` points from the wall tile into the corridor tile
       const spot = opts.length ? rng.pick(opts) : null;
       if (!spot || nearDoor(spot.x, spot.y)) return false;

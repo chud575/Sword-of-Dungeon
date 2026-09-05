@@ -318,6 +318,60 @@ function platelight(ctx, k = 3.4) {
   L.baseHemi *= k; L.baseMoon *= k * 0.8;
 }
 
+/** Is a decor entry inside a room (its wall ring included, because the hung pieces live on it)? */
+function inRoom(d, r) { return d.x >= r.x - 1 && d.y >= r.y - 1 && d.x <= r.x + r.w && d.y <= r.y + r.h; }
+/** How many decor entries a room carries. */
+function countDecor(lv, r) { return lv.decor.filter((d) => inRoom(d, r)).length; }
+
+/** The clear tile in a room with the most dressing within two tiles of it — where a shot of the room belongs. */
+function roomStand(lv, r) {
+  let best = { x: r.cx, y: r.cy }, bestScore = -1;
+  for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) {
+    if (lv.get(x, y) !== TILE.FLOOR || !lv.isEmptyFloor(x, y) || lv.decorAt(x, y).length) continue;
+    let score = 0;
+    for (const d of lv.decor) if (inRoom(d, r) && Math.max(Math.abs(d.x - x), Math.abs(d.y - y)) <= 2) score++;
+    if (score > bestScore) { bestScore = score; best = { x, y }; }
+  }
+  return best;
+}
+
+/**
+ * THE SHOTS THAT PHOTOGRAPH THE REAL FEATURE.
+ *
+ * Every other ambience scenario stands hand-picked pieces in a hand-built hall, which proves the
+ * ART and nothing else. These walk the ACTUAL generator until they find a room the ACTUAL placement
+ * pass called `archetype`, enter that level, and stand the hero in it at the ORDINARY PLAY CAMERA —
+ * so what comes back is the picture a player gets, dressed by the code that will dress it in the
+ * game. A type the renderer cannot build, a piece placed on a wall, a room too dense to walk
+ * through: all of it shows up here and nowhere else (docs/AMBIENCE.md §10).
+ *
+ * @param {object} ctx @param {string} archetype one of AMBIENCE §6's 24 ids
+ * @param {{seeds?:number[], depths?:number[], zoom?:number}} [o]
+ * @returns {object|null} the room it settled on, or null if no seed offered one
+ */
+function playRoom(ctx, archetype, { seeds = [42, 7, 101, 3, 19, 77], depths = [2, 4, 6, 9, 12, 15, 18], zoom = 0 } = {}) {
+  for (const seed of seeds) {
+    const g = ctx.reset(seed);
+    for (const depth of depths) {
+      const lv = g.getLevel(depth);
+      const room = lv.rooms.filter((r) => r.archetype === archetype && countDecor(lv, r) >= 4)
+        .sort((a, b) => countDecor(lv, b) - countDecor(lv, a))[0];
+      if (!room) continue;
+      g.enterLevel(depth, 'teleport', { arrival: roomStand(lv, room) });
+      g.player.facing = { dx: 0, dy: -1 };
+      for (const m of lv.monsters) freeze(m);
+      g.give('light', 1); g.castSpell('light');
+      ctx.renderer.fog.override = 'all';
+      ctx.renderer.rebuildLevel();
+      if (zoom) { ctx.renderer.cameraRig.setZoomExact(zoom); ctx.renderer.cameraRig.follow(ctx.renderer.playerView.pos, null); ctx.renderer.cameraRig.snap(); }
+      ctx.step(3000);   // long enough for the light spell's rune to fade off the floor
+      return room;
+    }
+  }
+  ctx.step(400);
+  return null;
+}
+
 export const scenarios = {
   /** Depth 1 start, player on the up-stairs with the first room revealed. */
   async 'default'(ctx) {
@@ -1465,6 +1519,69 @@ export const scenarios = {
     ctx.renderer.fog.override = 'all';
     ctx.renderer.rebuildLevel();
     ctx.step(900);
+  },
+
+  // ----------------------------------------------------- the real generator, at the play camera
+  /** A guardroom the generator built: table, seating, a rack on the wall, tankards at their feet. */
+  async 'room-guardroom'(ctx) { playRoom(ctx, 'guardroom'); },
+  /** A crypt the generator built: sarcophagi and slabs, bone and rime, cold light. */
+  async 'room-crypt'(ctx) { playRoom(ctx, 'crypt'); },
+  /** A scriptorium the generator built: bookcases, a lectern, candles, chalk on the flags. */
+  async 'room-scriptorium'(ctx) { playRoom(ctx, 'scriptorium'); },
+  /** An alchemy room the generator built: the bench, glass, a cauldron and its spills. */
+  async 'room-alchemy'(ctx) { playRoom(ctx, 'alchemy'); },
+  /** The audience chamber the generator built: one throne, its braziers, its carpet. */
+  async 'room-audience'(ctx) { playRoom(ctx, 'audience'); },
+
+  /**
+   * PROOF THAT CORRIDORS STAYED BARE (AMBIENCE §3). The hero stands in the longest stretch of
+   * corridor on a dressed level, looking down it. If this shot ever fills up, the bare-corridor
+   * rule has been lost and the rooms have stopped meaning anything.
+   */
+  async 'corridor-bare'(ctx) {
+    const g = ctx.reset(42);
+    const depth = 6;
+    const lv = g.getLevel(depth);
+    // the corridor tile with the most corridor in a straight line north of it
+    let best = null, bestRun = -1;
+    for (let y = 0; y < lv.height; y++) for (let x = 0; x < lv.width; x++) {
+      if (lv.get(x, y) !== TILE.CORRIDOR || !lv.isEmptyFloor(x, y)) continue;
+      let n = 0;
+      while (lv.get(x, y - n - 1) === TILE.CORRIDOR) n++;
+      if (n > bestRun) { bestRun = n; best = { x, y }; }
+    }
+    g.enterLevel(depth, 'teleport', { arrival: best || lv.stairsUp });
+    g.player.facing = { dx: 0, dy: -1 };
+    for (const m of lv.monsters) freeze(m);
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.step(3000);
+  },
+
+  /**
+   * THE WORST-CASE DRESSED HALL: whichever room on any of six seeds the placement pass loaded most
+   * heavily, at the play camera. If a room ever stops reading as walkable floor, it is this one.
+   */
+  async 'decor-density'(ctx) {
+    let pick = null;
+    for (const seed of [42, 7, 101, 3, 19, 77]) {
+      const g = ctx.reset(seed);
+      for (const depth of [1, 4, 8, 12, 16]) {
+        const lv = g.getLevel(depth);
+        lv.rooms.forEach((r, i) => { const n = countDecor(lv, r); if (!pick || n > pick.n) pick = { seed, depth, i, n }; });
+      }
+    }
+    if (!pick) { ctx.step(400); return; }
+    const g = ctx.reset(pick.seed);
+    const lv = g.getLevel(pick.depth);
+    g.enterLevel(pick.depth, 'teleport', { arrival: roomStand(lv, lv.rooms[pick.i]) });
+    g.player.facing = { dx: 0, dy: -1 };
+    for (const m of lv.monsters) freeze(m);
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.step(3000);
   },
 };
 

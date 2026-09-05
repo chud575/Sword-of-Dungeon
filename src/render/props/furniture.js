@@ -911,7 +911,12 @@ const FURNITURE = {
   retortStand: { art: artRetortStand, pal: { h: RAMP.iron, A: RAMP.glass }, v: 2, foot: 0.46, glow: 0.1, emissive: 0xffb070 },
   scales: { art: artScales, pal: { m: RAMP.brass, h: RAMP.iron }, v: 2, foot: 0.4 },
   cauldron: { art: artCauldron, pal: { h: RAMP.iron, A: RAMP.moss }, v: 3, foot: 0.56 },
-  forge: { art: artForge, pal: { r: RAMP.stone, h: RAMP.iron, A: RAMP.fire }, v: 2, foot: 0.9, blk: true, glow: 0.24, emissive: 0xff8a3a, pool: [0xff6a20, 0.7, 0.14] },
+  // The forge was measured invisible in its own room at the play camera (seed 5, depth 1): a white
+  // block where the hood, lip and legs should be. Most of that is not this file — hiding every decor
+  // group left the hot spot standing — but the forge was also carrying the catalogue's biggest glow
+  // and pool, and it can afford to give some back. See lighting.js DECOR_LIGHTS.forge and
+  // atmosphere.js DECOR_AIR.forge, trimmed in the same pass, for the two larger terms.
+  forge: { art: artForge, pal: { r: RAMP.stone, h: RAMP.iron, A: RAMP.fire }, v: 2, foot: 0.9, blk: true, glow: 0.15, emissive: 0xff8a3a, pool: [0xff6a20, 0.7, 0.10] },
   anvil: { art: artAnvil, pal: { h: RAMP.iron, a: RAMP.bog }, v: 2, foot: 0.56, blk: true },
   // fire and water
   brazier: { art: artBrazier, pal: { h: RAMP.iron, A: RAMP.fire }, v: 4, foot: 0.5, glow: 0.22, emissive: 0xff9a4a, pool: [0xff7a2a, 0.62, 0.11] },

@@ -256,3 +256,59 @@ test('the surface courtyard is dressed and keeps its temple and stairs clear', (
   }
   assert.equal(lv.componentCount(), 1);
 });
+
+// --------------------------------------------------------------- the three strands, joined
+// The generator emits `level.decor`, `props/furniture.js` and `props/dressing.js` paint it, and
+// `render/dungeon.js` stands it on the board. Those three were built in parallel against the same
+// document, which is exactly how a type ends up declared in one and missing from another: the
+// renderer then drops it with a warning nobody reads and the piece simply never appears in the
+// game. These tests hold the three registries to each other, id by id.
+import {
+  FURNITURE_TYPES, isFurniture, furnitureVariants, furnitureBlockable,
+} from '../src/render/props/furniture.js';
+import { DRESSING_TYPES, isDressing, dressingClass, dressingVariants } from '../src/render/props/dressing.js';
+
+test('every declared decor type has art, and every painted type is declared (§5)', () => {
+  const painted = new Set([...FURNITURE_TYPES, ...DRESSING_TYPES]);
+  const declared = Object.keys(DECOR_TYPES);
+  assert.deepEqual(declared.filter((t) => !painted.has(t)), [],
+    'declared in the generator with nothing to draw it — the renderer would drop these every level');
+  assert.deepEqual([...painted].filter((t) => !DECOR_TYPES[t]), [],
+    'painted but never placed — art the player can never meet');
+  for (const t of declared) {
+    const d = DECOR_TYPES[t];
+    const cls = isFurniture(t) ? 'prop' : dressingClass(t);
+    assert.equal(cls, d.cls, `${t}: the placer calls it '${d.cls}', the art builds a '${cls}'`);
+    const v = isFurniture(t) ? furnitureVariants(t) : dressingVariants(t);
+    assert.equal(v, d.v, `${t}: ${d.v} variants placed, ${v} painted — a variant index with no art`);
+    if (isFurniture(t)) assert.equal(furnitureBlockable(t), !!d.blk, `${t}: blockable disagrees`);
+  }
+});
+
+test('every type the generator can actually roll gets used, and nothing rolls that cannot be drawn', () => {
+  const seen = new Set();
+  for (const seed of SEEDS) for (const depth of [0, 1, 3, 6, 9, 12, 15, 18, 21, 25]) {
+    for (const d of generateLevel(seed, depth, { monsters: false }).decor) seen.add(d.type);
+  }
+  const painted = new Set([...FURNITURE_TYPES, ...DRESSING_TYPES]);
+  assert.deepEqual([...seen].filter((t) => !painted.has(t)), [], 'placed with no art');
+  assert.deepEqual(Object.keys(DECOR_TYPES).filter((t) => !seen.has(t)), [],
+    'declared and painted but the placer never rolls it — a piece the player can never see');
+});
+
+test('a hung piece is always on the one wall face this camera can see (§5.3)', () => {
+  // The camera is orthographic, fixed and looking from the south, so an east or west wall projects
+  // to zero area and a room's south wall is behind its own stone. Measured on the canvas at the
+  // play camera: 'e'/'w' paint 0 px of every type, every time. See wallReads() in generator.js.
+  for (const seed of SEEDS.slice(0, 12)) for (const depth of [0, 1, 5, 10, 16, 22]) {
+    const lv = generateLevel(seed, depth, { monsters: false });
+    for (const d of lv.decor) {
+      if (DECOR_TYPES[d.type].cls !== 'wall') continue;
+      assert.equal(d.facing, 's', `${d.type} hung facing '${d.facing}' at ${d.x},${d.y} seed=${seed} depth=${depth} — nobody can see it`);
+      assert.equal(lv.get(d.x, d.y), TILE.WALL, 'a hung piece names its wall tile');
+      // 'walkable' in the §4.1 sense: open ground. A blocking piece may legally stand on that tile
+      // (a plaque over a sarcophagus), and `isWalkable` folds decorBlocked in, so ask the terrain.
+      assert.notEqual(lv.get(d.x, d.y + 1), TILE.WALL, 'and the tile it looks at is open ground');
+    }
+  }
+});

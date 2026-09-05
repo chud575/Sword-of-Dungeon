@@ -196,7 +196,16 @@ const MOOD_INDEX = new Map(MOOD_KEYS.map((k, i) => [k, i]));
  */
 const DECOR_LIGHTS = {
   hearth: { color: 0xff8a3a, intensity: 5.5, radius: 6.0, y: 0.65, kind: 'fire', maxV: 1 },
-  forge: { color: 0xff6a20, intensity: 6.5, radius: 6.5, y: 0.55, kind: 'forge', maxV: 0 },
+  // THE FORGE STANDS IN A HOT SPOT AND IS PARTLY ERASED BY IT. Judged in a rendered frame at the
+  // play camera (seed 5, depth 1, the `forge` room): the tile came back as a featureless
+  // white-orange block with no hood, no lip, no legs — the signature piece of the archetype
+  // invisible in its own room. Hiding every decor group and re-rendering left the hot spot exactly
+  // where it was, which rules out the sprite's own emissive and names the culprits as the things
+  // that are NOT in dungeon.root: this point light, and (the larger term) the additive halo
+  // billboard atmosphere.js hangs over the same tile, which was the widest in its table at 2.1.
+  // Both are trimmed. It reads better and it is still hot — the room's grade and the bloom are
+  // doing the rest, and that belongs to whoever owns the exposure, not to three magic numbers here.
+  forge: { color: 0xff6a20, intensity: 4.6, radius: 5.8, y: 0.80, kind: 'forge', maxV: 0 },
   brazier: { color: 0xff7a2a, intensity: 4.2, radius: 5.2, y: 0.80, kind: 'fire', maxV: 1 },
   candelabra: { color: 0xffe6b0, intensity: 2.4, radius: 3.4, y: 0.85, kind: 'candle', maxV: 1 },
   candlestick: { color: 0xffe6b0, intensity: 1.6, radius: 2.6, y: 0.55, kind: 'candle', maxV: 1 },

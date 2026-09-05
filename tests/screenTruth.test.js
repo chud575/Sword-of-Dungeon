@@ -39,8 +39,16 @@ import {
   FORM_RUN_MIN, analyseForms, analyseSheet, lint, lintErrors, luminance, LINT_SKIP_ANIMS,
 } from '../src/render/sprites/style.js';
 
-/** The four frames these gates judge: the game as it starts, a fight, the deep dungeon, the cast. */
-const SCENARIOS = ['default', 'combat', 'deep-level', 'bestiary'];
+/**
+ * The frames these gates judge: the game as it starts, a fight, the deep dungeon, the cast — and
+ * two FURNISHED rooms built by the real generator and dressed by the real placement pass
+ * (docs/AMBIENCE.md §10). The ambience feature put up to a hundred new billboards a level in among
+ * the cast, on the same texel grid, and until these two were here nothing measured what that did to
+ * the hero standing in the middle of them: whether a bookcase draws in front of him, whether the
+ * props share his grid, whether a dressed room still lights him. 'decor-density' is deliberately
+ * the worst-loaded room the placer produces across six seeds.
+ */
+const SCENARIOS = ['default', 'combat', 'deep-level', 'bestiary', 'room-guardroom', 'decor-density'];
 /** The same frame broken on purpose, one gate at a time. */
 const SABOTAGE = [
   { scenario: 'default', sabotage: 'no-shadows' },
