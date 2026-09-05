@@ -532,38 +532,71 @@ export const DECOR_TYPES = {
 };
 
 /**
- * The 24 archetypes (§6). `w` is the weight in depth bands B1..B4, `cap` the per-level maximum,
- * `sig` the signature piece, `min` the floor tiles the room needs before it may claim the identity.
+ * The 28 archetypes (§6). `w` is the weight in depth bands B1..B4, `cap` the per-level maximum,
+ * `sig` the signature piece, `min` the floor tiles the room needs before it may claim the identity,
+ * `scale` the size of room the identity was written for ('small' | 'mid' | 'large', §6.2).
+ *
+ * THERE IS NO `bare` OUTCOME FOR A ROOM ANY MORE. HeroQuest has no unfurnished rooms, only rooms
+ * with fewer pieces in them; a lit, well-built, empty hall is the bug this whole feature exists to
+ * kill. `bare` survives for two things only: a nook of under four floor tiles (an alcove), and the
+ * corridors (§3), which stay bare by law. Every other room gets a real identity and the floor of
+ * §8.4 — two standing pieces and one hung one.
  */
 export const ARCHETYPES = {
-  guardroom: { rooms: ['hall', 'barracks', 'crypt', 'library', 'vault', 'cistern'], w: [8, 6, 2, 0], cap: 2, mood: 'torchlit', sig: 'table', min: 9 },
-  barracks: { rooms: ['barracks', 'hall'], w: [6, 5, 2, 0], cap: 2, mood: 'torchlit', sig: 'bunk', min: 10 },
-  armoury: { rooms: ['vault', 'barracks', 'hall'], w: [4, 4, 2, 1], cap: 1, mood: 'torchlit', sig: 'weaponRack', min: 8 },
-  forge: { rooms: ['hall', 'vault'], w: [2, 3, 2, 1], cap: 1, mood: 'forge', sig: 'forge', min: 12 },
-  refectory: { rooms: ['hall'], w: [4, 3, 1, 0], cap: 1, mood: 'hearth', sig: 'tableLong', min: 14 },
-  storeroom: { rooms: ['vault', 'barracks', 'cave'], w: [5, 5, 3, 1], cap: 2, mood: 'dark', sig: 'crate', min: 8 },
-  vault: { rooms: ['vault'], w: [2, 3, 3, 2], cap: 1, mood: 'candle', sig: 'strongbox', min: 8 },
-  scriptorium: { rooms: ['library'], w: [4, 4, 2, 0], cap: 1, mood: 'candle', sig: 'bookcase', min: 9 },
-  alchemy: { rooms: ['library', 'vault'], w: [2, 4, 3, 1], cap: 1, mood: 'candle', sig: 'alchemyBench', min: 9 },
-  audience: { rooms: ['hall'], w: [2, 3, 2, 1], cap: 1, mood: 'torchlit', sig: 'throne', min: 14 },
-  torture: { rooms: ['crypt', 'barracks', 'vault'], w: [1, 4, 3, 2], cap: 1, mood: 'ember', sig: 'rack', min: 12 },
-  kennel: { rooms: ['cave', 'barracks', 'hall'], w: [3, 4, 4, 3], cap: 1, mood: 'ember', sig: 'cage', min: 10 },
-  crypt: { rooms: ['crypt'], w: [3, 5, 6, 4], cap: 2, mood: 'cold', sig: 'sarcophagus', min: 9 },
-  ossuary: { rooms: ['crypt', 'cave'], w: [1, 3, 5, 4], cap: 1, mood: 'cold', sig: 'skullPile', min: 8 },
-  barrow: { rooms: ['crypt', 'vault'], w: [0, 2, 5, 5], cap: 1, mood: 'cold', sig: 'tombSlab', min: 9 },
-  cistern: { rooms: ['cistern', 'grotto'], w: [3, 4, 4, 2], cap: 1, mood: 'water', sig: 'wellHead', min: 10 },
-  flooded: { rooms: ['cave', 'grotto', 'cistern'], w: [1, 3, 5, 4], cap: 2, mood: 'water', sig: 'dripstone', min: 8 },
-  mushroom: { rooms: ['cave', 'grotto'], w: [1, 3, 5, 3], cap: 1, mood: 'fungal', sig: 'mushroomCluster', min: 8 },
-  collapsed: { rooms: ['cave', 'hall', 'crypt'], w: [2, 4, 5, 5], cap: 2, mood: 'dark', sig: 'fallenColumn', min: 12 },
-  wellroom: { rooms: ['cistern', 'hall'], w: [2, 2, 1, 0], cap: 1, mood: 'torchlit', sig: 'wellHead', min: 12 },
-  warren: { rooms: ['cave', 'barracks', 'hall'], w: [5, 5, 3, 2], cap: 2, mood: 'ember', sig: 'sackPile', min: 8 },
-  bare: { rooms: ['*'], w: [5, 6, 7, 8], cap: 99, mood: 'dark', sig: null, min: 0 },
-  shrine: { rooms: ['temple', 'shrine'], w: [0, 0, 0, 0], cap: 99, mood: 'shrine', sig: null, min: 0 },
-  courtyard: { rooms: ['surface'], w: [0, 0, 0, 0], cap: 1, mood: 'shrine', sig: null, min: 0 },
+  guardroom: { rooms: ['hall', 'barracks', 'crypt', 'library', 'vault', 'cistern', 'cave'], w: [8, 6, 3, 1], cap: 2, mood: 'torchlit', sig: 'table', min: 8, scale: 'mid' },
+  barracks: { rooms: ['barracks', 'hall', 'cave', 'vault'], w: [6, 5, 3, 1], cap: 2, mood: 'torchlit', sig: 'bunk', min: 10, scale: 'large' },
+  armoury: { rooms: ['vault', 'barracks', 'hall', 'library'], w: [4, 4, 3, 1], cap: 2, mood: 'torchlit', sig: 'weaponRack', min: 8, scale: 'mid' },
+  forge: { rooms: ['hall', 'vault', 'cave'], w: [2, 3, 2, 1], cap: 1, mood: 'forge', sig: 'forge', min: 12, scale: 'large' },
+  refectory: { rooms: ['hall', 'barracks'], w: [4, 3, 2, 1], cap: 1, mood: 'hearth', sig: 'tableLong', min: 14, scale: 'large' },
+  storeroom: { rooms: ['vault', 'barracks', 'cave', 'library', 'cistern', 'crypt'], w: [5, 5, 4, 2], cap: 3, mood: 'dark', sig: 'crate', min: 6, scale: 'small' },
+  vault: { rooms: ['vault', 'crypt', 'library'], w: [2, 3, 3, 2], cap: 2, mood: 'candle', sig: 'strongbox', min: 7, scale: 'mid' },
+  scriptorium: { rooms: ['library', 'hall'], w: [4, 4, 3, 1], cap: 1, mood: 'candle', sig: 'bookcase', min: 9, scale: 'mid' },
+  alchemy: { rooms: ['library', 'vault', 'cave'], w: [2, 4, 3, 2], cap: 1, mood: 'candle', sig: 'alchemyBench', min: 8, scale: 'mid' },
+  audience: { rooms: ['hall'], w: [2, 3, 2, 1], cap: 1, mood: 'torchlit', sig: 'throne', min: 14, scale: 'large' },
+  torture: { rooms: ['crypt', 'barracks', 'vault', 'cave'], w: [1, 4, 3, 2], cap: 1, mood: 'ember', sig: 'rack', min: 10, scale: 'mid' },
+  kennel: { rooms: ['cave', 'barracks', 'hall', 'grotto'], w: [3, 4, 4, 3], cap: 2, mood: 'ember', sig: 'cage', min: 10, scale: 'mid' },
+  crypt: { rooms: ['crypt', 'vault', 'cave'], w: [3, 5, 6, 4], cap: 2, mood: 'cold', sig: 'sarcophagus', min: 8, scale: 'mid' },
+  ossuary: { rooms: ['crypt', 'cave', 'cistern', 'vault'], w: [1, 3, 5, 4], cap: 2, mood: 'cold', sig: 'skullPile', min: 6, scale: 'small' },
+  barrow: { rooms: ['crypt', 'vault', 'cave'], w: [0, 2, 5, 5], cap: 1, mood: 'cold', sig: 'tombSlab', min: 9, scale: 'mid' },
+  cistern: { rooms: ['cistern', 'grotto', 'cave'], w: [3, 4, 4, 2], cap: 1, mood: 'water', sig: 'wellHead', min: 10, scale: 'mid' },
+  flooded: { rooms: ['cave', 'grotto', 'cistern'], w: [1, 3, 5, 4], cap: 2, mood: 'water', sig: 'dripstone', min: 8, scale: 'mid' },
+  mushroom: { rooms: ['cave', 'grotto', 'cistern'], w: [1, 3, 5, 3], cap: 2, mood: 'fungal', sig: 'mushroomCluster', min: 6, scale: 'small' },
+  collapsed: { rooms: ['cave', 'hall', 'crypt', 'barracks', 'library', 'vault', 'cistern'], w: [2, 4, 5, 5], cap: 2, mood: 'dark', sig: 'fallenColumn', min: 10, scale: 'mid' },
+  wellroom: { rooms: ['cistern', 'hall', 'grotto'], w: [2, 2, 1, 1], cap: 1, mood: 'torchlit', sig: 'wellHead', min: 12, scale: 'large' },
+  warren: { rooms: ['cave', 'barracks', 'hall', 'grotto', 'crypt'], w: [5, 5, 4, 3], cap: 2, mood: 'ember', sig: 'sackPile', min: 7, scale: 'small' },
+  // The four small identities — what a two-by-three closet is actually FOR. Without them the odd
+  // little rooms had nothing they could be: every identity in the table above wanted eight tiles or
+  // more, the roll came back empty, and the room fell to `bare`. That was 35-45% of a level.
+  study: { rooms: ['library', 'vault', 'hall', 'barracks'], w: [4, 4, 3, 1], cap: 2, mood: 'candle', sig: 'lectern', min: 5, scale: 'small' },
+  larder: { rooms: ['vault', 'barracks', 'cave', 'cistern', 'library', 'hall'], w: [4, 4, 3, 2], cap: 2, mood: 'dark', sig: 'barrel', min: 5, scale: 'small' },
+  cell: { rooms: ['barracks', 'vault', 'crypt', 'cave', 'library'], w: [2, 4, 4, 3], cap: 2, mood: 'dark', sig: 'chainPost', min: 5, scale: 'small' },
+  wayshrine: { rooms: ['crypt', 'vault', 'library', 'cistern', 'hall', 'grotto', 'cave', 'barracks'], w: [3, 3, 3, 2], cap: 2, mood: 'candle', sig: 'candelabra', min: 4, scale: 'small' },
+  // never rolled for a room any more: the nook under four tiles, and nothing else (§6.3)
+  bare: { rooms: ['*'], w: [0, 0, 0, 0], cap: 99, mood: 'dark', sig: null, min: 0, scale: 'small' },
+  shrine: { rooms: ['temple', 'shrine'], w: [0, 0, 0, 0], cap: 99, mood: 'shrine', sig: null, min: 0, scale: 'small' },
+  courtyard: { rooms: ['surface'], w: [0, 0, 0, 0], cap: 1, mood: 'shrine', sig: null, min: 0, scale: 'large' },
 };
 
+/** A nook of fewer than this many floor tiles is the only room a level may leave bare (§6.3). */
+export const BARE_MAX_TILES = 4;
+
+/** The floor every room of BARE_MAX_TILES tiles or more must clear (§8.4). */
+export const MIN_STANDING = 2;
+
+/**
+ * How well an identity suits a room of `n` floor tiles (§6.2). A store or a wayshrine reads fine
+ * in a closet and thin in a hall; a throne room is the other way round. Never zero — this only
+ * tilts the roll, the hard gate is `min`.
+ */
+function scaleBias(scale, n) {
+  if (scale === 'small') return n <= 9 ? 2.4 : n <= 14 ? 1.1 : 0.3;
+  if (scale === 'large') return n >= 18 ? 1.5 : n >= 14 ? 1.0 : 0.5;
+  return n <= 7 ? 0.7 : 1.0;
+}
+
 /** Archetypes the sword level may roll (§6.2). */
-const SWORD_ARCHETYPES = new Set(['crypt', 'barrow', 'ossuary', 'collapsed', 'vault', 'bare']);
+const SWORD_ARCHETYPES = new Set(['crypt', 'barrow', 'ossuary', 'collapsed', 'vault', 'storeroom',
+  'cell', 'wayshrine']);
 
 /**
  * Furniture plans (§6.1 / §8.1). `p` is the placement rule:
@@ -614,9 +647,40 @@ const PLANS = {
     { t: 'barrel', n: [0, 1], p: 'wall' }, { t: 'brazier', n: [0, 2], p: 'wall' }],
   warren: [{ t: 'sackPile', n: [2, 2], p: 'wall' }, { t: 'crate', n: [1, 2], p: 'wall' }, { t: 'barrel', n: [1, 2], p: 'wall' },
     { t: 'cauldron', n: [0, 1], p: 'interior' }, { t: 'chainPost', n: [0, 1], p: 'wall' }],
+  // the small identities (§6.1): two standing pieces fit a closet, and that is the whole point
+  study: [{ t: 'lectern', n: [1, 1], p: 'wall', anchor: true }, { t: 'bookcase', n: [1, 2], p: 'wallLong' },
+    { t: 'stool', n: [0, 1], p: 'around' }, { t: 'candelabra', n: [0, 1], p: 'wall' }, { t: 'table', n: [0, 1], p: 'interior' }],
+  larder: [{ t: 'barrel', n: [2, 3], p: 'wall', anchor: true }, { t: 'sackPile', n: [1, 2], p: 'wall' },
+    { t: 'crate', n: [0, 2], p: 'wall' }, { t: 'cupboard', n: [0, 1], p: 'wall' }],
+  cell: [{ t: 'chainPost', n: [1, 2], p: 'wall', anchor: true }, { t: 'stool', n: [1, 1], p: 'any' },
+    { t: 'footlocker', n: [0, 1], p: 'wall' }, { t: 'bonePile', n: [0, 1], p: 'any' }],
+  wayshrine: [{ t: 'candelabra', n: [1, 2], p: 'wall', anchor: true }, { t: 'candlestick', n: [1, 2], p: 'any' },
+    { t: 'bench', n: [0, 1], p: 'wall' }, { t: 'urn', n: [0, 1], p: 'wall' }],
   shrine: [{ t: 'candelabra', n: [1, 2], p: 'wall' }, { t: 'candlestick', n: [0, 1], p: 'any' }, { t: 'bench', n: [0, 1], p: 'wall' }],
   courtyard: [{ t: 'bench', n: [1, 2], p: 'wall' }, { t: 'barrel', n: [0, 1], p: 'wall' }, { t: 'candelabra', n: [0, 2], p: 'wall' }],
   bare: [],
+};
+
+/**
+ * The §8.4 top-up: what a room of this identity puts down when the grammar above ran out of legal
+ * spots before it had its two standing pieces. Every entry belongs to the archetype's own set, so
+ * the room still reads as itself — a store adds a barrel, a crypt an urn, an alchemy a stool.
+ */
+const FILLER = {
+  guardroom: ['stool', 'barrel', 'bench'], barracks: ['footlocker', 'stool', 'barrel'],
+  armoury: ['crate', 'shieldStand', 'barrel'], forge: ['anvil', 'crate', 'barrel'],
+  refectory: ['bench', 'barrel', 'stool'], storeroom: ['crate', 'barrel', 'sackPile'],
+  vault: ['strongbox', 'candelabra', 'crate'], scriptorium: ['stool', 'lectern', 'candelabra'],
+  alchemy: ['stool', 'bottles', 'retortStand'], audience: ['bench', 'candelabra', 'brazier'],
+  torture: ['stool', 'brazier', 'chainPost'], kennel: ['barrel', 'chainPost', 'bonePile'],
+  crypt: ['urn', 'candlestick', 'tombSlab'], ossuary: ['urn', 'skullPile', 'candlestick'],
+  barrow: ['urn', 'tombSlab', 'candlestick'], cistern: ['barrel', 'urn', 'stool'],
+  flooded: ['stalagmite', 'mushroomCluster', 'bonePile'], mushroom: ['mushroomCluster', 'stalagmite', 'bonePile'],
+  collapsed: ['rubbleMound', 'pillarBroken', 'bonePile'], wellroom: ['bench', 'barrel', 'brazier'],
+  warren: ['sackPile', 'crate', 'cauldron'], study: ['stool', 'bookcase', 'candelabra'],
+  larder: ['barrel', 'sackPile', 'crate'], cell: ['stool', 'footlocker', 'bonePile'],
+  wayshrine: ['candlestick', 'urn', 'bench'], shrine: ['candlestick', 'candelabra', 'bench'],
+  courtyard: ['bench', 'barrel', 'candelabra'],
 };
 
 /** Scatter dressing per archetype (§6.1), and the wall pieces each room may hang. */
@@ -643,6 +707,10 @@ const SCATTER = {
   collapsed: ['scree', 'crackedFlags', 'bones', 'scorch'],
   wellroom: ['puddle', 'coins', 'mosaic'],
   warren: ['bones', 'bloodstain', 'rat', 'scorch', 'tankards'],
+  study: ['bottles', 'chalkSigil', 'rug', 'coins'],
+  larder: ['scree', 'rat', 'coins', 'tankards'],
+  cell: ['bones', 'bloodstain', 'scree', 'rat', 'skull'],
+  wayshrine: ['mosaic', 'rug', 'coins', 'bones'],
   bare: ['scree', 'bones', 'crackedFlags'],
   courtyard: ['mosaic', 'rug', 'puddle'],
 };
@@ -658,7 +726,10 @@ const WALL_SET = {
   shrine: ['tapestry', 'plaque'], cistern: ['gargoyleSpout', 'mould', 'wallCrack'],
   flooded: ['mould', 'fungusShelf', 'gargoyleSpout'], mushroom: ['fungusShelf', 'mould'],
   collapsed: ['wallCrack', 'cobweb'], wellroom: ['gargoyleSpout', 'ironRing', 'sconce'],
-  warren: ['hungShield', 'chains', 'mould'], bare: ['cobweb', 'wallCrack'], courtyard: ['banner', 'plaque'],
+  warren: ['hungShield', 'chains', 'mould'], study: ['wallShelf', 'tapestry', 'cobweb'],
+  larder: ['wallShelf', 'sconce', 'cobweb'], cell: ['manacles', 'chains', 'ironRing'],
+  wayshrine: ['plaque', 'tapestry', 'skullNiche'],
+  bare: ['cobweb', 'wallCrack'], courtyard: ['banner', 'plaque'],
 };
 
 /** The whole corridor catalogue (§3) — nothing else may ever stand in a corridor. */
@@ -737,7 +808,8 @@ function roomFloor(level, room) {
 
 /** Everything the placer needs to know about one room's floor, computed once. */
 function roomSpace(level, room) {
-  let floor = roomFloor(level, room);
+  const boxFloor = roomFloor(level, room);
+  let floor = boxFloor;
   // a room box can catch a sliver of somebody else's floor; only real lobes count as this room
   const comps = components(floor);
   if (comps.length > 1) {
@@ -767,7 +839,22 @@ function roomSpace(level, room) {
     }
   }
   const free = floor.filter((t) => !entrances.has(key(t.x, t.y)) && !level.decorForbidden(t.x, t.y, true));
-  return { floor, inRoom, entrances, wallSide, free };
+  // The last-resort pool: every tile a standing piece could legally occupy, entrances included.
+  // A handful of rooms per hundred levels are all doorstep and have no `free` tile at all; the
+  // §8.4 floor still has to be met there, and a non-blocking piece beside a corridor mouth is a
+  // far smaller sin than a lit, empty, furnished-for-nobody hall.
+  const spare = floor.filter((t) => !level.decorForbidden(t.x, t.y, true));
+  // Wall mounts this camera can actually see: the rock directly NORTH of one of the room's own
+  // floor tiles (§5.3). Read off the WHOLE room box, not the trimmed floor — a two-tile pocket
+  // bitten off the room by a pool is still this room's stone, and its north wall is the only one
+  // the camera can see. A room whose north side opens straight into the next room has no mount at
+  // all, and is the one exemption from the §8.4 wall-piece floor (0.4% of rooms, measured).
+  const mounts = [];
+  for (const t of boxFloor) {
+    if (level.get(t.x, t.y - 1) !== TILE.WALL) continue;
+    mounts.push({ x: t.x, y: t.y - 1, facing: 's', doorstep: entrances.has(key(t.x, t.y)) });
+  }
+  return { floor, inRoom, entrances, wallSide, free, spare, mounts };
 }
 
 /** 4-connected components of a tile list. */
@@ -796,7 +883,7 @@ function components(tiles) {
  * Dress one room: furniture by the placement grammar, then scatter thinning away from it,
  * then wall pieces. Returns { furniture, scatter } (both arrays of Decor entries).
  */
-function dressRoom(level, room, space) {
+function dressRoom(level, room, space, force = false) {
   const out = { furniture: [], scatter: [] };
   const plan = PLANS[room.archetype] || [];
   const { floor, entrances, wallSide, free } = space;
@@ -805,8 +892,11 @@ function dressRoom(level, room, space) {
   const freeSet = new Set(free.map((t) => key(t.x, t.y)));
   const decay = room.decay;
   const props = new Set(), decals = new Set(), usedWalls = new Set();
-  const maxProps = Math.max(1, Math.floor(0.18 * floor.length));
-  const maxAny = Math.floor(0.35 * floor.length);
+  // §8.3, with the §8.4 floor written into it: the percentages govern a room big enough for them,
+  // and every room is still allowed its two standing pieces. 18% of a seven-tile store is 1.26 —
+  // rounded down that was one piece, and one piece in a room is a prop, not a place.
+  const maxProps = Math.max(MIN_STANDING, Math.floor(0.18 * floor.length));
+  const maxAny = Math.max(MIN_STANDING, Math.floor(0.35 * floor.length));
   const longAxis = room.w >= room.h ? 'x' : 'y';
   // §8.2 rule 10: the four tiles nearest the room centre stay clear of standing scatter
   const centreTiles = new Set(floor.slice()
@@ -816,7 +906,7 @@ function dressRoom(level, room, space) {
 
   const taken = new Set();                       // floor tiles carrying any decor
   const baseComps = components(floor);
-  const clearFloor = Math.ceil(0.55 * floor.length);
+  const clearFloor = Math.max(0, Math.min(Math.ceil(0.55 * floor.length), floor.length - MIN_STANDING));
   /** Would occupying (x,y) still leave the room reading as walkable floor? (§8.3) */
   const fitsFloor = (x, y) => {
     const k = key(x, y);
@@ -929,13 +1019,13 @@ function dressRoom(level, room, space) {
     }
   }
 
+  // The signature is the room's identity; a room that could not seat it is not that room. It used
+  // to fall to 'bare' here, which is exactly how a hall ended up empty. Now the caller re-rolls it
+  // into an identity that does fit (§6.3), and only a room with nowhere at all to stand a piece
+  // ever comes back undressed.
   const sig = ARCHETYPES[room.archetype].sig;
-  if (sig && !out.furniture.some((d) => d.type === sig)) {
-    room.archetype = 'bare';
-    room.lightMood = driftMood(ARCHETYPES.bare.mood, decay);
-    out.furniture.length = 0;
-    props.clear(); decals.clear(); taken.clear();
-  }
+  out.sigOk = !sig || out.furniture.some((d) => d.type === sig);
+  if (!out.sigOk && !force) return out;
 
   // ---- scatter, thinning away from the furniture (§8.2 rule 9)
   const furnTiles = out.furniture.map((d) => ({ x: d.x, y: d.y }));
@@ -967,40 +1057,37 @@ function dressRoom(level, room, space) {
     if (t) push(out.scatter, type, t.x, t.y, rng.pick(['n', 'e', 's', 'w']), variantFor(rng, type, decay), false);
   }
 
-  // ---- wall dressing (§8.2 rule 11): only walls a floor tile of this room can look at
-  const wallSpots = [];
-  for (const t of floor) {
-    if (entrances.has(key(t.x, t.y))) continue;
-    for (const d of DIRS4) {
-      const wx = t.x + d.dx, wy = t.y + d.dy;
-      if (level.get(wx, wy) !== TILE.WALL) continue;
-      // `facing` runs from the wall tile into the tile that looks at it (§4.1 coordinate law)
-      const facing = d.dx === 1 ? 'w' : d.dx === -1 ? 'e' : d.dy === 1 ? 'n' : 's';
-      if (!wallReads(facing)) continue;
-      wallSpots.push({ x: wx, y: wy, facing });
-    }
-  }
+  // ---- wall dressing (§8.2 rule 11 / §5.3): the mounts this camera can see, doorstep last
+  const wallSpots = space.mounts.filter((m) => !m.doorstep);
+  const spareSpots = space.mounts.filter((m) => m.doorstep);
+  rng.shuffle(wallSpots); rng.shuffle(spareSpots);
   const wallList = WALL_SET[room.archetype] || ['cobweb'];
-  let wallWant = floor.length < 4 ? 0 : room.archetype === 'bare' ? (rng.chance(0.35) ? 1 : 0) : rng.int(1, 3);
+  let wallWant = room.archetype === 'bare' ? (floor.length < 2 ? 0 : rng.chance(0.35) ? 1 : 0) : rng.int(1, 3);
   if (decay > 0.5 && room.archetype !== 'bare') wallWant += rng.int(0, 1);
-  rng.shuffle(wallSpots);
-  for (const spot of wallSpots) {
-    if (wallWant <= 0) break;
-    const k = key(spot.x, spot.y);
-    if (usedWalls.has(k)) continue;
+  /** Hang one piece on `m`; `must` waives the taste rules so the §8.4 floor can always be met. */
+  const hang = (m, must) => {
+    const k = key(m.x, m.y);
+    if (usedWalls.has(k)) return false;
     let type = rng.pick(wallList);
     if (decay > 0.45 && rng.chance(0.35)) type = 'cobweb';
     if (type === 'mould' && level.depth < 6) type = 'cobweb';
     if (type === 'cobweb') {
       // corners only: the mount wall must have wall on an adjacent side
-      const perp = FACE[spot.facing].dx !== 0 ? [{ dx: 0, dy: 1 }, { dx: 0, dy: -1 }] : [{ dx: 1, dy: 0 }, { dx: -1, dy: 0 }];
-      if (!perp.some((d) => level.get(spot.x + d.dx, spot.y + d.dy) === TILE.WALL)) continue;
+      const perp = FACE[m.facing].dx !== 0 ? [{ dx: 0, dy: 1 }, { dx: 0, dy: -1 }] : [{ dx: 1, dy: 0 }, { dx: -1, dy: 0 }];
+      if (!perp.some((d) => level.get(m.x + d.dx, m.y + d.dy) === TILE.WALL)) {
+        if (!must) return false;
+        type = wallList.find((t) => t !== 'cobweb' && !(t === 'mould' && level.depth < 6)) || 'sconce';
+      }
     }
-    if (out.scatter.some((d) => d.type === type && DECOR_TYPES[d.type].cls === 'wall'
-      && Math.max(Math.abs(d.x - spot.x), Math.abs(d.y - spot.y)) < 2)) continue;
+    if (!must && out.scatter.some((d) => d.type === type && DECOR_TYPES[d.type].cls === 'wall'
+      && Math.max(Math.abs(d.x - m.x), Math.abs(d.y - m.y)) < 2)) return false;
     usedWalls.add(k);
-    out.scatter.push({ type, x: spot.x, y: spot.y, facing: spot.facing, variant: variantFor(rng, type, decay), blocking: false });
-    wallWant--;
+    out.scatter.push({ type, x: m.x, y: m.y, facing: m.facing, variant: variantFor(rng, type, decay), blocking: false });
+    return true;
+  };
+  for (const m of wallSpots) {
+    if (wallWant <= 0) break;
+    if (hang(m, false)) wallWant--;
   }
 
   // ---- density (§8.3): drop scatter, newest first, until the room reads as walkable floor.
@@ -1014,7 +1101,7 @@ function dressRoom(level, room, space) {
     }
     if (taken.size > maxAny) return false;
     const clear = floor.filter((t) => !taken.has(key(t.x, t.y)));
-    if (clear.length < Math.ceil(0.55 * floor.length)) return false;
+    if (clear.length < clearFloor) return false;
     for (const comp of baseComps) {
       const keep = comp.filter((t) => !taken.has(key(t.x, t.y)));
       if (!keep.length) return false;
@@ -1026,9 +1113,40 @@ function dressRoom(level, room, space) {
   };
   let drops = 0;
   while (!clearOk() && out.scatter.length) { out.scatter.pop(); drops++; }
-  while (!clearOk() && out.furniture.length > 1) { out.furniture.pop(); drops++; }
-  if (!clearOk()) { out.furniture.length = 0; out.scatter.length = 0; drops++; }
+  while (!clearOk() && out.furniture.length > MIN_STANDING) { out.furniture.pop(); drops++; }
   out.drops = drops;
+
+  // ---- §8.4 THE FLOOR: two standing pieces and one hung one, in every room worth the name.
+  // Everything above is taste; this is the guarantee. It runs last, after the density drops, so
+  // nothing it adds can be taken away again, and it only ever adds pieces the room's own archetype
+  // owns — a store gets another barrel, a crypt another urn, never a generic crate everywhere.
+  if (floor.length >= BARE_MAX_TILES && room.archetype !== 'bare') {
+    const fillers = FILLER[room.archetype] || FILLER.storeroom;
+    const pool = [...free, ...space.spare.filter((t) => !freeSet.has(key(t.x, t.y)))];
+    /** The first tile left that a standing piece may occupy, taste first, brute force second. */
+    const spot = () => pool.find((c) => !props.has(key(c.x, c.y)) && !decals.has(key(c.x, c.y)) && fitsFloor(c.x, c.y))
+      || pool.find((c) => !props.has(key(c.x, c.y)));
+    const stand = (type, t) => {
+      out.furniture.push({ type, x: t.x, y: t.y, facing: facingFor('wall', t), variant: variantFor(rng, type, decay), blocking: false });
+      props.add(key(t.x, t.y)); taken.add(key(t.x, t.y));
+    };
+    // A room that has been re-rolled to the end of the ladder still gets its signature: a store
+    // with no crate in it is not a store, and the whole point of §8.4 is that it is still a place.
+    if (!out.sigOk && sig) {
+      const t = spot();
+      if (t) { stand(sig, t); out.sigOk = true; }
+    }
+    let guard = 0;
+    while (props.size < MIN_STANDING && guard++ < 24) {
+      const t = spot();
+      if (!t) break;
+      // a decal already on this tile is fine (§8.2 rule 12); another standing piece is not
+      stand(fillers[props.size % fillers.length], t);
+    }
+    if (!out.scatter.some((d) => DECOR_TYPES[d.type].cls === 'wall')) {
+      for (const m of [...wallSpots, ...spareSpots]) if (hang(m, true)) break;
+    }
+  }
   return out;
 }
 
@@ -1136,8 +1254,17 @@ function dressCorridors(level, rng) {
 
 /**
  * Assign an archetype, a light mood, a decay level and a dressing seed to every room (§6.3).
+ *
  * Side rooms are locked first; the rest are picked largest-first so the biggest room gets first
- * claim on a signature identity, and a quarter of the level is deliberately left bare.
+ * claim on a signature identity. NOTHING IS LEFT BARE. The old rule 6 ("a quarter of every level
+ * is deliberately empty") was measured in the shipped game and it was not a quarter: it was 35-45%
+ * of every level, several of those rooms twelve to twenty-four tiles of lit, well-built, utterly
+ * unfurnished hall. HeroQuest has no unfurnished rooms — it has rooms with fewer pieces — so the
+ * quota is gone and the scarcity that used to come from empty rooms now comes from the per-level
+ * caps and from `scaleBias`: a closet gets a store or a wayshrine, the hall gets the throne.
+ *
+ * Only a nook of under `BARE_MAX_TILES` floor tiles may still come back 'bare'.
+ * @returns {{spaces: Map, counts: Object<string,number>, band: number}}
  */
 function assignArchetypes(level, rng, isSwordLevel) {
   const band = bandIndex(level.depth);
@@ -1149,74 +1276,77 @@ function assignArchetypes(level, rng, isSwordLevel) {
   const lock = (room, id) => { room.archetype = id; counts[id] = (counts[id] || 0) + 1; };
   const spaces = new Map();
   for (const room of level.rooms) spaces.set(room, roomSpace(level, room));
-  const fits = (room, id) => {
-    const a = ARCHETYPES[id];
-    const sp = spaces.get(room), free = sp.free;
-    if (sp.floor.length < a.min || free.length < 2) return false;
-    if (!a.sig) return true;
-    const wallHug = !['table', 'tableLong', 'rack', 'wellHead', 'fallenColumn', 'cauldron'].includes(a.sig);
-    return free.some((t) => (sp.wallSide.has(key(t.x, t.y)) === wallHug) || free.length > 6);
-  };
   const main = [];
   for (const room of level.rooms) {
+    const sp = spaces.get(room);
     if (room.type === 'temple' || room.type === 'shrine') lock(room, 'shrine');
-    else if (room.type === 'alcove') lock(room, 'bare');
     else if (room.type === 'surface') lock(room, 'courtyard');
+    else if (sp.floor.length < BARE_MAX_TILES) lock(room, 'bare');   // the nook, and only the nook
     else main.push(room);
   }
   const order = main.map((r, i) => ({ r, i })).sort((a, b) => (b.r.area || b.r.w * b.r.h) - (a.r.area || a.r.w * a.r.h) || a.i - b.i);
-  // the biggest room on the level gets first pick of a signature identity, and is the least likely
-  // to be left empty; the closets are the ones that stay bare (§6.3 rule 2)
-  const bareBias = (i) => (order.length < 3 ? 1 : i < order.length / 3 ? 0.4 : i < (order.length * 2) / 3 ? 1 : 1.8);
-  for (const [oi, { r }] of order.entries()) {
+  for (const { r } of order) {
+    lock(r, rollArchetype(level, r, spaces.get(r), rng, counts, band, isSwordLevel, null));
+  }
+  for (const room of level.rooms) room.lightMood = moodFor(room, spaces.get(room), isSwordLevel);
+  return { spaces, counts, band };
+}
+
+/** The light mood an assignment implies, once decay and the room's own walls have had their say. */
+function moodFor(room, space, isSwordLevel) {
+  const a = ARCHETYPES[room.archetype];
+  let mood = isSwordLevel && room.archetype !== 'shrine' ? 'sword' : driftMood(a.mood, room.decay);
+  // a room lighting.js can hang no torch in may not claim to be torchlit (§6.3 rule 5)
+  if (mood === 'torchlit' && !space.wallSide.size) mood = 'ember';
+  return mood;
+}
+
+/**
+ * Roll one room's identity (§6.3 step 3), down a ladder that CANNOT come back empty:
+ *   0. the archetypes allowed on this room type, in band, under their cap, that fit the shape
+ *   1. the same list with the depth-band weight floored to 1 (a deep hall may still be a guardroom)
+ *   2. any archetype under its cap whose signature fits the shape, whatever the room is called
+ *   3. the same with the per-level cap waived — a third crypt beats an unfurnished hall
+ * Scarcity is defended in that order: the cap is the LAST thing given up, because a level where
+ * every room has a throne has no throne in it (§0 rule 2).
+ * `avoid` is the identity a re-roll is running away from (its signature would not place).
+ */
+function rollArchetype(level, room, sp, rng, counts, band, isSwordLevel, avoid) {
+  const n = sp.floor.length;
+  const allowed = (id, a) => {
+    if (id === 'shrine' || id === 'courtyard' || id === 'bare') return false;
+    if (id === avoid) return false;
+    if (isSwordLevel && !SWORD_ARCHETYPES.has(id)) return false;
+    return true;
+  };
+  const typed = (a) => a.rooms.includes('*') || a.rooms.includes(room.type);
+  const build = (rule) => {
     const table = [];
     for (const [id, a] of Object.entries(ARCHETYPES)) {
-      if (id === 'shrine' || id === 'courtyard') continue;
-      if (isSwordLevel && !SWORD_ARCHETYPES.has(id)) continue;
-      if (!a.rooms.includes('*') && !a.rooms.includes(r.type)) continue;
-      if ((counts[id] || 0) >= a.cap) continue;
-      let w = a.w[band];
-      if (w <= 0) continue;
-      if (id === 'bare') w *= bareBias(oi);
-      else if (!fits(r, id)) continue;
-      table.push({ t: id, w });
+      if (!allowed(id, a)) continue;
+      if (rule < 2 && !typed(a)) continue;
+      if (rule < 3 && (counts[id] || 0) >= a.cap) continue;
+      const w = rule < 1 ? a.w[band] : Math.max(a.w[band], 1);
+      if (w <= 0 || !fitsShape(level, room, sp, id)) continue;
+      table.push({ t: id, w: w * scaleBias(a.scale, n) });
     }
-    const pick = weightedPick(rng, table);
-    lock(r, pick ? pick.t : 'bare');
+    return table;
+  };
+  for (let rule = 0; rule <= 3; rule++) {
+    const pick = weightedPick(rng, build(rule));
+    if (pick) return pick.t;
   }
-  // §6.3 rule 6: between a quarter and three-fifths of a level is deliberately empty
-  const bareOf = (r) => r.archetype === 'bare';
-  const minBare = Math.ceil(main.length * 0.25), maxBare = Math.floor(main.length * 0.6);
-  let bare = main.filter(bareOf).length;
-  const bySize = main.slice().sort((a, b) => (a.area || a.w * a.h) - (b.area || b.w * b.h));
-  for (const r of bySize) {
-    if (bare >= minBare) break;
-    if (bareOf(r)) continue;
-    counts[r.archetype]--; r.archetype = 'bare'; bare++;
-  }
-  for (const r of bySize.slice().reverse()) {
-    if (bare <= maxBare) break;
-    if (!bareOf(r)) continue;
-    const table = [];
-    for (const [id, a] of Object.entries(ARCHETYPES)) {
-      if (id === 'bare' || id === 'shrine' || id === 'courtyard') continue;
-      if (isSwordLevel && !SWORD_ARCHETYPES.has(id)) continue;
-      if (!a.rooms.includes('*') && !a.rooms.includes(r.type)) continue;
-      if ((counts[id] || 0) >= a.cap || a.w[band] <= 0 || !fits(r, id)) continue;
-      table.push({ t: id, w: a.w[band] });
-    }
-    const pick = weightedPick(rng, table);
-    if (!pick) continue;
-    lock(r, pick.t); bare--;
-  }
-  for (const room of level.rooms) {
-    const a = ARCHETYPES[room.archetype];
-    let mood = isSwordLevel && room.archetype !== 'shrine' ? 'sword' : driftMood(a.mood, room.decay);
-    // a room lighting.js can hang no torch in may not claim to be torchlit (§6.3 rule 5)
-    if (mood === 'torchlit' && !spaces.get(room).wallSide.size) mood = 'ember';
-    room.lightMood = mood;
-  }
-  return spaces;
+  return avoid === 'storeroom' ? 'larder' : 'storeroom';
+}
+
+/** Does the room have the floor and the wall this identity's signature needs? (§6.3 step 3) */
+function fitsShape(level, room, sp, id) {
+  const a = ARCHETYPES[id];
+  if (sp.floor.length < a.min || sp.spare.length < 1) return false;
+  if (!a.sig) return true;
+  const wallHug = !['table', 'tableLong', 'rack', 'wellHead', 'fallenColumn', 'cauldron'].includes(a.sig);
+  return sp.free.some((t) => (sp.wallSide.has(key(t.x, t.y)) === wallHug) || sp.free.length > 6)
+    || sp.free.length < 2;
 }
 
 /**
@@ -1227,11 +1357,23 @@ function assignArchetypes(level, rng, isSwordLevel) {
  */
 export function placeDecor(level, isSwordLevel = false) {
   const rng = createRng(seedFrom(level.seed, 'decor'));
-  const spaces = assignArchetypes(level, rng, isSwordLevel);
+  const { spaces, counts, band } = assignArchetypes(level, rng, isSwordLevel);
   const furniture = [], scatter = [];
-  let drops = 0;
+  let drops = 0, rerolls = 0;
   for (const room of level.rooms) {
-    const dressed = dressRoom(level, room, spaces.get(room));
+    const sp = spaces.get(room);
+    let dressed = dressRoom(level, room, sp);
+    // A room whose signature would not seat is not that room — so it becomes another one, and the
+    // ladder in rollArchetype() cannot come back empty. It never falls to 'bare' (§6.3).
+    for (let tries = 0; !dressed.sigOk && tries < 4; tries++) {
+      const next = rollArchetype(level, room, sp, rng, counts, band, isSwordLevel, room.archetype);
+      counts[room.archetype] = Math.max(0, (counts[room.archetype] || 1) - 1);
+      room.archetype = next; counts[next] = (counts[next] || 0) + 1;
+      room.lightMood = moodFor(room, sp, isSwordLevel);
+      // the last try takes what it is given and stands the signature by hand (§8.4)
+      dressed = dressRoom(level, room, sp, tries === 3);
+      rerolls++;
+    }
     furniture.push(...dressed.furniture);
     scatter.push(...dressed.scatter);
     drops += dressed.drops || 0;
@@ -1247,7 +1389,21 @@ export function placeDecor(level, isSwordLevel = false) {
     mounted.add(k);
     return true;
   });
-  if (all.length > 220) all = all.slice(0, 220);   // renderer budget (§8.3)
+  // Renderer budget (§8.3). Trim the loosest dressing first — corridor pieces, then room scatter,
+  // newest first — so a level never buys its budget by emptying the last room in the list.
+  if (all.length > 220) {
+    const room = new Set(furniture);
+    const wall = new Set();
+    for (const d of all) {   // the first hung piece of each room's wall run is part of the floor
+      if (DECOR_TYPES[d.type].cls !== 'wall' || wall.size >= level.rooms.length) continue;
+      if (!wall.has(d)) wall.add(d);
+    }
+    for (let i = all.length - 1; i >= 0 && all.length > 220; i--) {
+      if (room.has(all[i]) || wall.has(all[i])) continue;
+      all.splice(i, 1);
+    }
+    if (all.length > 220) all = all.slice(0, 220);
+  }
   level.setDecor(all);
   // §4.3 rule 4: nothing may sever the level. Back blocking pieces out until the fill passes.
   let backedOut = 0;
@@ -1268,6 +1424,7 @@ export function placeDecor(level, isSwordLevel = false) {
       level.setDecor(all);
     }
   }
-  level.debug.decor = { pieces: all.length, blocking: all.filter((d) => d.blocking).length, densityDrops: drops, blockDrops: backedOut };
+  level.debug.decor = { pieces: all.length, blocking: all.filter((d) => d.blocking).length,
+    densityDrops: drops, blockDrops: backedOut, rerolls };
   return all;
 }

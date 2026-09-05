@@ -28,6 +28,17 @@ Two rules fall out of that and both are law here:
 2. **Scarcity is the point.** One throne on the level. One rack. Two bookcases. A dungeon where
    every room has a throne has no throne in it. See §6, the per-level manifest.
 
+**And a third, learned the hard way.** The first edition of this document said a quarter of every
+level should be *deliberately* empty, and the shipped generator obeyed it and then some:
+`node tools/decordump.mjs --seed 7 --depth 8` came back with **seven bare rooms out of fifteen**,
+several of them twelve to twenty-four tiles of lit, well-built, utterly unfurnished hall
+(`library bare dark decay=0.25 area=12`). Thirty-five to forty-five per cent of every level was
+the exact disease this document was written to cure. **HeroQuest has no unfurnished rooms — it has
+rooms with fewer pieces in them.** The empty-room quota is therefore GONE (§6.3), `bare` is no
+longer a room outcome (§6.1), and every room of four floor tiles or more now carries a hard floor
+of two standing pieces and one hung one (§8.4). Scarcity now comes from the per-level caps and from
+the size-fit roll, which is where it belonged all along.
+
 **Dungeon Crawlers HD (Drowning Monkeys)** supplies the other half: painted, high-frequency surface
 detail, and *a reason for each area to look different from the last* — goblin corridors, lava
 caverns, flooded works. So: HeroQuest's discipline about **what stands on the floor**, Dungeon
@@ -91,7 +102,7 @@ Bands are keyed to `depthTint()` in `render/lighting.js` and to `levelStyle()` i
 | **B2** | 6–12 | cold blue-grey | `masonry`/`ruin` | The old works: goblinoid squats in a human keep | Half the torches dead, furniture broken and re-used, filth |
 | **B3** | 13–18 | green-black | `ruin`/`cavern` | Older than the keep: crypts, drake dens, water | Cold, wet, fungal; furniture is wreckage; bone everywhere |
 | **B4** | 19+ | red-violet | `cavern` | The demon's floor | Scorched, chained, ember-lit, almost nothing man-made survives |
-| **BS** | sword level (15–19) | as its band | `obsidian` | Where Umla hid the Sword | Violet, silent, unfurnished except tombs and rubble |
+| **BS** | sword level (15–19) | as its band | `obsidian` | Where Umla hid the Sword | Violet, silent: tombs, stores, cells and rubble only |
 
 ### 2.1 `room.decay` — one number carries "older, colder, more ruined"
 
@@ -213,13 +224,15 @@ assigns (`hall`, `cave`, `grotto`, `cistern`, `crypt`, `library`, `barracks`, `v
 
 | Field | Type | Meaning |
 |---|---|---|
-| `room.archetype` | `string` | one of the 24 ids in §6. **Always set**, `'bare'` when the room is deliberately empty. |
+| `room.archetype` | `string` | one of the 28 ids in §6. **Always set.** `'bare'` ONLY for a nook of fewer than `BARE_MAX_TILES` (4) floor tiles — never for a room. |
 | `room.lightMood` | `string` | one of the 11 moods in §7. Always set. |
 | `room.decay` | `number` 0..1 | §2.1. Always set. |
 | `room.decorSeed` | `number` | integer; the fork the room's dressing was rolled from, so a single room can be re-dressed without re-rolling the level. |
 
-Side rooms (`temple`, `shrine`, `alcove`) get `archetype: 'shrine'` / `'shrine'` / `'bare'`
-respectively and are never given furniture beyond §6's shrine row.
+Side rooms: `temple` and `shrine` get `archetype: 'shrine'` and are never given furniture beyond
+§6's shrine row. An `alcove` — every one the generator builds is a single tile — is under
+`BARE_MAX_TILES` and so gets `'bare'`. The size test is on the room's own **floor tiles**, not on
+its type: a four-tile alcove, if one is ever carved, is furnished like anything else.
 
 ### 4.3 BLOCKING IS DANGEROUS
 
@@ -424,11 +437,16 @@ to *nothing* — a `scriptorium` with only two bookcases and a candle still read
 
 ## 6. ROOM ARCHETYPES
 
-24 ids. Every room gets one; `'bare'` is a legitimate, *deliberate* answer (§6.3).
+28 ids. **Every room gets a real one.** `'bare'` is not a room outcome: it survives for a nook of
+fewer than `BARE_MAX_TILES` (4) floor tiles — in practice the one-tile alcoves — and for the
+corridors of §3, which are bare by law and unchanged.
 
 ### 6.1 Identity and dressing
 
-"Signature" is the piece that must be there or the room is not that room.
+"Signature" is the piece that must be there or the room is not that room. The last four rows before
+`bare` are the **small identities**: what a two-by-three closet is actually *for*. Every identity
+above them wants eight tiles or more, so an odd little room used to fail every roll and fall to
+`bare`; a nook is a store or a wayshrine, never an audience chamber.
 
 | id | Signature | Furniture set | Scatter dressing | Wall |
 |---|---|---|---|---|
@@ -454,7 +472,11 @@ to *nothing* — a `scriptorium` with only two bookcases and a candle still read
 | `collapsed` | `fallenColumn` | `fallenColumn`, 2–3 `pillarBroken`, 2–4 `rubbleMound` | `scree`, `crackedFlags`, `bones`, `scorch` | `wallCrack`, `cobweb` |
 | `wellroom` | `wellHead` | `wellHead` (centred), `bench`, `barrel`, `brazier` | `puddle`, `coins`, `mosaic` | `gargoyleSpout`, `ironRing`, `sconce` |
 | `warren` | `sackPile` | `sackPile` ×2, `crate` v2, `barrel` v2, `cauldron`, `chainPost` | `bones`, `bloodstain`, `rat`, `scorch`, `tankards` | `hungShield` v3, `chains`, `mould` |
-| `bare` | — | **nothing** | at most 1 scatter decal | at most 1 `cobweb`/`wallCrack` |
+| `study` | `lectern` | `lectern`, 1–2 `bookcase`, `stool`, `candelabra`, `table` | `bottles`, `chalkSigil`, `rug`, `coins` | `wallShelf`, `tapestry`, `cobweb` |
+| `larder` | `barrel` | 2–3 `barrel`, 1–2 `sackPile`, `crate`, `cupboard` | `scree`, `rat`, `coins`, `tankards` | `wallShelf`, `sconce`, `cobweb` |
+| `cell` | `chainPost` | 1–2 `chainPost`, `stool`, `footlocker`, `bonePile` | `bones`, `bloodstain`, `scree`, `rat`, `skull` | `manacles`, `chains`, `ironRing` |
+| `wayshrine` | `candelabra` | 1–2 `candelabra`, 1–2 `candlestick`, `bench`, `urn` | `mosaic`, `rug`, `coins`, `bones` | `plaque`, `tapestry`, `skullNiche` |
+| `bare` | — | **the nook only** (under 4 floor tiles) | at most 1 scatter decal | at most 1 `cobweb`/`wallCrack` |
 | `courtyard` | — | `bench`, `barrel`, `candelabra`, `banner` | `mosaic`, `rug`, `puddle` | `banner`, `plaque` |
 
 ### 6.2 Scheduling and gameplay
@@ -464,36 +486,46 @@ level**. Monster and treasure columns are **placement preferences only** — the
 an already-rolled monster or item is put in. They never touch the roll itself (`DESIGN.md` §2.6,
 §5.3, §4). Fidelity is not negotiable for a bit of atmosphere.
 
-| id | Allowed `room.type` | B1 | B2 | B3 | B4 | Cap | `lightMood` | Favours (monsters) | Tends to hold |
-|---|---|---|---|---|---|---|---|---|---|
-| `guardroom` | hall, barracks, crypt, library, vault, cistern | 8 | 6 | 2 | 0 | 2 | `torchlit` | mercenary, swordsman, barbarian | gold bags |
-| `barracks` | barracks, hall | 6 | 5 | 2 | 0 | 2 | `torchlit` | dwarven guard, mercenary, dark warrior | gold, potion |
-| `armoury` | vault, barracks, hall | 4 | 4 | 2 | 1 | 1 | `torchlit` | dwarven guard, swordsman | **enchanted weapon** |
-| `forge` | hall, vault | 2 | 3 | 2 | 1 | 1 | `forge` | dwarven guard, troll | enchanted weapon |
-| `refectory` | hall | 4 | 3 | 1 | 0 | 1 | `hearth` | ogre, hobgoblin, barbarian | gold, potion |
-| `storeroom` | vault, barracks, cave | 5 | 5 | 3 | 1 | 2 | `dark` | rogue, assassin | magic sack, gold |
-| `vault` | vault | 2 | 3 | 3 | 2 | 1 | `candle` | assassin, dark warrior | **the open chest** (`placeTreasure`) |
-| `scriptorium` | library | 4 | 4 | 2 | 0 | 1 | `candle` | monk, mage | **magic map, spell books** |
-| `alchemy` | library, vault | 2 | 4 | 3 | 1 | 1 | `candle` | monk, mage | **healing potions** |
-| `audience` | hall | 2 | 3 | 2 | 1 | **1** | `torchlit` | war lord, dark warrior | gold, enchanted weapon |
-| `torture` | crypt, barracks, vault | 1 | 4 | 3 | 2 | **1** | `ember` | dark warrior, assassin | — |
-| `kennel` | cave, barracks, hall | 3 | 4 | 4 | 3 | 1 | `ember` | dire wolf, werebear, wyvern, **fyre drake** | bones, gold |
-| `crypt` | crypt | 3 | 5 | 6 | 4 | 2 | `cold` | gargoyle, shadow dragon | buried cache |
-| `ossuary` | crypt, cave | 1 | 3 | 5 | 4 | 1 | `cold` | gargoyle, dimension spider | buried cache |
-| `barrow` | crypt, vault | 0 | 2 | 5 | 5 | 1 | `cold` | shadow dragon, war lord, **demon** | buried cache, enchanted weapon |
-| `shrine` | temple, shrine | — | — | — | — | all | `shrine` | none (sanctuary, `DESIGN.md` §6) | — |
-| `cistern` | cistern, grotto | 3 | 4 | 4 | 2 | 1 | `water` | dimension spider, troll | — |
-| `flooded` | cave, grotto, cistern | 1 | 3 | 5 | 4 | 2 | `water` | troll, wyvern, dimension spider | — |
-| `mushroom` | cave, grotto | 1 | 3 | 5 | 3 | 1 | `fungal` | hobgoblin, troll | potion |
-| `collapsed` | cave, hall, crypt | 2 | 4 | 5 | 5 | 2 | `dark` | gargoyle, troll | buried cache |
-| `wellroom` | cistern, hall | 2 | 2 | 1 | 0 | **1** | `torchlit` | — | gold |
-| `warren` | cave, barracks, hall | 5 | 5 | 3 | 2 | 2 | `ember` | hobgoblin, ogre, rogue, elvin ranger | gold bags |
-| `bare` | any | 5 | 6 | 7 | 8 | all | `dark` / `cold` | any | any |
-| `courtyard` | surface | — | — | — | — | 1 | `shrine` | none | — |
+| id | Allowed `room.type` | B1 | B2 | B3 | B4 | Cap | Min | Scale | `lightMood` | Favours (monsters) | Tends to hold |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| `guardroom` | hall, barracks, crypt, library, vault, cistern, cave | 8 | 6 | 3 | 1 | 2 | 8 | mid | `torchlit` | mercenary, swordsman, barbarian | gold bags |
+| `barracks` | barracks, hall, cave, vault | 6 | 5 | 3 | 1 | 2 | 10 | large | `torchlit` | dwarven guard, mercenary, dark warrior | gold, potion |
+| `armoury` | vault, barracks, hall, library | 4 | 4 | 3 | 1 | 2 | 8 | mid | `torchlit` | dwarven guard, swordsman | **enchanted weapon** |
+| `forge` | hall, vault, cave | 2 | 3 | 2 | 1 | 1 | 12 | large | `forge` | dwarven guard, troll | enchanted weapon |
+| `refectory` | hall, barracks | 4 | 3 | 2 | 1 | 1 | 14 | large | `hearth` | ogre, hobgoblin, barbarian | gold, potion |
+| `storeroom` | vault, barracks, cave, library, cistern, crypt | 5 | 5 | 4 | 2 | 3 | 6 | small | `dark` | rogue, assassin | magic sack, gold |
+| `vault` | vault, crypt, library | 2 | 3 | 3 | 2 | 2 | 7 | mid | `candle` | assassin, dark warrior | **the open chest** |
+| `scriptorium` | library, hall | 4 | 4 | 3 | 1 | 1 | 9 | mid | `candle` | monk, mage | **magic map, spell books** |
+| `alchemy` | library, vault, cave | 2 | 4 | 3 | 2 | 1 | 8 | mid | `candle` | monk, mage | **healing potions** |
+| `audience` | hall | 2 | 3 | 2 | 1 | 1 | 14 | large | `torchlit` | war lord, dark warrior | gold, enchanted weapon |
+| `torture` | crypt, barracks, vault, cave | 1 | 4 | 3 | 2 | 1 | 10 | mid | `ember` | dark warrior, assassin | — |
+| `kennel` | cave, barracks, hall, grotto | 3 | 4 | 4 | 3 | 2 | 10 | mid | `ember` | dire wolf, werebear, wyvern, **fyre drake** | bones, gold |
+| `crypt` | crypt, vault, cave | 3 | 5 | 6 | 4 | 2 | 8 | mid | `cold` | gargoyle, shadow dragon | buried cache |
+| `ossuary` | crypt, cave, cistern, vault | 1 | 3 | 5 | 4 | 2 | 6 | small | `cold` | gargoyle, dimension spider | buried cache |
+| `barrow` | crypt, vault, cave | 0 | 2 | 5 | 5 | 1 | 9 | mid | `cold` | shadow dragon, war lord, **demon** | buried cache, enchanted weapon |
+| `shrine` | temple, shrine | — | — | — | — | all | 0 | small | `shrine` | none (sanctuary) | — |
+| `cistern` | cistern, grotto, cave | 3 | 4 | 4 | 2 | 1 | 10 | mid | `water` | dimension spider, troll | — |
+| `flooded` | cave, grotto, cistern | 1 | 3 | 5 | 4 | 2 | 8 | mid | `water` | troll, wyvern, dimension spider | — |
+| `mushroom` | cave, grotto, cistern | 1 | 3 | 5 | 3 | 2 | 6 | small | `fungal` | hobgoblin, troll | potion |
+| `collapsed` | cave, hall, crypt, barracks, library, vault, cistern | 2 | 4 | 5 | 5 | 2 | 10 | mid | `dark` | gargoyle, troll | buried cache |
+| `wellroom` | cistern, hall, grotto | 2 | 2 | 1 | 1 | 1 | 12 | large | `torchlit` | — | gold |
+| `warren` | cave, barracks, hall, grotto, crypt | 5 | 5 | 4 | 3 | 2 | 7 | small | `ember` | hobgoblin, ogre, rogue, elvin ranger | gold bags |
+| `study` | library, vault, hall, barracks | 4 | 4 | 3 | 1 | 2 | 5 | small | `candle` | monk, mage | spell books |
+| `larder` | vault, barracks, cave, cistern, library, hall | 4 | 4 | 3 | 2 | 2 | 5 | small | `dark` | rogue, hobgoblin | gold |
+| `cell` | barracks, vault, crypt, cave, library | 2 | 4 | 4 | 3 | 2 | 5 | small | `dark` | assassin, dark warrior | — |
+| `wayshrine` | crypt, vault, library, cistern, hall, grotto, cave, barracks | 3 | 3 | 3 | 2 | 2 | 4 | small | `candle` | none | gold |
+| `bare` | **the nook only** (< 4 floor tiles) | 0 | 0 | 0 | 0 | all | 0 | small | `dark` | any | any |
+| `courtyard` | surface | — | — | — | — | 1 | 0 | large | `shrine` | none | — |
 
-**Sword level (BS).** Only `crypt`, `barrow`, `ossuary`, `collapsed`, `vault` and `bare` are rolled;
-every mood becomes `sword`; caps stay. The Sword's own room is `barrow` if the shape allows and
-`bare` otherwise — nothing on the level should out-shout the Sword.
+`Min` is the room's **floor tiles** (not box area) before the identity may be claimed; `Scale` tilts
+the roll by size — `small` is ×2.4 in a room of nine tiles or fewer and ×0.3 above fourteen, `large`
+is the reverse, `mid` is flat. That tilt, plus the caps, is where scarcity lives now that no room is
+left empty to make its neighbour look furnished.
+
+**Sword level (BS).** Only `crypt`, `barrow`, `ossuary`, `collapsed`, `vault`, `storeroom`, `cell`
+and `wayshrine` are rolled; every mood becomes `sword`; caps stay. All eight are quiet identities —
+a coffin, a bone shelf, a crate, a chain post, two candles — so nothing on the level out-shouts the
+Sword, and no room on it is empty either. The Sword's own room is `barrow` if the shape allows.
 
 ### 6.3 Assignment algorithm (generator, binding)
 
@@ -505,21 +537,32 @@ rng = createRng(seedFrom(level.seed, 'decor'))
 for each room in level.rooms:
     room.decay     = clamp01((depth - 1) / 18 + rng.float(-0.12, 0.12))
     room.decorSeed = rng.int(1, 2**30)
-1. side rooms (temple/shrine -> 'shrine', alcove -> 'bare') are assigned first and locked
-2. rooms are visited LARGEST FIRST (by `area`): the biggest room gets first pick of the
-   signature archetypes, because a throne in a 3x3 closet is a joke
-3. for each room: build the weight list for its `room.type` and depth band, zero out any
-   archetype already at its per-level cap, zero out any archetype whose signature piece
-   does not FIT (§8.1), then weighted-pick
-4. if every weight is zero -> 'bare'
+1. side rooms are locked first: temple/shrine -> 'shrine', surface -> 'courtyard', and any
+   room with FEWER THAN 4 FLOOR TILES -> 'bare'. That is the only 'bare' there is.
+2. the remaining rooms are visited LARGEST FIRST (by `area`): the biggest room gets first
+   pick of the signature archetypes, because a throne in a 3x3 closet is a joke
+3. for each room, roll down a LADDER THAT CANNOT COME BACK EMPTY:
+     rung 0  archetypes allowed on this `room.type`, weight > 0 in this band, under their
+             per-level cap, whose signature FITS the shape (§8.1); weight x scaleBias(size)
+     rung 1  the same, with the band weight floored to 1 (a deep hall is still a guardroom)
+     rung 2  any archetype at all, under its cap, whose signature fits the shape
+     rung 3  the same with the cap waived — a third crypt beats an unfurnished hall
+   the cap is the LAST thing given up, because scarcity is what makes a throne a throne.
+   Measured over 1500 levels, rung 3 never fired: no cap was ever exceeded.
+4. dress the room (§8). If its signature could not be seated, the room is not that room:
+   RE-ROLL it (up to 4 times, `avoid` = the identity that failed) and dress again. On the
+   last try the signature is stood by hand from the relaxed pool (§8.4). It is NEVER
+   demoted to 'bare' — that demotion was the single biggest source of empty halls.
 5. room.lightMood = the archetype's mood, drifted by `decay` (§2.1); a room with no wall
    torch spot from `lighting.js` may not claim `torchlit` — it drifts to `ember`/`dark`
-6. AT LEAST 25% AND AT MOST 60% of a level's non-side rooms must end up 'bare'. Enforce it:
-   if too few, re-roll the lowest-weight assignments to 'bare'; if too many, re-roll the
-   largest bare rooms with the bare weight removed.
+6. there is NO empty-room quota. See §0 and §8.4.
 ```
 
-**Rule 6 is the HeroQuest discipline in code.** Empty rooms are what make a furnished room land.
+**Rule 6 used to say the opposite** — "at least 25% and at most 60% of a level must end up bare" —
+and the shipped result was 35–45% of every level, several of those rooms twelve to twenty-four tiles
+of nothing. The discipline that makes a furnished room land is **scarcity of the loud pieces** (one
+throne, one rack, two bookcases; the caps in §6.2) and **fit** (`scaleBias`: the closet gets the
+store, the hall gets the throne) — not empty floor.
 
 ---
 
@@ -598,15 +641,52 @@ Placement runs per room from `createRng(room.decorSeed)`.
 
 | Limit | Value |
 |---|---|
-| Tiles carrying **any** decor | ≤ **35 %** of the room's floor tiles |
-| Tiles carrying a **standing prop** | ≤ **18 %** of the room's floor tiles |
-| Completely clear floor | ≥ **55 %** of the room's floor tiles, and that clear set must be **4-connected** and touch every door/entrance |
+| Tiles carrying **any** decor | ≤ **max(2, 35 %)** of the room's floor tiles |
+| Tiles carrying a **standing prop** | ≤ **max(2, 18 %)** of the room's floor tiles |
+| Completely clear floor | ≥ **min(55 % of the floor, floor − 2)** tiles, and that clear set must be **4-connected** and touch every door/entrance |
 | Blocking pieces | ≤ 2 per room, ≤ 1 per 12 floor tiles (§4.3) |
 | Corridors | §3 — ≤ 1 per 10 corridor tiles, 12 per level |
 | Level-wide sanity | ≤ **220** decor entries per level (the renderer budget: ≤ 150 draw calls total, `ARCHITECTURE.md`) |
 
-If a room fails any limit, the generator drops scatter in reverse placement order until it passes —
-furniture is never dropped for density, because furniture is the point.
+The `max(2, …)` and the `floor − 2` are the §8.4 floor written into the density law: 18 % of a
+seven-tile store is 1.26, which rounded down is **one** piece, and one piece in a room is a prop,
+not a place. The percentages still govern any room big enough for them — nothing changes above
+twelve tiles.
+
+If a room fails any limit, the generator drops scatter in reverse placement order until it passes,
+then furniture down to (never below) the two-piece floor — furniture is never dropped below that,
+because furniture is the point.
+
+### 8.4 THE FLOOR — no room is left unfurnished
+
+> A lit, well-built, completely unfurnished hall is the bug this whole document exists to kill.
+
+**Every room of `BARE_MAX_TILES` (4) floor tiles or more ends the pass with at least
+`MIN_STANDING` (2) standing pieces and at least 1 hung piece.** It is a guarantee, not a tendency:
+it runs LAST, after the density drops, so nothing it puts down can be taken away again.
+
+How it is met, in order:
+
+1. the archetype's plan (§8.1) normally supplies far more than two;
+2. if the signature never seated, the room is re-rolled into an identity that fits (§6.3 step 4),
+   and on the final attempt the signature is stood by hand;
+3. any shortfall is topped up from `FILLER[archetype]` — **pieces from the room's own set**, so a
+   store gets another barrel and a crypt another urn, never a generic crate in every room;
+4. the top-up may use the room's *doorstep* tiles (the tiles beside a corridor mouth) as a last
+   resort. It is still never a door throat, a staircase apron, a trap, an item tile or a blocking
+   piece — a non-blocking barrel beside a corridor mouth is a far smaller sin than an empty hall;
+5. if no hung piece was rolled, one is forced onto the room's north wall (§5.3), doorstep last.
+
+**The two exemptions, both measured over 16 030 rooms (60 seeds × depths 1–25), both under 1 %:**
+
+| Exemption | Rate | Why it cannot be fixed |
+|---|---|---|
+| Fewer than 2 tiles a standing piece may legally occupy | 10 / 16 030 (0.06 %) | the whole room is doorstep, item, trap or staircase apron |
+| No wall the camera can see | 69 / 16 030 (0.43 %) | its north side opens straight into the next room, so every wall of its own projects to zero area (§5.3) |
+
+`tests/decor.test.js` asserts the floor across 20 seeds × depths 1–25 (5 345 rooms), asserts that
+no room of 4+ tiles carries `archetype: 'bare'`, counts both exemptions and fails if either passes
+1 %, and re-checks connectivity with everything standing in place.
 
 ---
 
@@ -614,6 +694,9 @@ furniture is never dropped for density, because furniture is the point.
 
 A checklist for review; each line is a failure mode we can already name.
 
+- Never leave a room of four floor tiles or more with fewer than two standing pieces and one hung
+  piece (§8.4). "The roll came back empty" is not a reason; the ladder in §6.3 cannot come back
+  empty, and `bare` is not a room outcome.
 - Never sit on stairs, doors, temple tiles, trap tiles, pits or water (§4.4).
 - Never seal a room, strand a staircase, or sever a level (§4.3).
 - Never look like a pickup. Decor is dull, matte and unglowing; pickups glow, bob and sparkle
@@ -658,6 +741,8 @@ Acceptance for a decor pass:
 | Cast still readable in every mood, including `dark`/`ember` | `tests/screenTruth.test.js` |
 | Determinism: same seed ⇒ identical `level.decor` | `tests/decor.test.js` |
 | Every §4.3/§4.4/§8.3 invariant, seeds × depths 1–20 | `tests/decor.test.js` |
+| **§8.4: no room of 4+ tiles under two standing pieces + one hung, 20 seeds × depths 1–25** | `tests/decor.test.js` |
+| No room of 4+ tiles carries `archetype: 'bare'`; the histogram stays varied | `tools/decordump.mjs --stats-only` |
 | `node --test tests/` and `npm run smoke` both green | always, before finishing |
 
 ---
@@ -683,9 +768,14 @@ Acceptance for a decor pass:
 *May ever block (9):* `sarcophagus` `fallenColumn` `pillarBroken` `rubbleMound` `stalagmite`
 `wellHead` `cage` `forge` `anvil`
 
-**Valid `room.archetype` strings (24):** `guardroom` `barracks` `armoury` `forge` `refectory`
+**Valid `room.archetype` strings (28):** `guardroom` `barracks` `armoury` `forge` `refectory`
 `storeroom` `vault` `scriptorium` `alchemy` `audience` `torture` `kennel` `crypt` `ossuary` `barrow`
-`shrine` `cistern` `flooded` `mushroom` `collapsed` `wellroom` `warren` `bare` `courtyard`
+`shrine` `cistern` `flooded` `mushroom` `collapsed` `wellroom` `warren` `study` `larder` `cell`
+`wayshrine` `bare` `courtyard`
+
+**The two constants the floor is written in** (`world/generator.js`): `BARE_MAX_TILES = 4` — under
+this many floor tiles a room may be `bare`, at or above it may not; `MIN_STANDING = 2` — the
+standing pieces every room at or above that size carries (§8.4).
 
 **Valid `room.lightMood` strings (11):** `torchlit` `hearth` `forge` `candle` `ember` `cold` `dark`
 `water` `fungal` `shrine` `sword`

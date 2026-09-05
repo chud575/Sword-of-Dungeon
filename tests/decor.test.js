@@ -3,7 +3,9 @@
 // and a level must read as a set of different places rather than one repeated room.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateLevel, DECOR_TYPES, ARCHETYPES } from '../src/world/generator.js';
+import {
+  generateLevel, DECOR_TYPES, ARCHETYPES, BARE_MAX_TILES, MIN_STANDING,
+} from '../src/world/generator.js';
 import { Level } from '../src/world/level.js';
 import { TILE, DIRS4, DIRS8 } from '../src/core/constants.js';
 
@@ -141,9 +143,12 @@ test('a room reads as walkable floor: density stays inside §8.3', () => {
       const tiles = new Set(mine.map((d) => `${d.x},${d.y}`));
       const props = new Set(mine.filter((d) => DECOR_TYPES[d.type].cls === 'prop').map((d) => `${d.x},${d.y}`));
       const where = `seed=${seed} depth=${depth} ${r.type}/${r.archetype} floor=${floor.length}`;
-      assert.ok(tiles.size <= Math.max(1, Math.floor(0.35 * floor.length)), `35% any decor (${where} ${tiles.size})`);
-      assert.ok(props.size <= Math.max(1, Math.floor(0.18 * floor.length)), `18% standing props (${where} ${props.size})`);
-      assert.ok(floor.length - tiles.size >= Math.ceil(0.55 * floor.length) || floor.length <= 2,
+      // §8.3 with the §8.4 floor folded in: the percentages govern a room big enough for them, and
+      // every room is still allowed the two standing pieces that make it a place rather than a hole
+      const clear = Math.min(Math.ceil(0.55 * floor.length), floor.length - MIN_STANDING);
+      assert.ok(tiles.size <= Math.max(MIN_STANDING, Math.floor(0.35 * floor.length)), `35% any decor (${where} ${tiles.size})`);
+      assert.ok(props.size <= Math.max(MIN_STANDING, Math.floor(0.18 * floor.length)), `18% standing props (${where} ${props.size})`);
+      assert.ok(floor.length - tiles.size >= clear || floor.length <= 2,
         `55% clear floor (${where} ${floor.length - tiles.size})`);
     }
   }
@@ -185,9 +190,9 @@ test('corridors stay bare (§3)', () => {
   }
 });
 
-test('rooms get varied archetypes, capped, banded, and a quarter of them deliberately bare (§6)', () => {
+test('rooms get varied archetypes, capped and banded, and NONE of them is left bare (§6)', () => {
   const seen = new Map();
-  let levels = 0, distinctMin = 99, bareMin = 1, bareMax = 0;
+  let levels = 0, distinctMin = 99;
   for (const seed of SEEDS) for (const depth of [1, 3, 6, 9, 12, 15, 18, 21, 24]) {
     const lv = generateLevel(seed, depth, { monsters: false });
     const where = `seed=${seed} depth=${depth}`;
@@ -199,7 +204,11 @@ test('rooms get varied archetypes, capped, banded, and a quarter of them deliber
       assert.ok(r.decay >= 0 && r.decay <= 1, `decay ${where}`);
       assert.ok(Number.isInteger(r.decorSeed) && r.decorSeed > 0, `decor seed ${where}`);
       if (r.type === 'temple' || r.type === 'shrine') assert.equal(r.archetype, 'shrine', `side room ${where}`);
-      if (r.type === 'alcove') assert.equal(r.archetype, 'bare', `alcove ${where}`);
+      // 'bare' is not a room outcome any more: only a nook of under four floor tiles may hold it
+      if (r.archetype === 'bare') {
+        assert.ok(roomFloorTiles(lv, r).length < BARE_MAX_TILES,
+          `only a nook may be bare (${r.type} ${roomFloorTiles(lv, r).length} tiles) ${where}`);
+      }
       counts[r.archetype] = (counts[r.archetype] || 0) + 1;
       seen.set(r.archetype, (seen.get(r.archetype) || 0) + 1);
     }
@@ -212,23 +221,91 @@ test('rooms get varied archetypes, capped, banded, and a quarter of them deliber
       const distinct = new Set(main.map((r) => r.archetype)).size;
       distinctMin = Math.min(distinctMin, distinct);
       assert.ok(distinct >= 3, `a level is not one room repeated (${distinct} identities) ${where}`);
-      const bare = main.filter((r) => r.archetype === 'bare').length / main.length;
-      bareMin = Math.min(bareMin, bare); bareMax = Math.max(bareMax, bare);
-      assert.ok(bare >= 0.25 - 1e-9, `at least a quarter bare (${bare.toFixed(2)}) ${where}`);
-      assert.ok(bare <= 0.75, `not a level of empty rooms (${bare.toFixed(2)}) ${where}`);
+      const bare = main.filter((r) => r.archetype === 'bare' && roomFloorTiles(lv, r).length >= BARE_MAX_TILES);
+      assert.deepEqual(bare.map((r) => `${r.type} ${r.w}x${r.h}`), [],
+        `no room of ${BARE_MAX_TILES}+ tiles is left unfurnished ${where}`);
     }
-    // the signature piece is actually there
+    // the signature piece is actually there — unless the room has no tile a piece may legally
+    // stand on at all (all doorstep, item, trap or staircase apron), which is under 0.1% of rooms
     for (const r of lv.rooms) {
       const sig = ARCHETYPES[r.archetype].sig;
       if (!sig || SIDE.has(r.type)) continue;
+      if (!roomFloorTiles(lv, r).some((t) => !lv.decorForbidden(t.x, t.y, true))) continue;
       const has = lv.decor.some((d) => d.type === sig && d.x >= r.x - 1 && d.y >= r.y - 1 && d.x <= r.x + r.w && d.y <= r.y + r.h);
       assert.ok(has, `${r.archetype} has its ${sig} ${where}`);
     }
   }
   assert.ok(levels > 100);
-  assert.ok(seen.size >= 18, `the catalogue of identities gets used (${seen.size})`);
-  for (const id of ['guardroom', 'crypt', 'armoury', 'storeroom', 'collapsed', 'flooded', 'audience'])
+  assert.ok(distinctMin >= 3);
+  assert.ok(seen.size >= 24, `the catalogue of identities gets used (${seen.size})`);
+  for (const id of ['guardroom', 'crypt', 'armoury', 'storeroom', 'collapsed', 'flooded', 'audience',
+    'study', 'larder', 'cell', 'wayshrine'])
     assert.ok((seen.get(id) || 0) > 0, `${id} appears somewhere`);
+  // and no single identity swallows the level now that the empty rooms are gone
+  for (const [id, n] of seen) {
+    if (id === 'shrine' || id === 'bare') continue;
+    assert.ok(n / levels <= 2.0, `${id} is not the whole dungeon (${(n / levels).toFixed(2)} per level)`);
+  }
+});
+
+/**
+ * §8.4 THE FLOOR — the reason this whole feature exists.
+ *
+ * The shipped build left 35-45% of every level as a lit, well-built, completely unfurnished hall:
+ * `decordump --seed 7 --depth 8` reported seven bare rooms out of fifteen, several of them twelve
+ * to twenty-four tiles with nothing standing in them at all. HeroQuest has no unfurnished rooms —
+ * it has rooms with fewer pieces in them. So: every room of BARE_MAX_TILES floor tiles or more
+ * carries at least MIN_STANDING standing pieces and one hung piece, on every seed, at every depth.
+ *
+ * Two exemptions, both measured rather than assumed, both under 1% of rooms:
+ *  - a room with fewer than two tiles a standing piece may legally occupy (all doorstep, item,
+ *    trap or staircase apron) cannot hold two pieces however much we want it to;
+ *  - a room with no wall the camera can see — its north side opens straight into the next room, so
+ *    every one of its own walls projects to zero area (§5.3) — has nowhere for a hung piece to read.
+ */
+test('NO ROOM IS LEFT UNFURNISHED: two standing pieces and one hung one, 20 seeds x depths 1..25', () => {
+  let rooms = 0, exemptStanding = 0, exemptHung = 0;
+  const failures = [];
+  for (const seed of SEEDS) for (let depth = 1; depth <= 25; depth++) {
+    const lv = generateLevel(seed, depth, { monsters: false });
+    // connectivity still holds with everything standing in it
+    assert.equal(lv.componentCount(), 1, `connectivity seed=${seed} depth=${depth}`);
+    const reach = lv.floodFill(lv.stairsUp.x, lv.stairsUp.y);
+    for (const s of [lv.stairsUp, ...lv.stairsDownAll]) {
+      assert.equal(reach[lv.idx(s.x, s.y)], 1, `staircase reachable seed=${seed} depth=${depth}`);
+    }
+    for (const r of lv.rooms) {
+      const floor = roomFloorTiles(lv, r);
+      if (floor.length < BARE_MAX_TILES) continue;
+      rooms++;
+      const where = `seed=${seed} depth=${depth} ${r.type}/${r.archetype} floor=${floor.length}`;
+      assert.notEqual(r.archetype, 'bare', `a room of ${floor.length} tiles is never bare (${where})`);
+      const inside = new Set(floor.map((t) => `${t.x},${t.y}`));
+      // the wall tiles of this room the fixed camera can see: the rock north of its own floor
+      const mounts = new Set(floor.filter((t) => lv.get(t.x, t.y - 1) === TILE.WALL).map((t) => `${t.x},${t.y - 1}`));
+      const standing = lv.decor.filter((d) => DECOR_TYPES[d.type].cls === 'prop' && inside.has(`${d.x},${d.y}`));
+      const hung = lv.decor.filter((d) => DECOR_TYPES[d.type].cls === 'wall' && mounts.has(`${d.x},${d.y}`));
+      const placeable = floor.filter((t) => !lv.decorForbidden(t.x, t.y, true)).length;
+      if (standing.length < MIN_STANDING) {
+        if (placeable < MIN_STANDING) exemptStanding++;
+        else failures.push(`${where} standing=${standing.length} placeable=${placeable}`);
+      }
+      if (hung.length < 1) {
+        if (mounts.size === 0) exemptHung++;
+        else failures.push(`${where} hung=0 mounts=${mounts.size}`);
+      }
+      // and the identity it claims is really in the room
+      const sig = ARCHETYPES[r.archetype].sig;
+      if (sig && !SIDE.has(r.type) && placeable >= 1) {
+        assert.ok(lv.decor.some((d) => d.type === sig && d.x >= r.x - 1 && d.y >= r.y - 1
+          && d.x <= r.x + r.w && d.y <= r.y + r.h), `${r.archetype} has its ${sig} (${where})`);
+      }
+    }
+  }
+  assert.deepEqual(failures.slice(0, 12), [], `every room of ${BARE_MAX_TILES}+ tiles is furnished`);
+  assert.ok(rooms > 4000, `a real sample of rooms (${rooms})`);
+  assert.ok(exemptStanding / rooms < 0.01, `nowhere-to-stand is a rarity (${exemptStanding}/${rooms})`);
+  assert.ok(exemptHung / rooms < 0.01, `nowhere-to-hang is a rarity (${exemptHung}/${rooms})`);
 });
 
 test('decor survives a save: serialize round-trips it, and old saves without it still load', () => {
