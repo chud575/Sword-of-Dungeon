@@ -2,7 +2,9 @@
 // Runs in headless Chromium because three ships both FBXLoader and GLTFExporter as browser modules.
 import { chromium } from 'playwright';
 import http from 'node:http'; import fs from 'node:fs'; import path from 'node:path';
-const ROOT = process.cwd(), TH = '/home/user/Neural-Razz-Arena/fargoal/node_modules/three';
+import { fileURLToPath } from 'node:url';
+// Resolved from this file, not hardcoded, so the pipeline runs from any checkout.
+const ROOT = process.cwd(), TH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../node_modules/three');
 const srv = http.createServer((req,res)=>{ const p=decodeURIComponent(req.url.split('?')[0]);
   if(p==='/'){res.setHeader('content-type','text/html');return res.end('<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>');}
   const f=p.startsWith('/three/')?path.join(TH,p.slice(6)):path.join(ROOT,p);
@@ -11,7 +13,8 @@ const srv = http.createServer((req,res)=>{ const p=decodeURIComponent(req.url.sp
 const port=srv.address().port;
 const models=fs.readdirSync('srv/Models').filter(d=>fs.statSync('srv/Models/'+d).isDirectory()&&!['Textures','Materials'].includes(d))
   .flatMap(d=>fs.readdirSync('srv/Models/'+d).filter(f=>f.endsWith('.fbx')).map(f=>({cat:d,name:f.replace('.fbx',''),url:`Models/${d}/${f}`})));
-const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium',args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
+const PINNED=process.env.CHROMIUM_PATH||'/opt/pw-browsers/chromium'; // see tools/browser.mjs
+const b=await chromium.launch({executablePath:fs.existsSync(PINNED)?PINNED:undefined,args:['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader']});
 const page=await b.newPage(); page.on('pageerror',e=>console.log('ERR',e.message));
 await page.goto(`http://127.0.0.1:${port}/`);
 const b64 = await page.evaluate(async ({port,models})=>{

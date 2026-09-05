@@ -1,7 +1,9 @@
 // Emit the props as plain JS modules holding gzipped base64. No fetch and no data: URIs, so the
 // single-file artifact build (which forbids both) can carry them unchanged.
-import fs from 'node:fs'; import zlib from 'node:zlib';
-const OUT = '/home/user/Neural-Razz-Arena/fargoal/src/assets';
+import fs from 'node:fs'; import zlib from 'node:zlib'; import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+// Resolved from this file, not hardcoded, so the pipeline runs from any checkout.
+const OUT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../src/assets');
 fs.mkdirSync(OUT, { recursive: true });
 
 const glb = fs.readFileSync('out/props.glb');

@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -26,9 +27,18 @@ export async function startServer() {
   return { url, stop: () => { try { proc.kill('SIGTERM'); } catch {} } };
 }
 
+/** The container this project was first built in ships Chromium at a fixed path and forbids
+ *  `playwright install`; a normal machine has Playwright's own download instead. Pin the fixed path
+ *  only when it is actually there, so the same tools run in both places. Override with
+ *  CHROMIUM_PATH=/path/to/chrome if you want a specific browser. */
+function chromiumPath() {
+  const pinned = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium';
+  return existsSync(pinned) ? pinned : undefined; // undefined => Playwright resolves its own
+}
+
 export async function launchBrowser({ width = 1600, height = 900 } = {}) {
   const browser = await chromium.launch({
-    executablePath: '/opt/pw-browsers/chromium',
+    executablePath: chromiumPath(),
     args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'],
   });
   const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1 });
