@@ -10,6 +10,16 @@
 import * as THREE from 'three';
 
 const MARGIN = 26; // tiles of rock drawn beyond each edge — past the far zoom stop's view
+/**
+ * How much of the rock texture's own value reaches the screen.
+ *
+ * The texture is painted at the value the bedrock INSIDE the level sits at, so that the apron and
+ * the level read as one mass rather than meeting at a horizon (see rockTexture below). Judged in a
+ * real frame that turned out to be too much: the ground outside the walls is not part of the board
+ * and competes with it for attention. This dims it toward the void without going to the void —
+ * 1.0 is the old flat grey, 0.0 is black.
+ */
+const SURROUND_DIM = 0.46;
 
 /**
  * Procedural top-down bedrock: mottled stone with darker fissures, tiled without visible seams.
@@ -72,7 +82,8 @@ export class Surround {
     // Unlit on purpose: this is background mass far from every torch, and a lit material here
     // would flicker distractingly at the edge of vision. A flat dim tone reads as depth — and the
     // tone lives in the texture (see rockTexture), so this tint stays white.
-    this.material = new THREE.MeshBasicMaterial({ map: this.texture, color: 0xffffff, fog: false });
+    this.material = new THREE.MeshBasicMaterial({ map: this.texture, fog: false });
+    this.material.color.setScalar(SURROUND_DIM);
     this.geo = new THREE.PlaneGeometry(1, 1);
     this.geo.rotateX(-Math.PI / 2);
 

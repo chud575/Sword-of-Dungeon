@@ -10,6 +10,13 @@ import { icon } from './icons.js';
 
 const VARS = ['floor', 'wall', 'stairs-down', 'stairs-up', 'temple', 'pit', 'water', 'player', 'monster', 'gold', 'trap', 'beacon'];
 const SMALL = 3.4, BIG = 7.6;
+/**
+ * The three sizes M cycles through. `off` is the minimised state (the panel is hidden and the HUD
+ * keeps its M hint), and the two open sizes are the same scales the map used to reach by growing
+ * under the pointer. Hover-grow is gone: it moved the map while you were reading it, and it made
+ * the size impossible to keep. The choice is remembered in settings (`minimapSize`).
+ */
+const SIZES = ['off', 'small', 'large'];
 const GHOST_TTL = 25; // seconds a monster's last known position stays on the map
 
 export class Minimap {
@@ -17,8 +24,11 @@ export class Minimap {
   constructor(ctx) {
     this.ctx = ctx; this.bus = ctx.bus;
     this.scale = SMALL; this.bigScale = BIG; // kept for callers that poke them
-    this.big = false; this.userZoom = 1; this.cur = SMALL;
-    this.visible = ctx.settings.minimap !== false;
+    this.userZoom = 1; this.cur = SMALL;
+    const saved = SIZES.includes(ctx.settings.minimapSize) ? ctx.settings.minimapSize : null;
+    this.size = saved || (ctx.settings.minimap === false ? 'off' : 'small');
+    this.big = this.size === 'large';
+    this.visible = this.size !== 'off';
     this.el = document.createElement('div');
     this.el.className = 'panel hud px'; this.el.id = 'minimap';
     this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div>
@@ -36,9 +46,8 @@ export class Minimap {
     this.g2d = this.canvas.getContext('2d');
     this.layer = document.createElement('canvas'); this.l2d = this.layer.getContext('2d');
     this.layerKey = '';
-    this.el.addEventListener('mouseenter', () => { this.big = true; this.dirty = true; });
-    this.el.addEventListener('mouseleave', () => { this.big = false; this.dirty = true; });
-    this.el.addEventListener('click', () => this.bus.emit('sfx:ui', { kind: 'click' }));
+    // Click the map to step to the next size, the same cycle M walks.
+    this.el.addEventListener('click', () => { this.bus.emit('sfx:ui', { kind: 'click' }); this.cycle(); });
     this.el.addEventListener('wheel', (e) => {
       e.preventDefault(); e.stopPropagation();
       this.userZoom = Math.max(0.7, Math.min(1.8, this.userZoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
@@ -65,7 +74,39 @@ export class Minimap {
     this.colors.gold2 = (cs.getPropertyValue('--gold') || '').trim() || '#e8c15a';
   }
 
-  toggle(force) { this.visible = force === undefined ? !this.visible : !!force; this.el.hidden = !this.visible; this.dirty = true; return this.visible; }
+  /**
+   * Step to the next size: off -> small -> large -> off.
+   * @returns {string} the size now in force, for the caller to save
+   */
+  cycle() {
+    return this.setSize(SIZES[(SIZES.indexOf(this.size) + 1) % SIZES.length]);
+  }
+
+  /**
+   * Show the map at a named size.
+   * @param {'off'|'small'|'large'} size
+   * @returns {string} the size actually applied
+   */
+  setSize(size) {
+    this.size = SIZES.includes(size) ? size : 'small';
+    this.visible = this.size !== 'off';
+    this.big = this.size === 'large';
+    this.el.hidden = !this.visible;
+    this.dirty = true;
+    if (this.visible) this.toast(this.size === 'large' ? 'Large' : 'Small');
+    return this.size;
+  }
+
+  /**
+   * Legacy on/off used by Settings and the old hotkey path. `true` restores the last open size.
+   * @param {boolean} [force]
+   * @returns {boolean} whether the map is now showing
+   */
+  toggle(force) {
+    const want = force === undefined ? this.size === 'off' : !!force;
+    this.setSize(want ? (this.big ? 'large' : 'small') : 'off');
+    return this.visible;
+  }
 
   toast(text) { this.toastEl.textContent = text; this.toastEl.classList.add('show'); this.toastT = 1.1; }
 

@@ -1,6 +1,9 @@
 // Bestiary and monster generation formulas (DESIGN.md §2.6, §4). The AI lives in monsterAi.js and is
 // re-exported here so game.js keeps a single import.
 import { monsterPhaseSeconds } from '../core/constants.js';
+// A real import, not just the re-export below: `export { AI } from ...` forwards the name to this
+// module's CONSUMERS without binding it in this module's own scope, and rollMonster needs it here.
+import { AI } from './monsterAi.js';
 export {
   updateMonsters, monsterAct, stepMonster, monsterVisibleToPlayer, monsterCanEnter, pathStep, perceive,
   makeNoise, stagger, onMonsterSlain, startFlee, extendedRules, initAiFields, AI,
@@ -132,7 +135,9 @@ export function rollMonster(rng, depth, opts = {}) {
     kind: 'monster', type: def.rig || def.type, variant: def.rig ? def.type : null, name: def.name, family: def.family, typeIndex: def.typeIndex, glyph: def.glyph,
     x: 0, y: 0, px: 0, py: 0, facing: { dx: 0, dy: 1 },
     hp, maxHp: hp, initialHp: hp, strength, level: depth, xpValue: (strength + hp) * Math.max(1, depth),
-    speed, moveTimer: rng.next() * 0.5, state: 'wander', target: null, lastSeen: null,
+    // Half the dungeon is dozing when you arrive (AI.sleepChance). A sleeper shows a Z and does
+    // nothing until noticed, so a corridor of monsters becomes a set of choices instead of a queue.
+    speed, moveTimer: rng.next() * 0.5, state: rng.next() < AI.sleepChance ? 'asleep' : 'wander', target: null, lastSeen: null,
     invisible: def.special === 'invisible', special: def.special,
     flags: { thief: def.special === 'thief', blink: def.special === 'blink', flees: def.flees, follows: def.follows, invisible: def.special === 'invisible' },
     statusEffects: [], gold: 0, stolenGold: 0, wanderDir: null, fleeing: null, homeDepth: depth, size: def.size,

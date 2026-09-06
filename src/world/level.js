@@ -31,6 +31,28 @@ export function rleDecode(str, length) {
 }
 
 /** Tiles the player can stand on (everything except solid rock). */
+/**
+ * Every tile a decor entry stands on.
+ *
+ * A HeroQuest bookcase is not a decoration painted on one square — it is an object lying along
+ * three of them, and the squares it lies on are off the board for everyone. So an entry may carry
+ * `span`: how many tiles it occupies along the axis PERPENDICULAR to its `facing`, which is the
+ * axis a wall piece runs down. `(x, y)` is the anchor — the first tile of the run, never its
+ * centre — so a piece can be laid from a wall scan without arithmetic at every call site.
+ *
+ * @param {{x:number, y:number, facing?:string, span?:number}} d a decor entry
+ * @returns {{x:number, y:number}[]} one entry for span 1, in run order otherwise
+ */
+export function decorTiles(d) {
+  const n = Math.max(1, d.span | 0);
+  if (n === 1) return [{ x: d.x, y: d.y }];
+  // `facing` names the direction the piece looks; it runs across that, along the wall behind it.
+  const along = (d.facing === 'e' || d.facing === 'w') ? { dx: 0, dy: 1 } : { dx: 1, dy: 0 };
+  const out = [];
+  for (let k = 0; k < n; k++) out.push({ x: d.x + along.dx * k, y: d.y + along.dy * k });
+  return out;
+}
+
 export function isWalkableTile(t) {
   return t !== TILE.WALL;
 }
@@ -142,7 +164,7 @@ export class Level {
     for (const d of list) {
       if (!d.blocking) continue;
       if (!mask) mask = new Uint8Array(this.width * this.height);
-      if (this.inBounds(d.x, d.y)) mask[d.y * this.width + d.x] = 1;
+      for (const t of decorTiles(d)) if (this.inBounds(t.x, t.y)) mask[t.y * this.width + t.x] = 1;
     }
     this.decorBlock = mask;
     return list;

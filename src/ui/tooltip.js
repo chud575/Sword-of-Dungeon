@@ -164,6 +164,15 @@ export class Tooltip {
     }
     const tile = lv.get(t.x, t.y);
     const cl = lv.climbableAt(t.x, t.y);
+    // NOTHING ON THE TILE, NO PANEL. Bare floor, a corridor and plain rock are the three things the
+    // player is moving the mouse ACROSS on the way to something, and popping a card for each of
+    // them made the tooltip flicker over most of the screen. A tile earns its panel by holding
+    // something — a monster, an item, the player, a climb, the beacon — or by being a tile that
+    // does something to you: stairs, a temple, a pit, water, a sprung trap, a doorway, rubble.
+    const PLAIN = tile === TILE.FLOOR || tile === TILE.CORRIDOR || tile === TILE.WALL;
+    if (!html && PLAIN && !cl && !(lv.beacon && lv.beacon.x === t.x && lv.beacon.y === t.y)) {
+      return this.el.classList.remove('show');
+    }
     if (!html || (!m && !items.length)) {
       const info = TILE_INFO[tile] || ['Unknown', '', '', 'pin', 'var(--parchment-dim)'];
       if (tile === TILE.WALL && !html) return this.el.classList.remove('show');

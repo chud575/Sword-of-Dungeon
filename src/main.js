@@ -7,7 +7,7 @@ import { Input } from './core/input.js';
 import { registerScenarios } from './debug/scenarios.js';
 import { TILE } from './core/constants.js';
 import { AudioEngine } from './core/audio.js';
-import { saveGame, loadSave, deleteSave, loadSettings } from './core/save.js';
+import { saveGame, loadSave, deleteSave, loadSettings, saveSettings } from './core/save.js';
 import { Hud } from './ui/hud.js';
 import { PanelCollapse } from './ui/collapse.js';
 import { Surround } from './render/surround.js';
@@ -118,8 +118,11 @@ const app = {
     document.body.classList.toggle('reduce-flash', !!s.reduceFlash);
     renderer.cameraRig.shakeEnabled = s.screenShake !== false;
     renderer.cameraRig.setTilt(s.cameraTilt ?? 17);
+    renderer.setCameraProjection(s.perspectiveCamera ? 'perspective' : 'orthographic');
+    renderer.dungeon.setModelsOnly(s.flatDecor === false);
     audio.setVolumes({ master: s.masterVolume, music: s.musicVolume, sfx: s.sfxVolume });
-    if (minimap.visible !== (s.minimap !== false)) minimap.toggle(s.minimap !== false);
+    if (s.minimapSize && s.minimapSize !== minimap.size) minimap.setSize(s.minimapSize);
+    else if (minimap.visible !== (s.minimap !== false)) minimap.toggle(s.minimap !== false);
     hud.refreshStatic();
     bus.emit('settings:changed', { settings: s });
   },
@@ -184,7 +187,8 @@ bus.on('input:action', (a) => {
 bus.on('ui:action', (a) => {
   switch (a.action) {
     case 'inventory': inventory.toggle(); break;
-    case 'minimap': settings.minimap = minimap.toggle(); break;
+    // M walks the map through its three sizes rather than just on/off (ui/minimap.js SIZES).
+    case 'minimap': settings.minimapSize = minimap.cycle(); settings.minimap = minimap.visible; saveSettings(settings); break;
     case 'help': menus.showHelp(); break;
     default: break;
   }

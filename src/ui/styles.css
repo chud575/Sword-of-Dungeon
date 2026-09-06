@@ -54,7 +54,19 @@ html { font-size: calc(clamp(13px, 0.55vw + 7px, 16.5px) * var(--ui-scale)); } /
 .corners i:nth-child(4) { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
 
 .label { font-family: var(--font-display); text-transform: uppercase; letter-spacing: .18em; font-size: .68rem; color: var(--gold); font-weight: 600; }
-.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; }
+/* LINING, TABULAR FIGURES EVERYWHERE IN THE UI.
+   No webfont ships with this game (no external assets, by contract), so --font-display falls all
+   the way through Cinzel and Trajan to Palatino, and --font-body sits on Palatino outright. Both
+   default to OLD-STYLE numerals: the 1 is short and narrow, the 5 is wide, and 3/4/5/7/9 hang below
+   the baseline. In running prose that is handsome; in a HUD it makes "1" look crunched next to a
+   "5" and stops columns of digits from lining up. `lining-nums` asks for the even, cap-height
+   figures; `tabular-nums` makes every digit the same width so a counter does not jitter as it
+   climbs. font-feature-settings carries the same two for engines that want the older spelling. */
+#ui-root, #ui-root input, #ui-root button {
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: 'lnum' 1, 'tnum' 1;
+}
+.num { font-family: var(--font-mono); font-variant-numeric: lining-nums tabular-nums; font-weight: 600; }
 .gold-text { background: linear-gradient(180deg, #fff2c4 0%, var(--gold) 48%, #a5802e 52%, #ffe6a0 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .rule { height: 1px; background: linear-gradient(90deg, transparent, var(--gold-dim) 20%, var(--gold) 50%, var(--gold-dim) 80%, transparent); margin: .5rem 0; }
 .fade-in { animation: fadeIn .35s var(--ease) both; }

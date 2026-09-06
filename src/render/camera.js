@@ -58,7 +58,20 @@ export class CameraRig {
     this.viewportPx = 900;      // drawing-buffer height; renderer keeps this current
     this.texelSize = 3;         // device pixels per sprite texel - always an integer
     // Near/far span the whole rig: the camera sits ~13 units out and must never clip the dungeon.
-    this.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -60, 200);
+    this.orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -60, 200);
+    // THE SECOND CAMERA. The dungeon is drawn under an orthographic plan view because that is the
+    // only projection in which one world unit is the same number of screen pixels everywhere in
+    // the frame, which is what makes an exact pixel grid possible (see applyFrustum). But an
+    // orthographic view also flattens every piece of real geometry in the room: an imported
+    // bookcase or a standing skeleton has no vanishing point to read its depth against, and from
+    // 17 degrees off vertical you see its lid and little else. So the projection is a setting.
+    // Its vertical framing is matched to the orthographic one every frame (see place()), so
+    // flipping the toggle changes ONLY the projection — same tilt, same zoom, same subject size at
+    // the player's own depth — and the difference you see is the perspective itself.
+    this.perspCamera = new THREE.PerspectiveCamera(35, this.aspect, 0.5, 400);
+    /** @type {'orthographic'|'perspective'} */
+    this.projection = 'orthographic';
+    this.camera = this.orthoCamera;
     this.applyFrustum();
     this.bus = bus;
     // follow state
@@ -157,7 +170,10 @@ export class CameraRig {
     const h = this.viewportPx / (S * pxPerTile); // world units tall
     this.viewHeight = h;
     const w = h * this.aspect;
-    const c = this.camera;
+    // The orthographic frustum is always kept current even while the perspective camera is the one
+    // being drawn: `viewHeight` and `texelSize` are read by the sprite and floor grids either way,
+    // and a stale frustum would make the toggle jump.
+    const c = this.orthoCamera;
     c.left = -w / 2; c.right = w / 2; c.top = h / 2; c.bottom = -h / 2;
     c.updateProjectionMatrix();
   }
@@ -175,7 +191,36 @@ export class CameraRig {
     this.currentElevation = this.elevation;
   }
 
-  setAspect(aspect) { this.aspect = aspect; this.applyFrustum(); }
+  /**
+   * Switch between the orthographic plan view and a real perspective camera.
+   *
+   * THE PIXEL GRID IS ORTHOGRAPHIC-ONLY, and that is not a bug to be fixed: under perspective a
+   * sprite's texel size depends on its distance from the camera, so the whole-pixel guarantee that
+   * `applyFrustum` exists to provide (and that tools/audit.mjs measures) can only hold on one
+   * plane. Expect the pixel art to soften slightly off that plane. The trade is that geometry —
+   * which is most of the dungeon — finally has depth to read.
+   *
+   * @param {'orthographic'|'perspective'} mode
+   * @returns {THREE.Camera} the camera now in use; the renderer must rebind to it
+   */
+  setProjection(mode) {
+    const want = mode === 'perspective' ? 'perspective' : 'orthographic';
+    if (want === this.projection) return this.camera;
+    this.projection = want;
+    this.camera = want === 'perspective' ? this.perspCamera : this.orthoCamera;
+    if (this.camera.isPerspectiveCamera) this.camera.aspect = this.aspect;
+    this._lastFrustumZoom = -1;    // force the next place() to resize the frustum
+    this.applyFrustum();
+    this.place();
+    this.bus.emit('camera:projection', { projection: want, camera: this.camera });
+    return this.camera;
+  }
+
+  setAspect(aspect) {
+    this.aspect = aspect;
+    this.perspCamera.aspect = aspect;
+    this.applyFrustum();
+  }
 
   /** Renderer tells the rig the drawing-buffer height so the texel size can stay exact. */
   setViewportHeight(px) { if (px > 0 && px !== this.viewportPx) { this.viewportPx = px; this.applyFrustum(); } }
@@ -411,5 +456,13 @@ export class CameraRig {
     const punch = (this.fovOffset + (this._trFov || 0)) * -0.006;
     const z = this.currentZoom * (1 + punch);
     if (Math.abs(z - this._lastFrustumZoom) > 1e-4) { this._lastFrustumZoom = z; this._frustumZoom = z; this.applyFrustumForZoom(z); }
+    if (c.isPerspectiveCamera) {
+      // Match the orthographic framing at the plane the camera is looking at, so the toggle is a
+      // change of projection and nothing else. `viewHeight` is the world height the ortho frustum
+      // covers; the fov that covers it at this distance is the fov to use.
+      c.aspect = this.aspect;
+      c.fov = 2 * Math.atan((this.viewHeight / 2) / Math.max(0.001, dist)) / DEG;
+      c.updateProjectionMatrix();
+    }
   }
 }

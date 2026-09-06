@@ -5,7 +5,10 @@ import { COMBAT_WORDS } from '../core/constants.js';
 import { hasStatus, removeStatus, damagePlayer, addGold, gainXp, drainLevel } from './player.js';
 import { swordStealable, stealSword } from './quest.js';
 import { describeMonster } from './monsters.js';
-import { makeNoise, stagger, onMonsterSlain, extendedRules, AI } from './monsterAi.js';
+import { makeNoise, stagger, onMonsterSlain, extendedRules, wake, AI } from './monsterAi.js';
+
+/** Nothing sleeps through being attacked, and nothing sleeps through being swung at and missed. */
+function rouse(game, monster) { if (monster && monster.state === 'asleep') wake(game, monster, 'hurt'); }
 
 /** Damage ratio x = monster strength / player skill. */
 export function damageRatio(monster, player) {
@@ -237,6 +240,7 @@ export function monsterAttack(game, monster) {
 export function playerAttack(game, monster) {
   const p = game.player;
   if (game.state.over || monster.state === 'dead') return false;
+  rouse(game, monster);
   const combat = game.state.combat;
   if (combat && !combat.playerInitiated && combat.monsterId !== monster.id) {
     // locked in a forced fight: blows go to the attacker

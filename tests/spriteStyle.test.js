@@ -5,7 +5,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { MONSTER_TYPES } from '../src/game/monsters.js';
-import { MONSTER_SPRITES } from '../src/render/sprites/monsters/index.js';
+// PAINTED, not MONSTER_SPRITES: this whole file is the hand-painted house style (ink, one ramp,
+// no pillowing, painted at the height SCALE demands). The imported sheet that now overrides these
+// at runtime has no palette and no ramps, so linting it here would measure nothing. See the note
+// on PAINTED_SPRITES, and docs/ARCHITECTURE.md on what the imported cast is NOT gated by.
+import { PAINTED_SPRITES as MONSTER_SPRITES } from '../src/render/sprites/monsters/index.js';
 import { buildHero } from '../src/render/sprites/heroSprite.js';
 import { packSheet } from '../src/render/sprites/spriteSheet.js';
 import { Palette, paint, outline } from '../src/render/sprites/pixelPainter.js';

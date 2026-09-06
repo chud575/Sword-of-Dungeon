@@ -61,7 +61,13 @@ const GradingShader = {
       // fine film grain, stronger in the darks (hides banding in the void)
       float g = hash(floor(vUv * uRes) + fract(uTime * 7.31) * 113.0) - 0.5;
       col += g * uGrain * (0.25 + 0.75 * (1.0 - smoothstep(0.0, 0.6, lum))) * mix(1.0, 0.1, sprite);
-      col = mix(col, uFlash * 2.5, uFlashAmt * 0.6);
+      // SCREEN BLEND, NOT MIX. This used to be mix(col, uFlash * 2.5, uFlashAmt * 0.6), which
+      // pulls every channel TOWARD the flash colour - so a saturated flash crushed the channels it
+      // was missing. The demon's (0.5, 0, 0) and the death flash's (0.55, 0.02, 0.02) took green
+      // and blue to nearly zero across the whole frame, and the screen went black on exactly the
+      // events that should have been the brightest. A screen blend can only ever lighten.
+      vec3 fl = clamp(uFlash * 1.6 * uFlashAmt, 0.0, 1.0);
+      col = 1.0 - (1.0 - clamp(col, 0.0, 1.0)) * (1.0 - fl);
       col *= (1.0 - uFade);
       gl_FragColor = vec4(col, 1.0);
     }`,
@@ -120,6 +126,21 @@ export class Renderer {
     this.bind();
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  /**
+   * Swap the projection the whole frame is drawn with (Settings -> Perspective camera).
+   *
+   * Two things hold a camera object: this renderer and the composer's RenderPass. Both are rebound
+   * here, because the rig hands back a DIFFERENT camera instance rather than mutating one — an
+   * orthographic and a perspective camera are separate classes in three.
+   * @param {'orthographic'|'perspective'} mode
+   */
+  setCameraProjection(mode) {
+    const cam = this.cameraRig.setProjection(mode);
+    if (cam === this.camera) return;
+    this.camera = cam;
+    if (this.renderPass) this.renderPass.camera = cam;
   }
 
   setupComposer() {

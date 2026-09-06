@@ -13,9 +13,19 @@ import { HUMAN_BUILDERS } from './humans.js';
 import { HUMANOID_BUILDERS } from './humanoid.js';
 import { UNDEAD_SPRITES } from './undead.js';
 import { VERMIN_SPRITES } from './vermin.js';
+import { CAST_SPRITES } from '../castSheet.js';
 
-/** @type {Object<string, () => {anims:object, palette:object, w:number, h:number, pivot:{x:number,y:number}, emissive?:string, scale?:number}>} */
-export const MONSTER_SPRITES = {
+/**
+ * The HAND-PAINTED builders, before the imported sheet overrides them.
+ *
+ * Kept as its own export because it is what the house-style lint is about: ink discipline, the one
+ * seven-step ramp, no pillow shading, painted at the height its SCALE slot demands
+ * (tests/spriteStyle.test.js). An imported bitmap obeys none of those by construction — it has no
+ * palette and no ramps — so linting it against them measures nothing. These stay the fallback the
+ * game falls back to if the sheet is removed, and they are still the only builders that animate.
+ * @type {Object<string, () => object>}
+ */
+export const PAINTED_SPRITES = {
   ...VERMIN_SPRITES,
   ...CASTER_SPRITES,
   ...HUMANOID_BUILDERS,
@@ -27,6 +37,13 @@ export const MONSTER_SPRITES = {
   // (monsters/drakes.js) instead of sharing buildDragon() and the generic spider
   ...DRAKE_SPRITES,
 };
+
+/**
+ * What the renderer actually draws: the painted builders, with the imported sheet
+ * (sprites/castSheet.js) laid over every type it has a sprite for — currently the whole roster.
+ * @type {Object<string, () => {anims:object, palette:object, w:number, h:number, pivot:{x:number,y:number}, emissive?:string, scale?:number}>}
+ */
+export const MONSTER_SPRITES = { ...PAINTED_SPRITES, ...CAST_SPRITES };
 
 /** The builder for a monster type, or null when that type is still a low-poly mesh. */
 export function monsterSpriteBuilder(type) {

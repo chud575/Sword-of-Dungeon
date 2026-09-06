@@ -6,7 +6,7 @@
 // Pure: same (seed, depth) => same Level. All randomness via core/rng.
 import { TILE, MAP_WIDTH, MAP_HEIGHT, DIRS4, DIRS8, BALANCE } from '../core/constants.js';
 import { createRng, seedFrom } from '../core/rng.js';
-import { Level } from './level.js';
+import { Level, decorTiles } from './level.js';
 import { shapeWeights, pickShape, rollSize, buildMask, maskCentre, maskArea } from './rooms.js';
 import { digTunnel, digStub, thinCorridors, ensureConnectivity } from './tunnels.js';
 import { rollMonster } from '../game/monsters.js';
@@ -543,10 +543,18 @@ function spawnMonsters(level, rng, balance) {
 // contract; section references below point at it. Everything here runs off a decor-only RNG
 // fork so dressing never perturbs the rest of generation, and a seed reproduces it exactly.
 
-/** The catalogue (§5): class, variant count, and whether the type may ever be blocking. */
+/**
+ * The catalogue (§5): class, variant count, whether the type may ever be blocking, and `span` —
+ * how many tiles a long piece lies along.
+ *
+ * SPAN IS WHY THE BOARD FEELS LIKE A BOARD. On a HeroQuest table a bookcase is a single object
+ * two or three squares long, and every square under it is off the board for heroes and monsters
+ * alike. A spanned type is therefore always blocking: it is terrain, not dressing. See
+ * `level.js decorTiles()` for the tiles an entry covers, and §5.4.
+ */
 export const DECOR_TYPES = {
   // standing props
-  strongbox: { cls: 'prop', v: 3 }, bookcase: { cls: 'prop', v: 4 }, cupboard: { cls: 'prop', v: 3 },
+  strongbox: { cls: 'prop', v: 3 }, bookcase: { cls: 'prop', v: 4, span: 2, blk: true }, cupboard: { cls: 'prop', v: 3 },
   lectern: { cls: 'prop', v: 3 }, table: { cls: 'prop', v: 4 }, tableLong: { cls: 'prop', v: 3, run: true },
   bench: { cls: 'prop', v: 2 }, stool: { cls: 'prop', v: 2 }, throne: { cls: 'prop', v: 2 },
   sarcophagus: { cls: 'prop', v: 4, blk: true }, tombSlab: { cls: 'prop', v: 3 }, urn: { cls: 'prop', v: 3 },
@@ -1011,11 +1019,42 @@ function dressRoom(level, room, space, force = false) {
   let anchor = null;
   let blockingLeft = floor.length >= 12 ? Math.min(2, Math.floor(floor.length / 12)) : 0;
 
-  const push = (list, type, x, y, facing, variant, blocking) => {
+  const push = (list, type, x, y, facing, variant, blocking, span = 1) => {
     const cls = DECOR_TYPES[type].cls;
-    if (cls === 'prop') props.add(key(x, y)); else if (cls === 'decal') decals.add(key(x, y));
-    taken.add(key(x, y));
-    list.push({ type, x, y, facing, variant, blocking });
+    const entry = { type, x, y, facing, variant, blocking };
+    if (span > 1) entry.span = span;
+    // A spanned piece really does stand on every tile of its run, so all of them go into `taken`
+    // and the room's floor is that much less clear (§8.3 measures `taken`). But it is still ONE
+    // piece of furniture, so only its anchor counts against the standing-prop budget: charging a
+    // bookcase two props emptied every scriptorium down to a single object, measured across 20
+    // seeds x 25 depths in tests/decor.test.js.
+    for (const q of decorTiles(entry)) taken.add(key(q.x, q.y));
+    if (cls === 'prop') props.add(key(x, y));
+    else if (cls === 'decal') decals.add(key(x, y));
+    list.push(entry);
+  };
+
+  /**
+   * The anchor tile for a long piece looking `facing` from somewhere on the wall at `t`.
+   *
+   * A wall scan hands us one tile; the piece needs `span` of them in a row along that wall. The
+   * run is tried from `t` and then from each tile behind it, so a bookcase found at the end of a
+   * short stretch backs up into the stretch instead of hanging off the end of it.
+   * @returns {{x:number, y:number}|null} the first tile of a clear run, or null
+   */
+  const spanAnchor = (t, facing, span) => {
+    const along = FACE[facing].dx !== 0 ? { dx: 0, dy: 1 } : { dx: 1, dy: 0 };
+    for (let back = 0; back < span; back++) {
+      const sx = t.x - along.dx * back, sy = t.y - along.dy * back;
+      let ok = true;
+      for (let k = 0; k < span && ok; k++) {
+        const qx = sx + along.dx * k, qy = sy + along.dy * k;
+        ok = freeSet.has(key(qx, qy)) && !props.has(key(qx, qy)) && fitsFloor(qx, qy)
+          && wallSide.get(key(qx, qy)) === facing && blockingOk(level, qx, qy);
+      }
+      if (ok) return { x: sx, y: sy };
+    }
+    return null;
   };
 
   /** Candidate tiles for a placement rule, best first. */
@@ -1073,6 +1112,16 @@ function dressRoom(level, room, space, force = false) {
       const facing = facingFor(step.p, t);
       let variant = variantFor(rng, step.t, decay);
       let blocking = false;
+      // A LONG PIECE IS TERRAIN. It takes its whole run or it is not placed at all: half a
+      // bookcase standing in a two-tile gap is the multi-tile contract broken on the first frame.
+      const span = DECOR_TYPES[step.t].span | 0;
+      if (span > 1) {
+        const a = spanAnchor(t, facing, span);
+        if (!a) continue;
+        push(out.furniture, step.t, a.x, a.y, facing, variant, true, span);
+        if (step.anchor && !anchor) anchor = { x: a.x, y: a.y, facing };
+        continue;
+      }
       if (DECOR_TYPES[step.t].blk && blockingLeft > 0 && rng.chance(0.55) && blockingOk(level, t.x, t.y)) {
         blocking = true; blockingLeft--;
       }

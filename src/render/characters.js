@@ -10,6 +10,7 @@ import { RigBuilder, createOutlineMaterial } from './charParts.js';
 import { BUILDERS, ANIM_KIND } from './charBuilders.js';
 import { bus } from '../core/events.js';
 import { buildHero } from './sprites/heroSprite.js';
+import { castHeroBuilder } from './sprites/castSheet.js';
 import { packSheet, createSheetTexture } from './sprites/spriteSheet.js';
 import { SpriteBillboard } from './sprites/spriteBillboard.js';
 import { MONSTER_SPRITES } from './sprites/monsters/index.js';
@@ -75,7 +76,9 @@ export class CharacterFactory {
   /** Build (once) the hero sheet + texture. */
   heroAssets() {
     if (!this.hero) {
-      const built = buildHero();
+      // The imported sheet plays the hero when it has a `player` sprite; the painted hero
+      // (sprites/heroSprite.js) stays as the fallback, and is still the only one that animates.
+      const built = (castHeroBuilder || buildHero)();
       const sheet = packSheet(built);
       this.hero = { built, sheet, texture: createSheetTexture(sheet), figurePx: measureFigure(sheet) };
     }

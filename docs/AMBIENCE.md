@@ -200,13 +200,18 @@ This is what every other agent codes against. It is exact; treat any deviation a
  * @property {'n'|'e'|'s'|'w'} facing  the direction the FRONT of the piece looks toward.
  * @property {number}  variant   integer >= 0, < VARIANTS[type] (§5). Lower = intact, higher = ruined.
  * @property {boolean} blocking  true only for a piece the player and monsters cannot walk through.
+ * @property {number} [span]     OPTIONAL, and only on a type whose `DECOR_TYPES` entry declares one:
+ *                               how many tiles this single object lies along, running perpendicular
+ *                               to `facing` (the axis of the wall behind it). `x, y` is the ANCHOR —
+ *                               the first tile of the run, never its centre. Absent means 1.
+ *                               `level.js decorTiles(d)` is the only place this is unpacked.
  */
 level.decor = [];   // Decor[]  — always an array, never null, empty on depth 0 unless dressed
 ```
 
-**All six fields are required and present on every entry.** No `undefined`, no optional-by-omission.
-Entries are plain JSON-safe data (numbers, strings, booleans) — nothing else, ever. No extra fields
-without an edit to this document.
+**All six fields are required and present on every entry**, plus `span` on the long pieces and only
+those. No `undefined`, no optional-by-omission. Entries are plain JSON-safe data (numbers, strings,
+booleans) — nothing else, ever. No extra fields without an edit to this document.
 
 **Coordinate law**
 
@@ -264,9 +269,15 @@ its type: a four-tile alcove, if one is ever carved, is furnished like anything 
 
 **The rule, plainly:**
 
-1. **Decor is NON-BLOCKING by default.** `blocking:false` unless the type is in the blockable set
-   below *and* the generator has re-verified connectivity afterwards. When in doubt: `false`.
-2. **Only these types may ever carry `blocking:true`** — everything else is a hard error:
+0. **A SPANNED PIECE IS TERRAIN AND ALWAYS BLOCKS**, on every tile of its run, and is outside rules
+   1, 2 and 5. This is the HeroQuest law: a bookcase is one object lying along two squares and both
+   squares are off the board for heroes and monsters alike. It is safe to exempt because a spanned
+   piece is only ever laid on a clear wall run that already passed every test in rule 3 — it takes
+   floor off the EDGE of a room, never out of its middle. Rule 4 still applies to it in full.
+1. **Every other piece of decor is NON-BLOCKING by default.** `blocking:false` unless the type is in
+   the blockable set below *and* the generator has re-verified connectivity afterwards. When in
+   doubt: `false`.
+2. **Only these types may ever carry `blocking:true` unspanned** — everything else is a hard error:
    `sarcophagus`, `fallenColumn`, `pillarBroken`, `rubbleMound`, `stalagmite`, `wellHead`, `cage`,
    `forge`, `anvil`.
 3. **Never blocking on, or orthogonally adjacent to:** any staircase (`stairsUp`, every entry of
@@ -437,13 +448,25 @@ the far wall.
 | `mould` | 24×24 | 3 | 0.00 | damp bloom |
 | `fungusShelf` | 20×14 | 3 | 0.35 | bracket fungus |
 
-### 5.4 Run pieces
+### 5.4 Long pieces: runs and spans
 
-`tableLong`, `bunk`, `runner` and `ossuaryShelf` may form a straight run of **2–4** consecutive
-entries. Rules: all entries share `facing`; the run lies along the axis perpendicular to `facing`
-(a table against a north wall faces `'s'` and runs east–west); `variant` encodes the segment —
-`0` = end, `1` = middle, `2` = end (mirrored) — and for `runner` `0`/`1` alternate. Every segment is
-its own `Decor` entry on its own tile. **There is no multi-tile entry in this contract.**
+There are two ways a piece of furniture covers more than one tile, and they are not the same thing.
+
+**A SPAN is one object.** `DECOR_TYPES[type].span` declares how many tiles it lies along; the
+generator emits a single `Decor` entry carrying that `span`, anchored on the first tile of the run,
+and `level.js decorTiles()` expands it. One entry, one mesh, one contact shadow, and every tile it
+covers is impassable (§4.3 rule 0). A span is placed all-or-nothing: it takes a clear wall run of
+its full length or it is not placed, because half a bookcase standing in a two-tile gap is this
+contract broken on the first frame. Spanned today: `bookcase` (2).
+
+**A RUN is several objects in a line.** `tableLong`, `bunk`, `runner` and `ossuaryShelf` may form a
+straight run of **2–4** consecutive entries. Rules: all entries share `facing`; the run lies along
+the axis perpendicular to `facing` (a table against a north wall faces `'s'` and runs east–west);
+`variant` encodes the segment — `0` = end, `1` = middle, `2` = end (mirrored) — and for `runner`
+`0`/`1` alternate. Every segment is its own `Decor` entry on its own tile.
+
+Prefer a span for anything the board would model as one piece of furniture. A run is for things that
+genuinely repeat — a row of cots, a carpet laid end to end.
 
 ### 5.5 Ship order
 

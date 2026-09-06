@@ -48,7 +48,10 @@ export function packSheet(built, { pad = 1, order = null, facings = ['S', 'E', '
   const data = new Uint8ClampedArray(W * H * 4);
   const emissive = new Set((built.emissive || '').split('').map((c) => c.charCodeAt(0)));
   for (const fr of frames) {
-    const rgba = toRGBA(fr.pix, built.palette);
+    // An IMPORTED frame carries its own colours (sprites/castSheet.js): the source is a bitmap with
+    // thousands of colours and no palette to index. Painted frames still go through the palette,
+    // which is what keeps the ramp discipline in sprites/style.js enforceable.
+    const rgba = fr.pix.rgba || toRGBA(fr.pix, built.palette);
     // emissive keys (glints, magic) are flagged in alpha (< 255, still above the alpha test)
     if (emissive.size) for (let i = 0; i < fr.pix.d.length; i++) if (emissive.has(fr.pix.d[i])) rgba[i * 4 + 3] = 240;
     for (let yy = 0; yy < fr.h; yy++) {

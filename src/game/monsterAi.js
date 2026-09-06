@@ -23,9 +23,34 @@ import { aStar } from '../world/pathfinding.js';
 import { lineOfSight } from '../world/fov.js';
 import { hasStatus, damagePlayer } from './player.js';
 
+/**
+ * Wake a sleeping monster. Safe to call on anything: a monster that is already awake, fleeing or
+ * dead is left alone, and `woke` makes it permanent so nothing dozes off mid-fight.
+ * @param {object} game @param {object} m @param {string} reason 'noticed' | 'hurt' | 'pack'
+ */
+export function wake(game, m, reason = 'noticed') {
+  if (!m || m.state !== 'asleep') return false;
+  initAiFields(m);
+  m.state = 'wander';
+  m.woke = true;
+  game.emit('monster:wake', { entity: m, reason });
+  say(game, m, `The ${lower(m)} wakes!`, 'combat', 'wake', { cooldown: 4 });
+  return true;
+}
+
 /** AI tuning [designed]. Paces multiply the per-depth monster phase rate by state. */
 export const AI = {
-  pace: { idle: 0.5, wander: 0.55, search: 0.85, lurk: 0.75, hunt: 1, flee: 1.25 },
+  // `asleep` is NOT 0: the pace gate in updateMonsters decides whether monsterAct runs at all, and
+  // a sleeper still has to be asked whether anything has woken it. It simply never moves.
+  pace: { idle: 0.5, wander: 0.55, search: 0.85, lurk: 0.75, hunt: 1, flee: 1.25, asleep: 0.6 },
+  // SLEEP. A monster that has never had prey may be dozing where it stands. It costs the player
+  // nothing to walk away from one, which is the point: it turns a corridor full of monsters into a
+  // set of choices rather than a queue of fights. A sleeper wakes on any of four things — you come
+  // within `wakeRadius`, you are heard moving inside `wakeHearRadius`, something hits it, or a
+  // packmate howls — and once woken it never sleeps again.
+  sleepChance: 0.45,       // share of monsters that start the level asleep
+  wakeRadius: 2,           // it wakes when you get this close, seen or not
+  wakeHearRadius: 4,       // ...or this close while actually moving (footsteps)
   noiseLife: 1.6,          // seconds a noise can still be heard
   combatNoise: 7,          // radius of a clashing fight
   footstepWindow: 0.6,     // seconds after a step during which the player is "moving" (audible)
@@ -60,6 +85,7 @@ export function monsterVisibleToPlayer(game, monster) {
 /** Fields the AI relies on; also upgrades entities from older saves. */
 export function initAiFields(m) {
   m.cooldowns = m.cooldowns || {};
+  m.woke = !!m.woke;
   m.lastLog = m.lastLog || {};
   m.target = m.target || null;
   m.searchLeft = m.searchLeft || 0;
@@ -326,7 +352,7 @@ function howl(game, m) {
   if (level.lastHowl[m.type] !== undefined && now - level.lastHowl[m.type] < 10) return;
   level.lastHowl[m.type] = now;
   const allies = level.monsters.filter((o) => o !== m && o.type === m.type && o.state !== 'hunt' && o.state !== 'flee' && cheb(o.x, o.y, m.x, m.y) <= AI.packRange);
-  for (const o of allies) { initAiFields(o); startSearch(game, o, { x: p.x, y: p.y, kind: 'howl' }, 'pack'); o.hadPrey = true; }
+  for (const o of allies) { initAiFields(o); wake(game, o, 'pack'); startSearch(game, o, { x: p.x, y: p.y, kind: 'howl' }, 'pack'); o.hadPrey = true; }
   const name = lower(m);
   const line = m.family === 'human'
     ? (allies.length ? `The ${name} shouts an alarm — boots clatter in the dark!` : `The ${name} shouts a challenge!`)
@@ -680,6 +706,13 @@ export function monsterAct(game, m) {
   const p = game.player, ext = extendedRules(game);
   tickCooldowns(m);
   const per = perceive(game, m);
+
+  // A sleeper does nothing at all until something wakes it, and then acts on the NEXT turn — the
+  // free move is the reward for spotting the Z and choosing to walk round it.
+  if (m.state === 'asleep') {
+    if (per.dist <= AI.wakeRadius || (per.hears && per.dist <= AI.wakeHearRadius)) wake(game, m, 'noticed');
+    return;
+  }
 
   if (m.state === 'flee') { fleeAct(game, m, per); return; }
 

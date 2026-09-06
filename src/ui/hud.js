@@ -46,7 +46,7 @@ export class Hud {
       <div class="gauge xp"><div class="lab"><span class="cap-l">Experience</span><span class="num"><span class="xp-v">0</span> <small>/ <span class="xp-next">200</span></small></span></div>
         <div class="frame"><div class="fill"></div></div><i class="end l"></i><i class="end r"></i></div>
       <div class="purse"><span class="gold" title="Gold carried — sacrifice it at a temple for experience">${icon('coin')}<span class="num gold-v">0</span><small>gold</small></span>
-        <span class="next">Next level <b class="xp-togo">200</b></span></div>`);
+        <span class="next"><b class="xp-togo">200</b> xp to level <b class="xp-nextlv">2</b></span></div>`);
     this.card.id = 'hud-card';
     root.appendChild(this.card);
     this.q = (s) => this.cache[s] || (this.cache[s] = this.card.querySelector(s));
@@ -168,7 +168,10 @@ export class Hud {
     this.q('.gauge.xp .fill').style.transform = `scaleX(${Math.max(0, Math.min(1, (D.xp - lo) / Math.max(1, hi - lo)))})`;
     setText(this.q('.xp-v'), fmtNum(D.xp));
     setText(this.q('.xp-next'), fmtNum(hi));
+    // "Next level 56" read as LEVEL 56 sitting under "144 / 200". Name the number for what
+    // it is - experience still owed - and name the level it buys.
     setText(this.q('.xp-togo'), fmtNum(Math.max(0, hi - p.xp)));
+    setText(this.q('.xp-nextlv'), String(p.level + 1));
     setText(this.q('.lv'), String(p.level));
     setText(this.q('.skill-v'), String(p.skill));
     setText(this.q('.kills'), String(p.kills));

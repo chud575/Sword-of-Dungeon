@@ -310,6 +310,8 @@ export class Menus {
       { id: 'sfxVolume', name: 'Sound effects', type: 'range', min: 0, max: 1, step: 0.05 },
       { group: 'Display' },
       { id: 'cameraTilt', name: 'Camera tilt', desc: 'degrees off straight down — 0 is a flat plan view', type: 'range', min: 0, max: 45, step: 0.5 },
+      { id: 'perspectiveCamera', name: 'Perspective camera', desc: 'off is the flat plan view with an exact pixel grid; on gives furniture and walls real depth', type: 'toggle' },
+      { id: 'flatDecor', name: '2D decor', desc: 'off draws only the 3D props — no painted billboards, stains or cobwebs', type: 'toggle' },
       { id: 'screenShake', name: 'Screen shake', type: 'toggle' },
       { id: 'reduceFlash', name: 'Reduce flashes', desc: 'softer explosion and trap flashes', type: 'toggle' },
       { id: 'fontScale', name: 'Interface scale', type: 'range', min: 0.8, max: 2, step: 0.1 },

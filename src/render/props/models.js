@@ -23,6 +23,8 @@ import { patchFog } from '../lighting.js';
 import { WORLD_MASK_ALPHA } from '../materials.js';
 import { PROPS_GLB_GZ_B64 } from '../../assets/propsModel.js';
 import { ATLAS_W, ATLAS_H, ATLAS_RGBA_GZ_B64 } from '../../assets/propsAtlas.js';
+import { FURNITURE_GLB_GZ_B64 } from '../../assets/furnitureModel.js';
+import { FURN_ATLAS_W, FURN_ATLAS_H, FURN_ATLAS_RGBA_GZ_B64 } from '../../assets/furnitureAtlas.js';
 
 /** decor `type` -> candidate model names. A type with several candidates picks one by variant, so a
  *  room full of barrels is not a row of identical barrels. Types absent here keep their hand-pixelled
@@ -47,6 +49,17 @@ export const MODEL_MAP = {
   plate: ['table_deco/plate_01'],
   cup: ['table_deco/cup_01'],
   scree: ['table_deco/rock'],
+  // THE SECOND LIBRARY. The entourage set has no case furniture at all, so the big silhouettes that
+  // say what a room is FOR - the ones AMBIENCE §5.1 leans hardest on - come from the Static Objects
+  // set instead (tools/props-import/furniture.mjs). Same grid, same material settings, its own
+  // small atlas: see loadPropModels below for why it cannot simply join the first one.
+  bookcase: ['furniture/bookcase'],
+  // The standing skeleton, from the same project's `Dynamic/Enemies` set (FBX 7.x, so three's own
+  // loader reads it). He stands in for `bonePile` — the crypt/barrow/ossuary heap — because that is
+  // the decor type a skeleton propped in a dungeon actually IS, and it needs no new type, no new
+  // painted fallback and no change to the archetype plans. He is flattened to his BIND POSE: the
+  // walk/idle/attack clips are separate FBX files and are not imported, so his arms are out.
+  bonePile: ['furniture/skeleton'],
 };
 
 /** Unlit twins, for a piece standing in a room the torches never reached. */
@@ -79,40 +92,62 @@ function inflate(b64) {
 export function loadPropModels(fog) {
   if (cache) return cache;
   cache = (async () => {
-    const [glb, rgbaBuf] = await Promise.all([inflate(PROPS_GLB_GZ_B64), inflate(ATLAS_RGBA_GZ_B64)]);
-    const tex = new THREE.DataTexture(new Uint8Array(rgbaBuf), ATLAS_W, ATLAS_H, THREE.RGBAFormat);
-    // Nearest, no mips: this is what puts the props on the cast's pixel grid rather than a finer one.
-    tex.magFilter = THREE.NearestFilter;
-    tex.minFilter = THREE.NearestFilter;
-    tex.generateMipmaps = false;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    tex.flipY = false; // the source atlas is authored top-down; the exporter kept those UVs
-    tex.needsUpdate = true;
-    const material = new THREE.MeshStandardMaterial({
-      // THE LIBRARY IS PAINTED BRIGHTER THAN OUR STONE. Its atlas was authored for a renderer with
-      // a flat white key; dropped into a torchlit room at full albedo the props sit a clear step
-      // above the flagstones beside them and read as cut-outs pasted over the floor. The tint puts
-      // them back inside the dungeon's own value range - the same job `stoneFamily` does for slabs.
-      map: tex, color: 0xc2bab2, roughness: 0.88, metalness: 0.04, alphaTest: 0.5, side: THREE.DoubleSide,
-    });
-    if (fog) {
-      patchFog(material, fog);          // the fog of war owns these props like it owns the stone
-      // ...and so does the grain mask: these are 32-texel blocks like the floor (materials.js
-      // WORLD_MASK_ALPHA), so the grading pass must keep its film grain off them too.
-      const fogged = material.onBeforeCompile;
-      material.onBeforeCompile = (shader, renderer) => {
-        fogged(shader, renderer);
-        shader.fragmentShader = shader.fragmentShader
-          .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n gl_FragColor.a = ${WORLD_MASK_ALPHA.toFixed(3)};`);
-      };
-      material.customProgramCacheKey = () => 'fogofwar-v2|propmodels';
-    }
-    const gltf = await new GLTFLoader().parseAsync(glb, '');
+    const [glb, rgbaBuf, furnGlb, furnRgbaBuf] = await Promise.all([
+      inflate(PROPS_GLB_GZ_B64), inflate(ATLAS_RGBA_GZ_B64),
+      inflate(FURNITURE_GLB_GZ_B64), inflate(FURN_ATLAS_RGBA_GZ_B64),
+    ]);
+    const material = propMaterial(rgbaBuf, ATLAS_W, ATLAS_H, fog, 'propmodels');
+    const furnMaterial = propMaterial(furnRgbaBuf, FURN_ATLAS_W, FURN_ATLAS_H, fog, 'furniture');
     const meshes = new Map();
-    gltf.scene.traverse((o) => { if (o.isMesh) { o.material = material; meshes.set(key(o.name), o); } });
-    return { meshes, material };
+    for (const [bytes, mat] of [[glb, material], [furnGlb, furnMaterial]]) {
+      const gltf = await new GLTFLoader().parseAsync(bytes, '');
+      gltf.scene.traverse((o) => { if (o.isMesh) { o.material = mat; meshes.set(key(o.name), o); } });
+    }
+    return { meshes, material, furnMaterial };
   })();
   return cache;
+}
+
+/**
+ * One library's atlas and the material that samples it. Two libraries ship (see MODEL_MAP): the
+ * entourage set on its 512 sheet, and the Static Objects furniture on its own small packed one.
+ * They cannot share a sheet — the entourage UVs are baked into its glb against a 512 that this
+ * repo has no source for, and growing that texture would renormalise every one of them — so they
+ * share these settings instead, which is what actually matters for keeping one pixel grid.
+ * @param {ArrayBuffer} rgba
+ * @param {number} w @param {number} h
+ * @param {import('../lighting.js').FogOfWar} [fog]
+ * @param {string} cacheKey distinguishes the two programs for three's shader cache
+ */
+function propMaterial(rgba, w, h, fog, cacheKey) {
+  const tex = new THREE.DataTexture(new Uint8Array(rgba), w, h, THREE.RGBAFormat);
+  // Nearest, no mips: this is what puts the props on the cast's pixel grid rather than a finer one.
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.flipY = false; // the source atlas is authored top-down; the exporter kept those UVs
+  tex.needsUpdate = true;
+  const material = new THREE.MeshStandardMaterial({
+    // THE LIBRARY IS PAINTED BRIGHTER THAN OUR STONE. Its atlas was authored for a renderer with
+    // a flat white key; dropped into a torchlit room at full albedo the props sit a clear step
+    // above the flagstones beside them and read as cut-outs pasted over the floor. The tint puts
+    // them back inside the dungeon's own value range - the same job `stoneFamily` does for slabs.
+    map: tex, color: 0xc2bab2, roughness: 0.88, metalness: 0.04, alphaTest: 0.5, side: THREE.DoubleSide,
+  });
+  if (fog) {
+    patchFog(material, fog);          // the fog of war owns these props like it owns the stone
+    // ...and so does the grain mask: these are 32-texel blocks like the floor (materials.js
+    // WORLD_MASK_ALPHA), so the grading pass must keep its film grain off them too.
+    const fogged = material.onBeforeCompile;
+    material.onBeforeCompile = (shader, renderer) => {
+      fogged(shader, renderer);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <dithering_fragment>', `#include <dithering_fragment>\n gl_FragColor.a = ${WORLD_MASK_ALPHA.toFixed(3)};`);
+    };
+    material.customProgramCacheKey = () => `fogofwar-v2|${cacheKey}`;
+  }
+  return material;
 }
 
 /**

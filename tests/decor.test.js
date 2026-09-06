@@ -12,8 +12,14 @@ import { TILE, DIRS4, DIRS8 } from '../src/core/constants.js';
 const SEEDS = Array.from({ length: 20 }, (_, i) => 1000 + i * 37);
 const SMALL = [42, 7, 1234, 99, 2024, 31337];
 const SIDE = new Set(['temple', 'shrine', 'alcove', 'surface']);
+// Single-tile pieces that may block. A SPANNED piece (DECOR_TYPES[t].span > 1) is a different
+// thing: a HeroQuest bookcase is one object lying along two squares and both squares are off the
+// board, so spanned types are terrain and always block, outside this list and outside the §4.3
+// budget below. They earn that by being placed only on a clear wall run that already passes every
+// `blockingOk` test (no door, corridor, stair, pit or item within one tile).
 const BLOCKABLE = new Set(['sarcophagus', 'fallenColumn', 'pillarBroken', 'rubbleMound', 'stalagmite',
   'wellHead', 'cage', 'forge', 'anvil']);
+const spanOf = (type) => Math.max(1, DECOR_TYPES[type].span | 0);
 const CORRIDOR_OK = new Set(['bones', 'scree', 'puddle', 'sconce', 'cobweb', 'wallCrack', 'skull',
   'bloodstain', 'mould', 'rat', 'rubbleMound']);
 const FACING = { n: { dx: 0, dy: -1 }, e: { dx: 1, dy: 0 }, s: { dx: 0, dy: 1 }, w: { dx: -1, dy: 0 } };
@@ -47,14 +53,21 @@ test('every decor entry obeys the data contract (§4.1, §5)', () => {
     assert.ok(Array.isArray(lv.decor));
     for (const d of lv.decor) {
       const where = `seed=${seed} depth=${depth} ${d.type}@${d.x},${d.y}`;
-      assert.equal(Object.keys(d).length, 6, `exactly the six contract fields (${where})`);
+      const fields = Object.keys(d);
+      assert.ok(fields.length === 6 || (fields.length === 7 && fields.includes('span')),
+        `the six contract fields, plus \`span\` on a long piece (${where}: ${fields.join(',')})`);
+      if (spanOf(d.type) > 1) {
+        assert.equal(d.span, spanOf(d.type), `a long piece carries its full span (${where})`);
+        assert.equal(d.blocking, true, `a long piece is terrain and always blocks (${where})`);
+      }
       const def = DECOR_TYPES[d.type];
       assert.ok(def, `known type (${where})`);
       assert.ok(Number.isInteger(d.x) && Number.isInteger(d.y) && lv.inBounds(d.x, d.y), `in bounds (${where})`);
       assert.ok(['n', 'e', 's', 'w'].includes(d.facing), `facing (${where})`);
       assert.ok(Number.isInteger(d.variant) && d.variant >= 0 && d.variant < def.v, `variant (${where})`);
       assert.equal(typeof d.blocking, 'boolean');
-      if (d.blocking) assert.ok(BLOCKABLE.has(d.type), `only a blockable type may block (${where})`);
+      if (d.blocking) assert.ok(BLOCKABLE.has(d.type) || spanOf(d.type) > 1,
+        `only a blockable or spanned type may block (${where})`);
       if (def.cls === 'wall') {
         assert.equal(lv.get(d.x, d.y), TILE.WALL, `a wall piece hangs on a wall (${where})`);
         const f = FACING[d.facing];
@@ -124,8 +137,13 @@ test('every level stays fully connected with decor placed, 20 seeds x depths 1..
     for (const r of lv.rooms) {
       const floor = roomFloorTiles(lv, r);
       const blocking = lv.decor.filter((d) => d.blocking && d.x >= r.x && d.y >= r.y && d.x < r.x + r.w && d.y < r.y + r.h);
-      assert.ok(blocking.length <= 2, `at most two blocking pieces per room ${where}`);
-      assert.ok(blocking.length <= Math.floor(floor.length / 12), `one blocking piece per twelve tiles ${where}`);
+      // The §4.3 budget governs the pieces placed *opportunistically* into open floor, which are
+      // the ones that can wall a room in half. Spanned furniture is not budgeted: it lies flat
+      // against a wall on a run that was clear, so it takes floor off the edge of the room, never
+      // out of its middle. Connectivity is still asserted for every piece, above.
+      const budgeted = blocking.filter((d) => spanOf(d.type) === 1);
+      assert.ok(budgeted.length <= 2, `at most two budgeted blocking pieces per room ${where}`);
+      assert.ok(budgeted.length <= Math.floor(floor.length / 12), `one blocking piece per twelve tiles ${where}`);
     }
   }
   assert.ok(blockingTotal > 100, `blocking decor does get used (${blockingTotal})`);

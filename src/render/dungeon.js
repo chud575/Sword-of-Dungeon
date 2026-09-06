@@ -394,7 +394,13 @@ export class DungeonView {
     if (!list || !list.length) return;
     const dropped = new Map();
     for (const d of list) {
-      const o = this.modelFor(d) || this.props.decor(d);
+      // MODELS ONLY (Settings -> "2D decor"). Every piece the imported library cannot serve is a
+      // painted billboard or a floor decal, and with the room now furnished in real geometry those
+      // read as stickers over it. Turning them off leaves the level as nothing but its own
+      // architecture and the props that are actually 3D — which is the only way to judge the
+      // architecture. Nothing is removed from `level.decor`: this is a view setting, so a piece
+      // that vanishes here is still on the tile and still blocks it.
+      const o = this.modelFor(d) || (this.modelsOnly ? null : this.props.decor(d));
       if (!o) { dropped.set(d.type, (dropped.get(d.type) || 0) + 1); continue; }
       const cls = (o.userData.decor && o.userData.decor.cls) || 'prop';
       if (cls === 'wall') {
@@ -433,10 +439,23 @@ export class DungeonView {
    *
    * `variant` goes through untouched, so a storeroom of six barrels is six different barrels.
    */
+  /**
+   * Draw only the decor the imported library can serve (Settings -> "2D decor" off), and rebuild
+   * the current level's dressing to match.
+   * @param {boolean} on
+   */
+  setModelsOnly(on) {
+    const want = !!on;
+    if (want === !!this.modelsOnly) return;
+    this.modelsOnly = want;
+    if (this.level && this.level.decor && this.level.decor.length) this.rebuildDecor();
+  }
+
   modelFor(d) {
     if (!this.modelLib || !isModelled(d.type)) return null;
     return buildModelProp(this.modelLib, d.type, {
       variant: d.variant | 0, facing: d.facing, blocking: !!d.blocking, lit: this.decorLit(d),
+      span: d.span | 0,
     });
   }
 

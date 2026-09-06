@@ -280,31 +280,44 @@ export function moodFlicker(kind, t, phase) {
  *    way: cold blue at 6-12, green at 13-18, violet below — the band is told by hue, not by dark.
  * @param {number} depth
  */
+/**
+ * `lift` raises the black floor. It went up with the saturation below, because pushing saturation
+ * costs a dark, saturated costume its luminance: the mage's purple robe measured 0.117 against the
+ * 0.12 screen floor that stops a character reading as a HOLE in the flagstone
+ * (tests/screenTruth.test.js). Lift is the lever to reach for if that test fails again.
+ *
+ * MORE COLOUR THE DEEPER YOU GO. Every band's `sat` was between 1.00 and 1.12 — close enough to
+ * neutral that the torch warm and the depth's cold cast cancelled to grey, and the five bands were
+ * telling the same colour story. They now run 1.24-1.34, and each band's `tint` leans further into
+ * its own hue, so a torchlit hall reads amber, the wet levels read green and the deep reads violet.
+ * The split-tone `shadows`/`highlights` below do the rest, and are where to reach first if a band
+ * needs pulling back.
+ */
 export function depthTint(depth) {
   const c = (h) => new THREE.Color(h);
   if (depth <= 0) return {
     ambient: c(0x8fb2d8), sky: c(0xa9c4e0), ground: c(0x5d5a52), fogTint: new THREE.Color(0.62, 0.64, 0.7), ambientScale: 2.4,
-    grade: { tint: new THREE.Color(1.0, 1.0, 1.04), sat: 1.06, contrast: 0.98, vignette: 0.24, lift: 0.008, shadows: c(0xb8c6e2), highlights: c(0xfff4e0) },
+    grade: { tint: new THREE.Color(1.0, 1.0, 1.06), sat: 1.24, contrast: 0.98, vignette: 0.24, lift: 0.013, shadows: c(0xb8c6e2), highlights: c(0xfff4e0) },
     atmo: { shaft: c(0xc8dcff), shaftStrength: 0.55, dust: c(0xfff2d8), dustDensity: 0.7 },
   };
   if (depth <= 5) return {
     ambient: c(0xa08a68), sky: c(0xac9673), ground: c(0x62564a), fogTint: new THREE.Color(0.62, 0.62, 0.68), ambientScale: 1.9,
-    grade: { tint: new THREE.Color(1.03, 1.0, 0.96), sat: 1.12, contrast: 0.99, vignette: 0.28, lift: 0.009, shadows: c(0xa8b0cc), highlights: c(0xffefd6) },
+    grade: { tint: new THREE.Color(1.05, 1.0, 0.94), sat: 1.34, contrast: 0.99, vignette: 0.28, lift: 0.014, shadows: c(0xa8b0cc), highlights: c(0xffefd6) },
     atmo: { shaft: c(0xb9cbe6), shaftStrength: 0.42, dust: c(0xffe6c0), dustDensity: 1.0 },
   };
   if (depth <= 12) return {
     ambient: c(0x8d9ab4), sky: c(0x96a6c0), ground: c(0x555d6c), fogTint: new THREE.Color(0.56, 0.6, 0.7), ambientScale: 1.74,
-    grade: { tint: new THREE.Color(0.98, 0.99, 1.05), sat: 1.08, contrast: 1.0, vignette: 0.32, lift: 0.008, shadows: c(0x8e9cc4), highlights: c(0xfff0dc) },
+    grade: { tint: new THREE.Color(0.96, 0.99, 1.08), sat: 1.30, contrast: 1.0, vignette: 0.32, lift: 0.013, shadows: c(0x8e9cc4), highlights: c(0xfff0dc) },
     atmo: { shaft: c(0x8fa8d8), shaftStrength: 0.26, dust: c(0xdde8ff), dustDensity: 0.9 },
   };
   if (depth <= 18) return {
     ambient: c(0x84a68e), sky: c(0x8fb098), ground: c(0x8fb098), fogTint: new THREE.Color(0.54, 0.62, 0.58), ambientScale: 1.62,
-    grade: { tint: new THREE.Color(0.97, 1.02, 0.99), sat: 1.04, contrast: 0.94, vignette: 0.34, lift: 0.005, shadows: c(0x86a8a0), highlights: c(0xf4f0dc) },
+    grade: { tint: new THREE.Color(0.94, 1.03, 0.98), sat: 1.28, contrast: 0.94, vignette: 0.34, lift: 0.011, shadows: c(0x86a8a0), highlights: c(0xf4f0dc) },
     atmo: { shaft: c(0x7fb090), shaftStrength: 0.12, dust: c(0xc8e8d0), dustDensity: 0.8 },
   };
   return {
     ambient: c(0xa088a0), sky: c(0xa892a4), ground: c(0x5f5262), fogTint: new THREE.Color(0.6, 0.52, 0.64), ambientScale: 1.52,
-    grade: { tint: new THREE.Color(1.03, 0.98, 1.04), sat: 1.0, contrast: 1.03, vignette: 0.36, lift: 0.007, shadows: c(0x9a82b2), highlights: c(0xffe6f0) },
+    grade: { tint: new THREE.Color(1.05, 0.96, 1.07), sat: 1.26, contrast: 1.03, vignette: 0.36, lift: 0.013, shadows: c(0x9a82b2), highlights: c(0xffe6f0) },
     atmo: { shaft: c(0xb08ad0), shaftStrength: 0.08, dust: c(0xe6c8ff), dustDensity: 0.7 },
   };
 }

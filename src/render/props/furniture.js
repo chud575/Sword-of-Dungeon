@@ -896,7 +896,10 @@ const FURNITURE = {
   stool: { art: artStool, pal: { a: RAMP.ash }, v: 2, foot: 0.38 },
   lectern: { art: artLectern, pal: { a: RAMP.oak, F: RAMP.bone }, v: 3, foot: 0.42 },
   // shelves and presses
-  bookcase: { art: artBookcase, pal: { a: RAMP.oak, m: RAMP.brass, A: RAMP.cloth, F: RAMP.bone }, v: 4, foot: 0.72 },
+  // `blk` because the imported bookcase is a spanned piece and spanned pieces are terrain
+  // (generator.js DECOR_TYPES.bookcase.span). The painted billboard is the fallback for a browser
+  // that never gets the model, and it blocks its one tile the same way.
+  bookcase: { art: artBookcase, pal: { a: RAMP.oak, m: RAMP.brass, A: RAMP.cloth, F: RAMP.bone }, v: 4, foot: 0.72, blk: true },
   cupboard: { art: artCupboard, pal: { a: RAMP.oak, h: RAMP.iron, F: RAMP.bone }, v: 3, foot: 0.66 },
   weaponRack: { art: artWeaponRack, pal: { a: RAMP.oak, h: RAMP.steel, r: RAMP.bog, m: RAMP.brass }, v: 4, foot: 0.78 },
   shieldStand: { art: artShieldStand, pal: { a: RAMP.oak, h: RAMP.iron, m: RAMP.brass, A: RAMP.cloth }, v: 3, foot: 0.66 },
@@ -1018,6 +1021,18 @@ export function buildFurniture(type, o = {}) {
  * library covers them.
  */
 const MODEL_BOX = {
+  // SPANNED (generator.js DECOR_TYPES.bookcase.span = 2), so the first two numbers are unused and
+  // only the lean applies. The model is 1.72 x 1.52 world units — a HeroQuest bookcase, wide and
+  // meant to lie along a wall, not the tall narrow billboard the painted one was. At span 2 it
+  // keeps its own proportions and stands a little above the hero, which is what it should do.
+  // Span 3 was tried: this model would have to be 2.65 units tall to reach three tiles at its own
+  // aspect, nearly twice the hero, so a 3-tile bookcase wants a different (longer) source model.
+  bookcase: [28, 46, 73],
+  // The skeleton stands as `bonePile`. No lean: he is a figure, and a figure tipped back 70 degrees
+  // is a figure falling over, not a figure you can see. Under the orthographic plan view you
+  // therefore get his skull and shoulders and not much else — which is the honest cost of putting
+  // real geometry under this camera, and the reason Settings now carries a perspective toggle.
+  bonePile: [48, 46, 0],
   barrel: [14, 20], table: [30, 22], tableLong: [32, 22], stool: [12, 14], bench: [26, 12],
   urn: [14, 20], brazier: [18, 30], hearth: [32, 40], candelabra: [14, 30], candlestick: [8, 22],
   // NOT `skull`, though the library covers it. Judged in a rendered frame at the play camera
@@ -1032,8 +1047,24 @@ const MODEL_BOX = {
 const BOX_PX = 32;
 /** Nothing standing on the floor may top the hero's own figure height (AMBIENCE §1). */
 const MODEL_MAX_H = 46 / BOX_PX;
-/** A model may not reach into the tile next door, where the wall behind it is. */
+/** A model may not reach into the tile next door, where the wall behind it is. For a spanned piece
+ *  this binds its DEPTH only: the run is what its width is allowed to fill. */
 const MODEL_MAX_FOOT = 0.92;
+/**
+ * Types allowed a wider bounding box than `MODEL_MAX_FOOT`, in tiles.
+ *
+ * That rule exists because a piece of furniture pushed into the next tile pushes into the WALL
+ * behind it. A free-standing figure has no wall behind it and does not stand on its bounding box —
+ * it stands on its feet, and its arms overhang. Held to 0.92 the skeleton (1.76 wide with his arms
+ * out in bind pose) came out 30 texels tall against the hero's 46: a knee-high skeleton. This lets
+ * him be sized by his HEIGHT, which is the dimension a figure is read by.
+ */
+const MODEL_FOOT_ALLOWANCE = { bonePile: 1.5 };
+/** Grout: a long piece stops just short of the ends of its run so the tiles under it still read. */
+const MODEL_SPAN_GAP = 0.18;
+/** A long piece may stand above the hero — a bookcase that does not is a sideboard. Its ceiling is
+ *  the wall band's own height, so nothing ever grows through the masonry behind it. */
+const MODEL_SPAN_MAX_H = 1.62;
 /** A hair off the flagstone, exactly as `ITEM_PIVOT_Y` lifts a pickup, so nothing z-fights the floor. */
 const MODEL_LIFT = 0.012;
 /** decor `facing` -> yaw for a mesh whose front is +z (`makePropModel`). */
@@ -1062,19 +1093,65 @@ export function buildModelProp(lib, type, o = {}) {
   const mesh = makePropModel(lib, type, v, o.lit !== false);
   if (!mesh) return null;
   const b = modelBounds(mesh);
-  const wantW = Math.min(box[0] / BOX_PX, MODEL_MAX_FOOT), wantH = Math.min(box[1] / BOX_PX, MODEL_MAX_H);
-  const foot = Math.max(1e-4, Math.max(b.sx, b.sz));
-  const k = Math.min(wantW / foot, wantH / Math.max(1e-4, b.sy));
+  const span = Math.max(1, o.span | 0);
+  let k;
+  if (span > 1) {
+    // A LONG PIECE IS SIZED BY ITS RUN, NOT BY AN ART BOX. The art box is a texel rectangle drawn
+    // for a billboard standing on one tile; a bookcase lying along two tiles has no such box. So
+    // the model keeps its own proportions and is scaled until its width fills the run, with only
+    // its depth held inside a tile (the wall is behind it) and a ceiling on height.
+    k = Math.min(
+      (span - MODEL_SPAN_GAP) / Math.max(1e-4, b.sx),
+      MODEL_MAX_FOOT / Math.max(1e-4, b.sz),
+      MODEL_SPAN_MAX_H / Math.max(1e-4, b.sy),
+    );
+  } else {
+    const maxFoot = MODEL_FOOT_ALLOWANCE[type] || MODEL_MAX_FOOT;
+    const wantW = Math.min(box[0] / BOX_PX, maxFoot), wantH = Math.min(box[1] / BOX_PX, MODEL_MAX_H);
+    const foot = Math.max(1e-4, Math.max(b.sx, b.sz));
+    k = Math.min(wantW / foot, wantH / Math.max(1e-4, b.sy));
+  }
   mesh.scale.setScalar(k);
   // recentre on the tile and stand it on the floor, whatever origin the exporter left behind
   mesh.position.set(-b.cx * k, -b.cy * k + MODEL_LIFT, -b.cz * k);
-  const g = new THREE.Group();
-  g.add(mesh);
+  const inner = new THREE.Group();
+  // THE LEAN (box[2], degrees). This camera is 17 degrees off VERTICAL, so a model with a flat
+  // vertical front — a bookcase, a cupboard, anything with a face — presents its lid to the player
+  // and nothing else: measured in 'room-scriptorium', the imported bookcase came back as a dark
+  // slab with no shelf, no book and no depth in it. The painted pieces never had the problem
+  // because they cheat: `topFace` + `frontFace` draw both planes into one billboard. A mesh cannot
+  // cheat, so it is tipped back on its base instead until its face turns up into the camera —
+  // the same trick a HeroQuest cardboard standee plays, and the same one Octopath plays with its
+  // shopfronts. Pieces that already read from above (barrels, braziers, urns) leave it at 0.
+  const lean = (box[2] || 0) * Math.PI / 180;
+  if (lean) {
+    mesh.rotation.x = -lean;
+    // Tipping about the base swings the top backwards; pull it forward by half the overhang so the
+    // piece still sits on its own tile rather than climbing into the wall behind it.
+    mesh.position.z += Math.sin(lean) * b.sy * k * 0.5;
+  }
+  inner.add(mesh);
   // The shadow is the piece's OWN footprint, never a floor value: a minimum of a third of a tile
   // put a shadow wider than the object under every small piece, which reads as a hole, not contact.
-  g.add(contactShadow(Math.max(0.12, foot * k * 0.9), { strength: 0.5, spread: 1.15 }));
-  g.rotation.y = MODEL_YAW[o.facing] ?? 0;
-  g.userData.decor = { type, variant: v, facing: o.facing || 's', cls: 'prop', model: true };
-  g.userData.blocking = !!o.blocking && !!(FURNITURE[type] && FURNITURE[type].blk);
+  // A long piece takes the same shadow stretched down its run — a round blot under a two-tile
+  // bookcase reads as a puddle it is standing in.
+  const shadow = contactShadow(Math.max(0.12, b.sz * k * 0.9), { strength: 0.5, spread: 1.15 });
+  if (span > 1) shadow.scale.x = Math.max(1, (b.sx * k) / Math.max(1e-4, b.sz * k));
+  inner.add(shadow);
+  inner.rotation.y = MODEL_YAW[o.facing] ?? 0;
+
+  // `DungeonView.addAt` stands the group on the entry's ANCHOR tile — the first of the run, which
+  // is what the generator and `decorTiles()` both key off. So the model is pushed half a run
+  // along, to sit over the middle of the tiles it actually occupies.
+  const g = new THREE.Group();
+  if (span > 1) {
+    const along = (o.facing === 'e' || o.facing === 'w') ? { dx: 0, dy: 1 } : { dx: 1, dy: 0 };
+    inner.position.set(along.dx * (span - 1) / 2, 0, along.dy * (span - 1) / 2);
+  }
+  g.add(inner);
+  g.userData.decor = { type, variant: v, facing: o.facing || 's', cls: 'prop', model: true, span };
+  // A spanned piece is terrain and always blocks; a single-tile piece still needs both the
+  // generator's say-so and a type that is allowed to block at all (AMBIENCE §4.3).
+  g.userData.blocking = span > 1 || (!!o.blocking && !!(FURNITURE[type] && FURNITURE[type].blk));
   return g;
 }
