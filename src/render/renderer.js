@@ -96,6 +96,18 @@ export class Renderer {
     this.gl.outputColorSpace = THREE.SRGBColorSpace;
     this.gl.info.autoReset = false;
     this.scene = new THREE.Scene();
+    /**
+     * THE SCREEN LAYER. Drawn in `draw()` AFTER the composer, so nothing in here is touched by tone
+     * mapping, bloom, the depth grade or the vignette, and nothing in here foreshortens under the
+     * perspective camera. Combat numbers and the sleep marks live here: a damage number tinted by
+     * whatever depth band it happens to be standing on, and dimmed by the vignette at the frame
+     * edge, is a number the player cannot read. Its contents place themselves in device pixels
+     * (see damageNumbers.js), which is also what keeps one font texel the size of one hero texel.
+     */
+    this.overlay = new THREE.Scene();
+    // The overlay's contents write NDC straight out of their vertex shaders, so this camera is only
+    // here to satisfy WebGLRenderer.render — none of its matrices are read.
+    this.overlayCamera = new THREE.Camera();
     // NOT BLACK. Whatever no mesh covers — past the surround apron, and for a frame during a level
     // change — used to be the void, which is the one thing the board-bright direction rules out.
     // A shade under the unexplored bedrock (lighting.js `bedrock()`) and the apron itself
@@ -110,7 +122,7 @@ export class Renderer {
     this.atmosphere = new Atmosphere(this.scene, this.fog);
     this.dungeon = new DungeonView(this.scene, this.mats, this.props, this.fog);
     this.characters = new CharacterFactory(this.fog);
-    this.effects = new Effects(this.scene, this.fog, bus);
+    this.effects = new Effects(this.scene, this.fog, bus, this.overlay);
     this.cameraRig = new CameraRig(canvas.clientWidth / Math.max(1, canvas.clientHeight));
     this.camera = this.cameraRig.camera;
     /** @type {Map<string, object>} entity id -> character view */
@@ -297,6 +309,8 @@ export class Renderer {
   syncViews(dt) {
     const g = this.game; if (!g) return;
     const level = g.level;
+    const sleepers = this._sleepers || (this._sleepers = []);
+    sleepers.length = 0;
     const ids = new Set();
     for (const e of level.entities) { ids.add(e.id); this.ensureView(e); }
     const invisible = !!g.player.invisible;
@@ -308,6 +322,12 @@ export class Renderer {
       if (v.anim.done) { this.scene.remove(v.root); this.characters.dispose(v); this.views.delete(id); continue; }
       const isPlayer = e.kind === 'player';
       v.root.visible = isPlayer || v.anim.dying || this.monsterShown(e);
+      // A sleeping monster the player can see gets a 'Z' on the screen layer. Collected here rather
+      // than in a pass of its own because this is the loop that already knows both the entity state
+      // and the interpolated position the creature is actually drawn at.
+      if (v.root.visible && !v.anim.dying && e.state === 'asleep') {
+        this._sleepers.push({ id, x: v.pos.x, z: v.pos.z, texH: v.figurePx || 46 });
+      }
       this.characters.update(v, dt, { invisible: isPlayer && invisible });
       if (isPlayer && v.swordAura) v.swordAura.visible = !!e.hasSword;
     }
@@ -336,6 +356,7 @@ export class Renderer {
     const goldViews = this._goldViews; goldViews.length = 0;
     for (const v of this.dungeon.itemViews.values()) { const it = v.userData.item; if (it && it.type === 'gold' && !it.hidden && (this.fog.override === 'all' || g.level.isVisible(it.x, it.y))) goldViews.push(v); }
     this.effects.update(dt, { player: g.player, playerPos: ppos, statuses, hasSword: !!g.player.hasSword, goldViews });
+    this.effects.numbers.syncSleep(this._sleepers || []);
     this.lighting.update(dt, { x: ppos.x, z: ppos.z }, { lightOn: g.lightOn(), sword: !!g.player.hasSword, allLit: this.fog.override === 'all' });
     this.atmosphere.update(dt, { x: ppos.x, z: ppos.z }, this.lighting.activeLights);
     this.dungeon.syncWater(ppos, this.lighting.activeLights);
@@ -366,6 +387,13 @@ export class Renderer {
     if (this.canvas.clientWidth !== this.sizeW || this.canvas.clientHeight !== this.sizeH) this.resize();
     this.gl.info.reset();
     this.composer.render();
+    // the screen layer, on top of the finished frame (see `this.overlay`)
+    if (this.overlay.children.length) {
+      this.gl.autoClear = false;
+      this.gl.clearDepth();
+      this.gl.render(this.overlay, this.overlayCamera);
+      this.gl.autoClear = true;
+    }
   }
 
   /** Convenience: update then draw. */

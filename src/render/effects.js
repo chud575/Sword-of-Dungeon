@@ -137,14 +137,16 @@ export class Effects {
    * @param {import('./lighting.js').FogOfWar} fog
    * @param {import('../core/events.js').EventBus} bus
    */
-  constructor(scene, fog, bus) {
+  constructor(scene, fog, bus, overlay = null) {
     this.scene = scene; this.fog = fog; this.bus = bus;
+    /** the renderer's screen layer (drawn after post-processing), or null in headless callers */
+    this.overlay = overlay;
     attachFog(fog);
     this.rng = createRng('fargoal-effects');
     this.particles = new ParticlePool(fog, { max: 4000, blending: 'add' });
     this.matter = new ParticlePool(fog, { max: 1500, blending: 'matter' });
     scene.add(this.particles.points); scene.add(this.matter.points);
-    this.numbers = new DamageNumbers(scene, this.rng);
+    this.numbers = new DamageNumbers(scene, this.rng, overlay);
     this.flashes = new FlashPool(scene, 14);
     this.rings = new FlatPool(scene, new THREE.RingGeometry(0.82, 1, 56), 8, { renderOrder: 5 });
     this.runes = new FlatPool(scene, new THREE.PlaneGeometry(1, 1), 6, { map: runeCircleTexture(), renderOrder: 4 });

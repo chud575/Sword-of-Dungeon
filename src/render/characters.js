@@ -113,6 +113,8 @@ export class CharacterFactory {
     const armR = new THREE.Object3D(); armR.position.set(0, 0.5, 0); root.add(armR);
     const view = {
       root, nodes: { root, armR }, material: sprite.material, sprite, mesh: sprite.mesh, kind: 'sprite', entity, type,
+      // how tall this sheet actually draws, in texels — what screen-space marks measure from
+      figurePx,
       // ONE size law (sprites/style.js): SCALE[type] is the creature's height relative to the hero.
       // For a SPRITE that law is served by the ART — the sheet is drawn so its figure is SCALE times
       // the hero's 46 rows — because the whole cast shares one texel size per frame (see the header

@@ -127,6 +127,8 @@ const STYLES = {
   magic: { color: '#c6a8ff', top: '#eadfff', big: false },
   banner: { color: '#ffdf8a', top: '#fff7d6', big: true },
   blocked: { color: '#cbd3e0', top: '#f2f6ff', big: false },
+  // the sleep mark: cool and quiet, so it never competes with a damage number for the eye
+  sleep: { color: '#9fc4e8', top: '#e8f4ff', big: false },
 };
 
 const PAD = 2;                        // texels of air around the glyph block (contour + drop shadow)
@@ -140,9 +142,15 @@ const HERO_TEX_W = 22;
 
 const hexRgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 
-/** Screen-space quad: the anchor is projected, snapped to a whole device pixel, then the corners are
- *  laid out in exact device pixels around it. That is what keeps every font texel square and the
- *  same size as a hero texel — a world-sized quad cannot, under a pitched perspective camera. */
+/** Screen-space quad: the anchor arrives already projected to device pixels, is snapped to a whole
+ *  one, and the corners are laid out in exact device pixels around it. That is what keeps every font
+ *  texel square and the same size as a hero texel — a world-sized quad cannot, under a pitched
+ *  perspective camera.
+ *
+ *  THE ANCHOR IS A UNIFORM, NOT A MODEL MATRIX. These quads live in the renderer's `overlay` scene,
+ *  drawn after the composer, so there is no play camera in scope when they render and no view matrix
+ *  worth reading — the CPU projects the world anchor once per frame (`_syncAnchors`) and hands the
+ *  result down. The shader writes NDC directly and never touches `projectionMatrix`. */
 function makeMaterial(tex) {
   return new THREE.ShaderMaterial({
     uniforms: {
@@ -150,22 +158,21 @@ function makeMaterial(tex) {
       uViewport: { value: new THREE.Vector2(1600, 900) },
       uSizePx: { value: new THREE.Vector2(1, 1) },   // the quad, in device pixels
       uOffsetPx: { value: new THREE.Vector2(0, 0) }, // separation nudge, in device pixels
+      uAnchorPx: { value: new THREE.Vector2(0, 0) }, // the world anchor, already projected
       uOpacity: { value: 1 },
     },
     transparent: true, depthTest: false, depthWrite: false,
     vertexShader: `
-      uniform vec2 uViewport, uSizePx, uOffsetPx;
+      uniform vec2 uViewport, uSizePx, uOffsetPx, uAnchorPx;
       varying vec2 vUv;
       void main() {
         vUv = uv;
-        vec4 a = projectionMatrix * modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
-        vec2 aPx = (a.xy / a.w * 0.5 + 0.5) * uViewport;
-        aPx = floor(aPx + 0.5) + floor(uOffsetPx + 0.5);
+        vec2 aPx = floor(uAnchorPx + 0.5) + floor(uOffsetPx + 0.5);
         // corners at WHOLE device pixels. Centring an odd-width quad on the anchor would put both
         // its edges on a half pixel, which is a blurred column down each side of the text.
         vec2 px = aPx - floor(uSizePx * 0.5) + uv * uSizePx;
         vec2 ndc = px / uViewport * 2.0 - 1.0;
-        gl_Position = vec4(ndc * a.w, a.z, a.w);
+        gl_Position = vec4(ndc, 0.0, 1.0);
       }`,
     fragmentShader: `
       uniform sampler2D uMap; uniform float uOpacity;
@@ -179,9 +186,18 @@ function makeMaterial(tex) {
 }
 
 export class DamageNumbers {
-  constructor(scene, rng) {
-    this.scene = scene; this.rng = rng;
+  /**
+   * @param {THREE.Scene} scene the world scene — the camera probe rides in it, nothing else does
+   * @param {*} rng
+   * @param {THREE.Scene} [overlay] the renderer's screen layer, drawn after post-processing; the
+   *   number quads live here. Defaults to `scene`, which is the old in-world behaviour and is what
+   *   the headless tools get when they build a DamageNumbers without a renderer around it.
+   */
+  constructor(scene, rng, overlay = null) {
+    this.scene = scene; this.overlay = overlay || scene; this.rng = rng;
     this.pool = []; this.active = [];
+    /** persistent marks that track a living entity, keyed by entity id (see `syncSleep`) */
+    this.marks = new Map();
     this.time = 0;
     this._cam = null; this._gl = null; this._vpH = 900; this._vpW = 1600;
     this._S = 4;
@@ -234,9 +250,10 @@ export class DamageNumbers {
     s.position.set(x, base, z);
     s.material.uniforms.uOpacity.value = 1;
     s.material.uniforms.uOffsetPx.value.set(0, 0);
-    this.scene.add(s);
+    this.overlay.add(s);
     this.active.push(s);
     this._seed(s);
+    this._syncAnchor(s);
   }
 
   update(dt) {
@@ -247,9 +264,10 @@ export class DamageNumbers {
       const k = Math.min(1, u.t / u.life);
       s.position.y = u.y0 + RISE * u.t;                 // linear rise; the nudge is screen-space only
       s.material.uniforms.uOpacity.value = k < 0.7 ? 1 : Math.max(0, 1 - (k - 0.7) / 0.3);
-      if (k >= 1) { this.scene.remove(s); this.active.splice(i, 1); this.pool.push(s); }
+      if (k >= 1) { this.overlay.remove(s); this.active.splice(i, 1); this.pool.push(s); }
     }
     this._separate(dt);
+    for (const s of this.active) this._syncAnchor(s);
   }
 
   // ------------------------------------------------------------------------- placement
@@ -269,6 +287,22 @@ export class DamageNumbers {
     const S = Math.max(1, this._S);
     const hh = (h.texH * S) / 2, hw = (h.texW * S) / 2;
     return { cx: foot.x, cy: foot.y + hh, hw, hh };
+  }
+
+  /**
+   * Project one number's world anchor to device pixels and hand it to the shader.
+   *
+   * On the CPU, once per frame per number, because the quads no longer render under the play camera.
+   * An anchor BEHIND a perspective camera projects to a mirrored point in front of it, so a number
+   * spawned on a monster the camera has since passed would otherwise appear on the wrong side of
+   * the screen; those are hidden instead.
+   */
+  _syncAnchor(s) {
+    if (!this._cam) { s.visible = false; return; }
+    const v = this._v.set(s.position.x, s.position.y, s.position.z).project(this._cam);
+    if (!Number.isFinite(v.x) || !Number.isFinite(v.y) || v.z > 1) { s.visible = false; return; }
+    s.visible = true;
+    s.material.uniforms.uAnchorPx.value.set((v.x * 0.5 + 0.5) * this._vpW, (v.y * 0.5 + 0.5) * this._vpH);
   }
 
   /** World point -> device pixels (origin bottom-left, the space the quad shader works in). */
@@ -386,6 +420,57 @@ export class DamageNumbers {
   }
 
   // ------------------------------------------------------------------------------ internals
+  /**
+   * Reconcile the sleep marks against the monsters that are asleep right now.
+   *
+   * A mark is not a damage number and is not pooled like one: it persists for exactly as long as its
+   * creature sleeps, so the marks are keyed by entity id and reconciled each frame. It rides this
+   * layer for the same reason the numbers do — a 'Z' dimmed by the depth grade and shrunk by
+   * distance is as unreadable as a damage number that is, and 45% of the monsters on a level start
+   * asleep (game/monsterAi.js), so this is the only thing telling the player which fights are
+   * optional.
+   *
+   * ANCHORED AT THE FEET, OFFSET IN PIXELS. Same lesson as `_heroRect`: a sprite is a screen-space
+   * quad pinned to its feet and `texels * S` device pixels tall, so projecting a world point at head
+   * height and calling that the top of the creature is wrong by the cosine of the camera pitch.
+   *
+   * @param {{id:string|number, x:number, z:number, texH:number}[]} sleepers feet, in world units
+   */
+  syncSleep(sleepers) {
+    const seen = this._seenIds || (this._seenIds = new Set());
+    seen.clear();
+    for (const sl of sleepers) {
+      seen.add(sl.id);
+      let m = this.marks.get(sl.id);
+      if (!m) {
+        m = this.pool.pop() || this._make();
+        const mask = textMask('Z');
+        this._paint(m, mask, STYLES.sleep);
+        const u = m.userData;
+        u.big = false; u.texW = mask.w + PAD * 2; u.texH = GH + PAD * 2;
+        u.t = 0; u.life = Infinity; u.overHero = false;
+        m.material.uniforms.uOpacity.value = 0.92;
+        this.overlay.add(m);
+        this.marks.set(sl.id, m);
+      }
+      const u = m.userData;
+      m.position.set(sl.x, 0.02, sl.z);
+      const S = this._texelPx(false);
+      // the creature's own height, then a texel of air, then a slow breath so it reads as dormant
+      // rather than as a frozen icon; whole device pixels only, or the glyph crawls between them.
+      const bob = Math.round(Math.sin(this.time * 1.6 + (u.phase || 0)) * 1.5) * S;
+      u.dx = 0;
+      u.dy = Math.round(sl.texH * S + u.texH * S * 0.5 + 2 * S) + bob;
+      this._syncAnchor(m);
+    }
+    for (const [id, m] of this.marks) {
+      if (seen.has(id)) continue;
+      this.overlay.remove(m);
+      this.marks.delete(id);
+      this.pool.push(m);
+    }
+  }
+
   _make() {
     const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
     const tex = new THREE.CanvasTexture(canvas);
@@ -394,6 +479,7 @@ export class DamageNumbers {
     const s = new THREE.Mesh(_quad(), makeMaterial(tex));
     s.userData.canvas = canvas; s.userData.tex = tex;
     s.renderOrder = 20; s.frustumCulled = false;
+    s.userData.phase = this.rng ? this.rng.float(0, 6.283) : 0;
     s.onBeforeRender = (renderer, scene, camera) => this._sync(s, renderer, camera);
     return s;
   }
@@ -466,9 +552,15 @@ export class DamageNumbers {
     if (camera && (camera.isPerspectiveCamera || camera.isOrthographicCamera)) this._S = frameTexelSize(renderer, camera, PX_PER_TILE);
   }
 
-  /** Per-frame, per-number: hand the shader the viewport, the quad's exact pixel size and its nudge. */
+  /**
+   * Per-frame, per-number: hand the shader the viewport, the quad's exact pixel size and its nudge.
+   *
+   * It deliberately does NOT read the camera it is handed. These quads render in the overlay scene
+   * under a dummy camera; the play camera comes from the probe, which still rides in the world
+   * scene. Taking the camera from here would replace it with the dummy and every projection —
+   * the hero's keep-off box, the anti-overlap search — would silently go wrong.
+   */
   _sync(s, renderer, camera) {
-    this._readCamera(renderer, camera);
     const u = s.userData, uni = s.material.uniforms;
     const S = this._texelPx(u.big);
     uni.uViewport.value.set(this._vpW, this._vpH);
