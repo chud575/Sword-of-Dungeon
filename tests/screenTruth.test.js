@@ -92,6 +92,8 @@ const DARK_SEPARATION_MIN = 0.05;
 const OCCLUSION_MAX = 0.5, COVERAGE_MIN = 0.5;
 /** How much of the bottom sixth of a figure must be on screen before its shadow can be judged. */
 const FEET_VISIBLE_MIN = 0.35;
+// See contactShadow: the floor drawn in front of a billboard occludes its foot band structurally.
+const FEET_OCCLUDED_MAX = 0.75;
 /** A body needs this many visible texels before a fraction of it means anything. */
 const MIN_BODY_TEXELS = 200;
 /**
@@ -163,9 +165,20 @@ const GATES = {
       + `(min ${DARK_SEPARATION_MIN}, ${seen}) — the figure and the floor are the same colour`];
   }),
 
-  /** Every lit figure whose feet the room does not cover must be standing ON something. */
+  /**
+   * Every lit figure whose feet the room does not cover must be standing ON something.
+   *
+   * FEET_OCCLUDED_MAX is 0.75, not 0.5, and the difference is the whole gate. Under the tilted
+   * camera the floor tile IN FRONT of a billboard is drawn over the bottom of it — that is the
+   * diorama working, not a prop hiding the figure — and it alone puts the hero of the `default`
+   * scenario at 0.508 in an untouched frame. At a 0.5 cut the only character in that scenario was
+   * filtered out, so the gate had no subjects at all and could not fail: `SABOTAGE no-shadows`
+   * deleted every contact blob (contact.px 2602 -> 0) and the gate still reported clean. Exempting
+   * a figure the room genuinely hides is the point of the cut; 0.75 clears the structural baseline
+   * and still exempts one that is mostly behind a wall.
+   */
   contactShadow: (r) => r.characters
-    .filter((c) => lit(c) && c.feetOccluded < 0.5 && c.feetCoverage >= FEET_VISIBLE_MIN
+    .filter((c) => lit(c) && c.feetOccluded < FEET_OCCLUDED_MAX && c.feetCoverage >= FEET_VISIBLE_MIN
       && (c.contact.px < CONTACT_MIN_PX || c.contact.peak < CONTACT_MIN_PEAK))
     .map((c) => `${who(r, c)}: contact shadow is ${c.contact.px} px, peak ${c.contact.peak.toFixed(3)}, core ${c.contact.core} px `
       + `(needs ${CONTACT_MIN_PX} px and a peak of ${CONTACT_MIN_PEAK}) — the figure is pasted on the floor, not standing on it`),

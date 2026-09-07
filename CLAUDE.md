@@ -90,17 +90,23 @@ transform between them is wrong, in four measured ways:
 
 ### Known-failing tests — the baseline
 
-`npm test` is **76/78**. Both failures are the same regression, not flaky tests:
+`npm test` is **77/78**. The one failure is real, and it is an ART fact rather than a lighting bug:
 
 - `no body is lit down its own middle` — 29 cast entries over the 15% pillow-shading ceiling
   (ogre 30%, hobgoblin 26%, dwarven-guard 26%).
-- `SABOTAGE no-shadows` — deleting the contact shadows produces **0** gate failures, same as the
-  untouched frame. The contact-shadow gate no longer detects its own sabotage.
 
-Both trace to the black `lift` in the depth grades (`render/lighting.js`), raised to 0.011–0.014 to
-pull the mage's dark robe off the 0.12 "reads as a hole in the floor" floor. Lift adds a constant to
-every channel, so it flattens shading and sinks contact shadows below the gate's threshold. The
-correct repair is to lower lift and raise the *cast's own* ambient/key instead.
+**Do not try to fix this with the lighting.** It was measured. Swinging the sprite gains hard —
+`uAmbientGain` 0.82 → 0.30 and `uDirectGain` 0.88 → 1.40, far past anything shippable — moves the
+three worst offenders by nothing at all (ogre 0.294 → 0.296, hobgoblin 0.269 → 0.286, dwarven-guard
+0.263 → 0.263). Their centre-lit bodies with shadowed edges are painted INTO the imported bitmaps.
+The gate was written for the hand-painted procedural sprites; the whole cast now comes off the
+imported sheet (`sprites/castMap.js`), which is why the list went from 1 entry to 29 in a single
+commit. Only repainting the source art, or rescoping the gate, can close it.
+
+Nor is the black `lift` in the depth grades to blame, which was the standing theory. Lowering it to
+its pre-import values (0.008–0.009) makes pillow slightly WORSE (29 → 32 entries) AND drops the
+mage's robe to litMedian 0.117 against the 0.12 "reads as a hole in the floor" floor. Lift is doing
+its job; leave it where it is.
 
 **The largest untested area is the game itself.** No one has yet played a full run from level 1 down
 to the Sword and back out. The art has been reviewed exhaustively; the loop has not been played end
