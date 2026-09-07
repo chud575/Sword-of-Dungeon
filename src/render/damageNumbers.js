@@ -34,6 +34,7 @@
 import * as THREE from 'three';
 import { INK, HERO_FIGURE_PX } from './sprites/style.js';
 import { PX_PER_TILE, frameTexelSize } from './sprites/spriteBillboard.js';
+import { hashString } from '../core/rng.js';
 
 // ------------------------------------------------------------------------------------- the font
 const GW = 5, GH = 7;                 // glyph cell, in texels
@@ -449,6 +450,12 @@ export class DamageNumbers {
         const u = m.userData;
         u.big = false; u.texW = mask.w + PAD * 2; u.texH = GH + PAD * 2;
         u.t = 0; u.life = Infinity; u.overHero = false;
+        // The breath phase is HASHED FROM THE ENTITY ID, never drawn from `this.rng`. Taking it
+        // from the shared stream would have advanced it once per sleeping monster per level, which
+        // shifts every effects draw downstream and changes the frame for a given seed — the first
+        // version of this did exactly that, and two shots of one scenario came back as different
+        // rooms. Same rule as core/rng.js: fork or derive, never borrow.
+        u.phase = (hashString(String(sl.id)) % 6283) / 1000;
         m.material.uniforms.uOpacity.value = 0.92;
         this.overlay.add(m);
         this.marks.set(sl.id, m);
@@ -479,7 +486,6 @@ export class DamageNumbers {
     const s = new THREE.Mesh(_quad(), makeMaterial(tex));
     s.userData.canvas = canvas; s.userData.tex = tex;
     s.renderOrder = 20; s.frustumCulled = false;
-    s.userData.phase = this.rng ? this.rng.float(0, 6.283) : 0;
     s.onBeforeRender = (renderer, scene, camera) => this._sync(s, renderer, camera);
     return s;
   }
