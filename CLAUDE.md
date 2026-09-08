@@ -38,10 +38,17 @@ These are not style preferences. Each one has already cost a rebuild.
    a sheet-level lint. Gate on `tools/audit.mjs`, which reads the real canvas back.
 5. **Verify at the play camera.** A frame shot from a bestiary or preview camera does not tell you
    what the player sees. The atlas can be right and the frame still wrong — that is the current bug.
-6. **Never leave the game broken.** `npm run smoke` passes before you finish, and `npm test` is no
+6. **The headless tools cannot see everything, and a green board is not a played game.** They drive
+   a headless Chromium; the browser you play in has hardware GL and a multisampled composer target.
+   A `pow()` of a negative base in `render/effects.js` blacked the WHOLE frame for 2-4 seconds at
+   level-up, at a sacrifice, on finding the Sword, on death and on victory — and `npm test`,
+   `npm run smoke` and every audit gate stayed green throughout, because none of them renders under
+   MSAA on real hardware and none of them asks "is the frame black?". Open the game after a render
+   change. See the header of `beamMaterial` for the mechanism.
+7. **Never leave the game broken.** `npm run smoke` passes before you finish, and `npm test` is no
    worse than the baseline below — which is **not** currently zero. Check the baseline before you go
    looking for something you broke.
-7. **`asleep` is a monster state, and its pace is not 0.** The AI runs
+8. **`asleep` is a monster state, and its pace is not 0.** The AI runs
    `wander / lurk / search / hunt / flee / asleep / dead`; 45% of monsters start a level asleep
    (`AI.sleepChance`, `game/monsterAi.js`). Its pace is `0.6`, not `0`, because the pace gate decides
    whether `monsterAct` runs at all — at `0` a sleeper would never be asked whether anything woke it.

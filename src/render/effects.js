@@ -16,6 +16,25 @@ const easeOut = (k) => 1 - (1 - k) * (1 - k);
 const easeOutBack = (k) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
 
 /** Soft-edged vertical light beam: fades with height and toward the silhouette. */
+/**
+ * The beam behind `pillar()` and `beam()`.
+ *
+ * EVERY `pow()` BASE IN HERE IS CLAMPED, AND THAT IS NOT DEFENSIVE STYLE — it is the fix for a bug
+ * that blacked the ENTIRE frame for as long as a beam was alive, which meant 2-4 seconds of black
+ * at level-up, at a temple sacrifice, on finding the Sword, on death and on victory.
+ *
+ * Under MSAA a varying is interpolated at SAMPLE positions, and those can lie fractionally outside
+ * the triangle, so `vUv.y` arrives a hair above 1.0 and `pow(1.0 - vUv.y, 1.3)` is a `pow` of a
+ * NEGATIVE base: NaN. The NaN lands in the fragment's alpha, blends additively into the HDR target,
+ * and the bloom pass then averages it down through its mip chain and back up, so a single poisoned
+ * fragment becomes a full-screen NaN and every pixel resolves to black.
+ *
+ * It only reproduces with `samples: 4` on the composer target (renderer.js) and only on hardware GL
+ * — the headless Chromium the screenshot tools drive does not hit it, which is why every gate and
+ * `npm run smoke` stayed green while the game was unplayable at exactly its five biggest moments.
+ * Measured both ways: MSAA on + this shader = black, MSAA off + this shader = correct, MSAA on +
+ * a constant-colour fragment = correct, MSAA on + this shader with the clamp = correct.
+ */
 function beamMaterial(color) {
   return new THREE.ShaderMaterial({
     uniforms: { uColor: { value: new THREE.Color(color) }, uOpacity: { value: 0.9 }, uTime: { value: 0 } },
@@ -23,7 +42,7 @@ function beamMaterial(color) {
     vertexShader: `varying vec2 vUv; varying vec3 vN; varying vec3 vV;
       void main() { vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
     fragmentShader: `uniform vec3 uColor; uniform float uOpacity; uniform float uTime; varying vec2 vUv; varying vec3 vN; varying vec3 vV;
-      void main() { float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.6); float h = pow(1.0 - vUv.y, 1.3); float streak = 0.75 + 0.25 * sin(vUv.x * 40.0 + uTime * 6.0 - vUv.y * 12.0);
+      void main() { float f = pow(abs(dot(normalize(vN), normalize(vV))), 1.6); float h = pow(max(0.0, 1.0 - vUv.y), 1.3); float streak = 0.75 + 0.25 * sin(vUv.x * 40.0 + uTime * 6.0 - vUv.y * 12.0);
         gl_FragColor = vec4(uColor * 1.6, f * h * streak * uOpacity); }`,
   });
 }
@@ -37,7 +56,7 @@ function bubbleMaterial() {
       void main() { vL = position; vec4 w = modelMatrix * vec4(position, 1.0); vN = normalize(mat3(modelMatrix) * normal); vV = normalize(cameraPosition - w.xyz); gl_Position = projectionMatrix * viewMatrix * w; }`,
     fragmentShader: `uniform vec3 uColor; uniform float uTime; uniform float uHit; uniform float uFade; varying vec3 vN; varying vec3 vV; varying vec3 vL;
       void main() {
-        float fres = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.4);
+        float fres = pow(max(0.0, 1.0 - abs(dot(normalize(vN), normalize(vV)))), 2.4);
         float l1 = smoothstep(0.93, 1.0, abs(sin((vL.x + vL.z) * 14.0 + vL.y * 6.0 + uTime * 0.8)));
         float l2 = smoothstep(0.93, 1.0, abs(sin((vL.x - vL.z) * 14.0 - vL.y * 6.0 - uTime * 0.6)));
         float lat = max(l1, l2) * (0.25 + fres * 0.5);

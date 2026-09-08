@@ -990,7 +990,7 @@ export function createWaterMaterial(fog) {
         float caustic = smoothstep(0.28, 0.85, c1 * c2 * 1.5) * (1.0 - depthK * 0.5);
         col += (uBandTint * 0.35 + litN * 0.5) * caustic * L * 0.5;
         // ---- a ceiling, not a sky: the fresnel reflects the room's own dark and its lamps ----
-        float fres = pow(1.0 - max(0.0, dot(n, V)), 3.0);
+        float fres = pow(max(0.0, 1.0 - max(0.0, dot(n, V))), 3.0);
         col = mix(col, uBandDeep * 1.6 + litN * 0.14, fres * 0.3);
         // ---- foam where the water meets the kerb ----
         float foam = smoothstep(0.26, 0.0, vShore) * (0.6 + 0.4 * sin(uTime * 1.7 + wv.x * 2.5));
