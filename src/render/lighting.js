@@ -293,6 +293,71 @@ export function moodFlicker(kind, t, phase) {
  * The split-tone `shadows`/`highlights` below do the rest, and are where to reach first if a band
  * needs pulling back.
  */
+/**
+ * How much of a band's authored chroma reaches the LIGHTS. 1 = the colour as written (what
+ * shipped); 0 = a neutral light of the same brightness.
+ *
+ * THE BUG THIS NUMBER FIXES. `depthTint`'s band colours were being used directly as the hemisphere
+ * and key-light colours, and a light's colour is a MULTIPLIER on albedo. The shallow band's
+ * ambient is 0xa08a68 — red 160, blue 104 — so every surface underground was multiplied by a
+ * red:blue of 1.54 before anything else happened, and the post grade's saturation (1.24-1.34) then
+ * amplified what was left. Measured with tools/cast.mjs at depth 4: `paleSpeck`, a NEUTRAL cream
+ * authored at rgb(217,214,205), reached the screen at rgb(226,175,49) — its blue channel cut to a
+ * quarter. That is not a room reading as its own field, it is a room reading as the band.
+ *
+ * WHY LEAN THE LIGHT AT ALL, THEN. Because depth is still told by hue and always was — the band
+ * table's whole design is "cold blue at 6-12, green at 13-18, violet below; the band is told by
+ * hue, not by dark". Dropping the light to neutral would take that away. So the light keeps the
+ * band's DIRECTION and loses most of its magnitude, and the rest of the depth signal stays where
+ * it already lives and where it costs the fields nothing: the fog tint, the atmospherics, the
+ * split-tone grade and the vignette.
+ *
+ * WHY IT DOES NOT CHANGE EXPOSURE. `bandLean` mixes toward the colour's OWN luminance, not toward
+ * white, so a lit surface keeps the brightness it had and only loses the cast. The frame being too
+ * dark is a separate complaint with its own numbers (tools/lumen.mjs) and its own fix; this one is
+ * about colour, and it is deliberately not smuggling an exposure change in with it.
+ */
+export const BAND_CHROMA = 0.38;
+
+/**
+ * A band colour reduced to a lean: same luminance, `keep` of the original chroma.
+ * @param {THREE.Color} color @param {number} [keep] @returns {THREE.Color} a new colour
+ */
+export function bandLean(color, keep = BAND_CHROMA) {
+  const l = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
+  return new THREE.Color(l + (color.r - l) * keep, l + (color.g - l) * keep, l + (color.b - l) * keep);
+}
+
+/**
+ * The same idea for the grade's SPLIT TONE, which needs a different cut.
+ *
+ * `bandLean` applied to `shadows` and `highlights` separately measured WORSE in the shallow bands,
+ * and the reason is instructive: at depth 1-5 the shadows are cool (0xa8b0cc) against warm
+ * highlights (0xffefd6), so the shadow end was actively COUNTERACTING the torch warmth. Leaning it
+ * toward neutral deleted a correction and the frame went further gold — dHue on the corridor rose
+ * from 15.9 to 27.4. In the deep bands the opposite holds: both ends are violet, so the "split"
+ * tone is not splitting anything, it is a global violet multiply, and that is the wash.
+ *
+ * So the thing to lean is not either end, it is what they have IN COMMON. This keeps the whole
+ * difference between the two ends — all the shaping a split tone is for — and pulls only the
+ * shared cast toward neutral. At `keep` = 1 it is the identity.
+ *
+ * @param {THREE.Color} shadows @param {THREE.Color} highlights @param {number} [keep]
+ * @returns {{shadows:THREE.Color, highlights:THREE.Color}} new colours, each at its own luminance
+ */
+export function splitToneLean(shadows, highlights, keep = BAND_CHROMA) {
+  const luma = (c) => Math.max(1e-4, 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b);
+  const dir = (c) => { const l = luma(c); return [c.r / l, c.g / l, c.b / l]; };
+  const ns = dir(shadows), nh = dir(highlights);
+  const common = [0, 1, 2].map((i) => (ns[i] + nh[i]) / 2);
+  const rebuild = (c, n) => {
+    const l = luma(c);
+    const k = [0, 1, 2].map((i) => 1 + (common[i] - 1) * keep + (n[i] - common[i]));
+    return new THREE.Color(Math.max(0, l * k[0]), Math.max(0, l * k[1]), Math.max(0, l * k[2]));
+  };
+  return { shadows: rebuild(shadows, ns), highlights: rebuild(highlights, nh) };
+}
+
 export function depthTint(depth) {
   const c = (h) => new THREE.Color(h);
   if (depth <= 0) return {
@@ -426,10 +491,12 @@ export class Lighting {
     const spots = [];
     const tint = depthTint(level.depth);
     this.depth = level.depth;
-    this.hemi.color.copy(tint.sky); this.hemi.groundColor.copy(tint.ground);
-    this.moon.color.copy(tint.ambient);
+    // THE BAND ARRIVES AS A LEAN, NOT A WASH (see bandLean): same brightness, most of the cast
+    // gone, so a room's floor still states its own colour and the depth still has a hue.
+    this.hemi.color.copy(bandLean(tint.sky)); this.hemi.groundColor.copy(bandLean(tint.ground));
+    this.moon.color.copy(bandLean(tint.ambient));
     // the band's own key colour, kept so a room's mood can tint it without losing it
-    this.moonBase = tint.ambient.clone();
+    this.moonBase = bandLean(tint.ambient);
     this.fog.uniforms.fogTint.value.copy(tint.fogTint);
     // The room's own light, before any torch is lit. Board-bright: this is the "room light" the
     // printed reference sits under, so it has to be enough on its own — the torches are relief on

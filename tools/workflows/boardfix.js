@@ -14,7 +14,7 @@ const COMMON = `
 Repo: ${ROOT} (Vite + Three.js 0.170; headless Chromium WebGL2 via tools/*.mjs).
 Screenshot: cd ${ROOT} && node tools/shot.mjs --scenario <name> --out shots/<name>.png — then Read the PNG. Crop with a small Playwright script at 6-12x to judge pixels.
 Measure: node tools/lumen.mjs prints mean game-area luminance and the histogram. node tools/audit.mjs --scenario <name> reads real rendered pixels back. node tools/tilepreview.mjs renders the authored atlas.
-Tests: node --test tests/ (78 passing)   Smoke: npm run smoke
+Tests: node --test tests/ (88 tests, 87 passing - see CLAUDE.md for the one known failure)   Smoke: npm run smoke
 HARD RULES: no external assets or network at runtime; no Math.random (use core/rng.js); the camera is ORTHOGRAPHIC, a near-plan view tilted ~17 degrees; ONE PIXEL GRID at TEXELS_PER_TILE (32); never leave the game broken.
 THE STANDING LESSON: authored values lie. Verify by sampling pixels out of a rendered frame at the PLAY camera.
 Concurrency: own only your listed files; targeted Edits elsewhere. If git reports index.lock, wait 5s and retry. Never git add -A; never rebase or force-push.

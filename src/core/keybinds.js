@@ -41,6 +41,8 @@ export const ACTIONS = [
   { id: 'save', group: 'Interface', name: 'Save now', keys: ['F5'], emit: { action: 'save' } },
   { id: 'zoom-out', group: 'Interface', name: 'Zoom out', keys: ['['], emit: { action: 'zoom', delta: -1 } },
   { id: 'zoom-in', group: 'Interface', name: 'Zoom in', keys: [']'], emit: { action: 'zoom', delta: 1 } },
+  { id: 'tileset-next', group: 'Interface', name: 'Next floor tile set', keys: ['p'], emit: { action: 'tileSkin', delta: 1 } },
+  { id: 'tileset-prev', group: 'Interface', name: 'Previous floor tile set', keys: ['Shift+p'], emit: { action: 'tileSkin', delta: -1 } },
 ];
 const BY_ID = new Map(ACTIONS.map((a) => [a.id, a]));
 /** Keys that can never be rebound away (the game must stay escapable). */

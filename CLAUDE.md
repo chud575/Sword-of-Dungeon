@@ -62,6 +62,7 @@ Every one of these boots a headless Chromium and renders real frames.
 | `node tools/shot.mjs --scenario default --out shots/x.png` | one frame from a named scenario |
 | `node tools/audit.mjs --scenario default` | `litMedian`, `edgeAlign`, `runTexels`, contact shadow, off real pixels |
 | `node tools/lumen.mjs` | mean scene luminance and histogram — the board-bright meter |
+| `node tools/cast.mjs --depths 4,20` | how much of a floor field's OWN colour survives to the screen — the band-wash meter |
 | `node tools/tilepreview.mjs shots/tiles.png` | every floor style as a labelled field |
 | `node tools/decordump.mjs --seed 7 --depth 8` | furniture placement as ASCII |
 | `node tools/mapdump.mjs --seed 42 --depth 5` | level layout + stats as ASCII |
@@ -88,16 +89,43 @@ transform between them is wrong, in four measured ways:
 - ACES tone mapping at 0.92 exposure (`render/renderer.js`) delivers a cream corridor authored at
   luminance 0.82 to the screen at 0.29. Scene mean is 0.16; a board under room light is 0.5–0.6.
 - Corridor 0.29 vs wall top 0.50 — inverted. The floor should be the light anchor.
-- `depthTint` (`render/lighting.js`) applies band colour as a hue multiplier on albedo, so room
-  fields vanish below depth 13: at depth 20 a tan-brick room is rgb(105,64,99) and the corridor
-  beside it rgb(102,63,101).
+- ~~`depthTint` applies band colour as a hue multiplier on albedo, so room fields vanish below
+  depth 13.~~ **LARGELY FIXED** — see below. Measure it with `tools/cast.mjs` before believing
+  anything about floor colour.
 - Pixels per texel is 2.008 horizontal, ~1.92 vertical after the tilt, so grout flickers 2–3px wide.
 
 `tools/workflows/boardfix.js` targets all four with numeric gates.
 
+### The band wash, and the three places it came from
+
+The band colour was reaching the FIELDS through three separate multiplies, and each needed its own
+cut. `tools/cast.mjs` measures what survives; `dHue` on the corridor (the largest continuous field,
+so the least noisy row) roughly halved at both ends of the dungeon — 32.2 → 16.9 at depth 4 and
+46.7 → 24.6 at depth 20.
+
+1. **The band lights.** `depthTint`'s colours were used directly as the hemisphere and key light,
+   and a light colour is a multiply on albedo — the shallow band's 0xa08a68 is a red:blue of 1.54
+   applied to every surface underground. `bandLean()` (`render/lighting.js`) keeps the band's hue
+   DIRECTION and drops most of its magnitude, mixing toward the colour's own luminance so exposure
+   does not move.
+2. **The saturation boost clipped channels.** `mix(vec3(lum), col, uSat)` with `uSat` at 1.24–1.34
+   EXTRAPOLATES away from grey, driving any channel already under the luminance negative, and the
+   `max(col, 0.0)` below clipped it — a hue shift wearing saturation's clothes, and the same
+   mistake the flash blend in that shader already carries a comment about. The boost is now limited
+   per pixel to the largest one that leaves every channel non-negative.
+3. **The split tone was not splitting.** `col *= st / luma(st)` is a chroma multiply, and in the
+   deep bands BOTH ends of the split are the same violet, so it is a global tint. Leaning each end
+   separately made the shallow bands worse — down there the cool shadows are deliberately
+   counteracting the torch warmth — so `splitToneLean()` neutralises only what the two ends SHARE
+   and keeps the whole difference between them.
+
+**Deep levels are still violet, and that is the design** ("the band is told by hue, not by dark").
+The bug was fields being indistinguishable, not the band having a colour: field spread at depth 20
+is now 97/255 against boardfix's gate of 30.
+
 ### Known-failing tests — the baseline
 
-`npm test` is **77/78**. The one failure is real, and it is an ART fact rather than a lighting bug:
+`npm test` is **87/88**. The one failure is real, and it is an ART fact rather than a lighting bug:
 
 - `no body is lit down its own middle` — 29 cast entries over the 15% pillow-shading ceiling
   (ogre 30%, hobgoblin 26%, dwarven-guard 26%).

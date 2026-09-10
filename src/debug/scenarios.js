@@ -372,6 +372,9 @@ function playRoom(ctx, archetype, { seeds = [42, 7, 101, 3, 19, 77], depths = [2
   return null;
 }
 
+/** The one level the imported tile-sheet skins are compared on. Pinned so every capture is the same map. */
+export const TILESHEET_SEED = 42, TILESHEET_DEPTH = 4;
+
 export const scenarios = {
   /** Depth 1 start, player on the up-stairs with the first room revealed. */
   async 'default'(ctx) {
@@ -1582,6 +1585,25 @@ export const scenarios = {
     ctx.renderer.fog.override = 'all';
     ctx.renderer.rebuildLevel();
     ctx.step(3000);
+  },
+
+  /**
+   * THE IMPORTED TILE SHEET, on one fixed Fargoal level.
+   *
+   * Pinned seed AND pinned depth, because the whole use of this scenario is to shoot the SAME level
+   * under different skins and compare — `dungeon-overview` picks its depth by showcase quality,
+   * which would hand you a different map every run. Set the skin with the shot tool's --eval
+   * (`__game.debug.setTileSkin('keep')`) AFTER the scenario: the atlas repaints in place, so the
+   * level, the dressing, the monsters and the framing are identical across every capture and the
+   * only thing that changed is the picture inside the cells.
+   */
+  async 'tilesheet-level'(ctx) {
+    const g = ctx.reset(TILESHEET_SEED);
+    g.goToDepth(TILESHEET_DEPTH);
+    g.revealAll();
+    ctx.renderer.fog.override = 'all';
+    fitOverview(ctx, 62);
+    ctx.step(500);
   },
 };
 

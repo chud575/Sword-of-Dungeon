@@ -54,6 +54,37 @@ export const TILE_STYLES = {
   wallTop:    { name: 'Wall top',     pattern: 'wallBlock',   base: 0xe0d9c9, alt: 0xc2bbab, grout: 0x33302a, edge: 0xf5eedd, wear: 0.4 },
 };
 
+/**
+ * HOW MANY QUARTER TURNS A FIELD SURVIVES — a fact about the PATTERN, not a change to any of them.
+ *
+ * Turning a tile is the cheapest way to stop a room reading as one cell stamped across a grid, but
+ * it is only free when the pattern has the symmetry for it. `dungeon.js` used to settle this with a
+ * blanket rule ("a field must not be turned; only corridor cobble and rubble keep their random
+ * turn") and the reason it gave is right for exactly three of the twelve patterns: a brick course,
+ * a plank run and a bar field have a DIRECTION, and a quarter turn per tile shreds the room into
+ * confetti. The other nine do not — a cracked polygon field, a speckle, a cobble, a square grid, a
+ * checker, a diamond have no course to break — and they were being held still for no reason.
+ *
+ * So the fact is stored per pattern, and every field takes the largest turn it can survive:
+ *   4 — any quarter turn. The pattern is four-fold symmetric or has no direction at all.
+ *   2 — half turns only. A course runs one way; 180 degrees keeps it running that way, 90 does not.
+ *
+ * A skin (render/tileSkins.js) inherits this through the style it is cast onto, which is why a skin
+ * is required to put plank-like art on `plank` and cobble-like art on a cobble field: the rotation
+ * it will be given is decided by the FIELD, not by the picture.
+ */
+export const PATTERN_TURNS = {
+  basketweave: 2, brick: 2, bars: 2,
+  cobble: 4, crackedPoly: 4, speckle: 4, grid: 4, checker: 4, diamond: 4, xcross: 4,
+  bigSlab: 4, wallBlock: 4,
+};
+
+/** Quarter turns a style's field survives (see PATTERN_TURNS). Unknown styles are held still. */
+export function styleTurns(id) {
+  const st = TILE_STYLES[id];
+  return (st && PATTERN_TURNS[st.pattern]) || 1;
+}
+
 /** Room styles only — corridor and wallTop are placed by the map, not chosen per room. */
 export const ROOM_STYLE_IDS = Object.keys(TILE_STYLES).filter((k) => k !== 'corridor' && k !== 'wallTop');
 

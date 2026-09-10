@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS = {
   masterVolume: 0.8, musicVolume: 0.5, sfxVolume: 0.8,
   cameraTilt: 17,          // degrees off straight-down; higher leans the plan view further forward
   flatDecor: true,          // false strips the painted 2D dressing and draws only real geometry
+  tileSkin: '',             // '' = the procedural fields (render/tiles.js); otherwise a render/tileSkins.js id
   minimapSize: 'small',     // 'off' | 'small' | 'large' - M cycles it (ui/minimap.js)
   perspectiveCamera: false, // false = the orthographic plan view (exact pixel grid); true = a real
                             // perspective camera, which gives imported geometry depth to read

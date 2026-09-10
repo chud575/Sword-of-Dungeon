@@ -11,6 +11,7 @@ import { saveGame, loadSave, deleteSave, loadSettings, saveSettings } from './co
 import { Hud } from './ui/hud.js';
 import { PanelCollapse } from './ui/collapse.js';
 import { Surround } from './render/surround.js';
+import { TILE_SKINS, SKIN_IDS } from './render/tileSkins.js';
 import { MessageLog } from './ui/log.js';
 import { InventoryPanel } from './ui/inventory.js';
 import { Minimap } from './ui/minimap.js';
@@ -120,6 +121,7 @@ const app = {
     renderer.cameraRig.setTilt(s.cameraTilt ?? 17);
     renderer.setCameraProjection(s.perspectiveCamera ? 'perspective' : 'orthographic');
     renderer.dungeon.setModelsOnly(s.flatDecor === false);
+    renderer.setTileSkin(s.tileSkin || null);
     audio.setVolumes({ master: s.masterVolume, music: s.musicVolume, sfx: s.sfxVolume });
     if (s.minimapSize && s.minimapSize !== minimap.size) minimap.setSize(s.minimapSize);
     else if (minimap.visible !== (s.minimap !== false)) minimap.toggle(s.minimap !== false);
@@ -136,6 +138,27 @@ const ui = {
   update(dt) { hud.update(dt); log.update(dt); inventory.update(dt); minimap.update(dt); tooltip.update(dt); menus.update(dt); },
 };
 app.applySettings(settings);
+
+/**
+ * Walk the floor tile set on to the next one (or back with `delta < 0`).
+ *
+ * The ring starts at the procedural fields, so the cycle always has a way back to what the game
+ * ships with rather than trapping you in the imported sheets. Nothing rebuilds: `setTileSkin`
+ * repaints the atlas the dungeon materials already hold, so this is safe mid-run and mid-level.
+ */
+function cycleTileSkin(delta) {
+  const ring = ['', ...SKIN_IDS];
+  const at = Math.max(0, ring.indexOf(settings.tileSkin || ''));
+  const next = ring[(at + (delta < 0 ? ring.length - 1 : 1)) % ring.length];
+  settings.tileSkin = next;
+  saveSettings(settings);
+  renderer.setTileSkin(next || null).then((ok) => {
+    if (!ok && next) { settings.tileSkin = ''; saveSettings(settings); game && game.log('That tile set could not be loaded.', 'info'); return; }
+    const name = next ? TILE_SKINS[next].name : 'Procedural fields';
+    if (game) game.log(`Floor tile set: ${name}.`, 'info');
+    hud.showBanner(name, next ? TILE_SKINS[next].blurb : 'the fields the game paints itself', 'info', 1.8);
+  });
+}
 
 // ------------------------------------------------------------------ input wiring
 function stopAuto() { autoPath = null; if (exploring) { exploring = false; bus.emit('ui:explore', { on: false }); } }
@@ -181,6 +204,7 @@ bus.on('input:action', (a) => {
     case 'explore': exploring = !exploring; autoPath = null; bus.emit('ui:explore', { on: exploring }); if (exploring) game.log('Exploring... any monster or treasure stops you.', 'info'); break;
     case 'pause': game.setPaused(!game.paused); break; // the pause menu opens/closes from 'game:paused' (ui/menus.js)
     case 'zoom': renderer.cameraRig.setZoom(renderer.cameraRig.zoom * (a.delta > 0 ? 1.12 : 1 / 1.12)); break;
+    case 'tileSkin': cycleTileSkin(a.delta); break;
     default: bus.emit('ui:action', a); // inventory/minimap/help are handled by the UI layer
   }
 });
@@ -286,6 +310,8 @@ const debug = {
   heal() { game.heal(); },
   kill(entity) { game.kill(entity); },
   setTime(hour) { renderer.setTimeOfDay(hour); },
+  /** Floor tile skin: an id from render/tileSkins.js, or null for the procedural fields. */
+  setTileSkin(id) { return renderer.setTileSkin(id); },
   stats() { return renderer.stats(); },
   showTitle() { showTitlePreview(); menus.showTitle(); },
   newGame, input, ui, app, audio,

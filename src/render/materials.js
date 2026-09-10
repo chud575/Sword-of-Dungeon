@@ -41,6 +41,8 @@ import { frameTexelSize, texelGrid, PX_PER_TILE } from './sprites/spriteBillboar
 // here): nothing in this module's TOP LEVEL may touch a tiles.js binding, so the atlas layout below
 // is a fixed number of rows and the style->cell lookup is built lazily on first use.
 import { TILE_STYLES, VARIANTS, paintTile } from './tiles.js';
+import { blitCell, sheetReady, loadTileSheet } from './tileSheet.js';
+import { skinCells, TILE_SKINS } from './tileSkins.js';
 
 /** Palette used by the renderer (linear-space friendly hex values). */
 export const PALETTE = {
@@ -334,7 +336,18 @@ const MARBLE = ramp('#c9c3b4', 7, { range: 0.3, step: 0.05, hueShift: 0.02, satS
  * sword level's obsidian re-skin is the same relief read out of a violet-black glass ramp.
  * Returns { albedo, normal, rough, obsidian } textures.
  */
-function flagstoneAtlas() {
+/**
+ * THE ACTIVE SKIN, or null for the procedural fields. Module state rather than a parameter because
+ * the atlas is a singleton the materials already hold references into: switching skins REPAINTS
+ * those same textures (see `setTileSkin`) instead of building new ones, so nothing has to rebind.
+ */
+let activeSkin = null;
+
+/**
+ * Paint the atlas's four channel arrays. Split out of `flagstoneAtlas` so a skin change can
+ * recompute them and write the result into the textures that already exist.
+ */
+function paintAtlasArrays() {
   const S = ATLAS.cell, W = S * ATLAS.cols, H = S * ATLAS.rows, N_CELLS = ATLAS.cols * ATLAS.rows;
   const r = rng.fork('atlas');
   const hgt = new Float32Array(W * H);
@@ -355,7 +368,20 @@ function flagstoneAtlas() {
       // A FIELD, not a slab: the whole cell is one style, painted by the approved vocabulary.
       // Spare cells past the last style repeat the corridor cobble so nothing samples black.
       const o = owner[idx] || { id: 'corridor', v: idx % VARIANTS, s: 0 };
-      paintTile({ alb, hgt, W, x0: cx0, y0: cy0, S, style: TILE_STYLES[o.id], seed: o.s * 101 + o.v * 7 + 1 });
+      // A SKIN REPLACES THE PAINT, NOT THE LAYOUT: the cell still belongs to the same field, so
+      // every room, corridor and wall cap keeps the identity dungeon.js picked for it and only the
+      // picture changes. A skin that cannot serve this field falls through to the procedural one.
+      //
+      // AND IT FILLS ALL `VARIANTS` CELLS FROM A FAMILY, NOT ONE TILE FROM ONE. `o.v` is which of
+      // the style's variants this atlas cell is, and dungeon.js `cellFor` hashes a tile's position
+      // to pick among them — so walking the family here is what turns "one bitmap stamped across a
+      // room" into several stones of one colour. A family shorter than VARIANTS simply repeats,
+      // which still beats a single tile because the tiles are also turned per position.
+      const fam = activeSkin && sheetReady() ? skinCells(activeSkin, o.id) : null;
+      const cell = fam && fam[o.v % fam.length];
+      if (!cell || !blitCell(cell, { alb, hgt, W, x0: cx0, y0: cy0, S })) {
+        paintTile({ alb, hgt, W, x0: cx0, y0: cy0, S, style: TILE_STYLES[o.id], seed: o.s * 101 + o.v * 7 + 1 });
+      }
       for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
         const gi = (cy0 + py) * W + cx0 + px;
         const h = hgt[gi];
@@ -401,6 +427,12 @@ function flagstoneAtlas() {
       obs[gi * 3] = oc[0]; obs[gi * 3 + 1] = oc[1]; obs[gi * 3 + 2] = oc[2];
     }
   }
+  return { alb, hgt, rgh, obs, W, H };
+}
+
+/** Build the atlas textures from a fresh paint. */
+function flagstoneAtlas() {
+  const { alb, hgt, rgh, obs, W, H } = paintAtlasArrays();
   const albedo = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [alb[i], alb[i + 1], alb[i + 2]]; }, { pixel: true });
   const obsidian = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [obs[i], obs[i + 1], obs[i + 2]]; }, { pixel: true });
   const rough = rgbTexture(W, H, (x, y) => { const v = rgh[y * W + x]; return [v, v, v]; }, { srgb: false, pixel: true });
@@ -408,6 +440,55 @@ function flagstoneAtlas() {
   for (const t of [albedo, obsidian, rough, normal]) { t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping; }
   return { albedo, normal, rough, obsidian };
 }
+
+/** Overwrite a canvas-backed texture made by `rgbTexture` with a fresh pass of the same painter. */
+function repaintRgb(tex, W, H, fn) {
+  const canvas = tex.image;
+  if (!canvas || canvas.width !== W || canvas.height !== H) return false;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(W, H), d = img.data;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const c = fn(x, y), i = (y * W + x) * 4;
+    d[i] = Math.max(0, Math.min(255, c[0] * 255 + 0.5)); d[i + 1] = Math.max(0, Math.min(255, c[1] * 255 + 0.5));
+    d[i + 2] = Math.max(0, Math.min(255, c[2] * 255 + 0.5)); d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  tex.needsUpdate = true;
+  return true;
+}
+
+/**
+ * Switch the floor atlas to an imported skin, or back to the procedural fields with `null`.
+ *
+ * Repaints the EXISTING atlas textures in place. Every dungeon material already holds a reference
+ * to them and every slab already carries the `aTile` cell it was given, so the swap needs no
+ * rebuild of the level, no rebinding and no change to a single instance attribute: the same cell
+ * simply has a different picture in it next frame.
+ * @param {string|null} id a key of TILE_SKINS, or null
+ * @returns {Promise<boolean>} false if the id is unknown or the sheet could not be inflated
+ */
+export async function setTileSkin(id) {
+  if (id && !TILE_SKINS[id]) { console.warn(`setTileSkin: unknown skin '${id}'`); return false; }
+  if (id && !(await loadTileSheet())) return false;
+  activeSkin = id || null;
+  if (!textures) return true;                 // nothing painted yet; first paint will use it
+  const { alb, hgt, rgh, obs, W, H } = paintAtlasArrays();
+  const a = textures.atlas;
+  repaintRgb(a.albedo, W, H, (x, y) => { const i = (y * W + x) * 3; return [alb[i], alb[i + 1], alb[i + 2]]; });
+  repaintRgb(a.obsidian, W, H, (x, y) => { const i = (y * W + x) * 3; return [obs[i], obs[i + 1], obs[i + 2]]; });
+  repaintRgb(a.rough, W, H, (x, y) => { const v = rgh[y * W + x]; return [v, v, v]; });
+  // The normal map is derived, not painted, so build it once through the same helper and copy the
+  // finished canvas across in ONE read — a per-pixel getImageData here is ~100k round trips to the
+  // 2D context and turns a skin swap into a visible stall.
+  const n = normalFromHeight(hgt, W, H, 1.5, { wrap: false });
+  const nd = n.image.getContext('2d').getImageData(0, 0, W, H).data;
+  repaintRgb(a.normal, W, H, (x, y) => { const i = (y * W + x) * 4; return [nd[i] / 255, nd[i + 1] / 255, nd[i + 2] / 255]; });
+  n.dispose();
+  return true;
+}
+
+/** The skin currently on the floor atlas, or null for the procedural fields. */
+export function getTileSkin() { return activeSkin; }
 
 /**
  * THE MASONRY STRIP, painted texel by texel: 128x32 texels = four world tiles wide by exactly ONE

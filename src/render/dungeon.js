@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { TILE, DIRS8, DIRS4 } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
 import { createWaterMaterial, syncWaterLights, createShaftMaterial, CELLS, cellUV, ATLAS, styleCells, stoneFamily, syncWorldGrid } from './materials.js';
+import { styleTurns } from './tiles.js';
 import { TILE_STYLES } from './tiles.js';
 import { MeshBuilder, slabGeometry, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
 import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
@@ -279,10 +280,22 @@ export class DungeonView {
       // `sub` picks WHICH quarter of the atlas cell a half/quarter cobble reads, so the small
       // pieces are not all the same corner of the same slab (see buildSlabs).
       const push = (kind, x, z, rot, c) => pieces[kind].push({ x, y: yJ(), z, rot, tx: tilt(), tz: tilt(), cell: c, sub: rng.int(0, 3), color });
-      // A FIELD MUST NOT BE TURNED. A brick course, a plank run and a bar field have a DIRECTION;
-      // a quarter turn per tile shreds the room into confetti. Only the symmetric paving — corridor
-      // cobble and rubble shards — keeps its random turn.
-      const turn = () => (corridor || f.t === TILE.RUBBLE ? rng.int(0, 3) * Math.PI / 2 : 0);
+      // TURN EVERY FIELD AS FAR AS ITS PATTERN SURVIVES (tiles.js PATTERN_TURNS).
+      //
+      // This used to be a blanket "a field must not be turned; only corridor cobble and rubble keep
+      // their random turn", and the reason it gave — a brick course and a plank run have a
+      // DIRECTION, and a quarter turn shreds the room into confetti — is right for three of the
+      // twelve patterns and wrong for the other nine. A cracked-polygon field, a speckle, a grid, a
+      // checker and a diamond have no course to break, and holding them still is what makes a room
+      // read as one cell stamped across a grid. So each field now takes the LARGEST turn it can
+      // survive: four-fold patterns take any quarter turn, coursed ones take half turns (which
+      // keep the course running the same way), and anything unknown is still held still.
+      //
+      // The turn is a HASH OF THE TILE'S OWN POSITION, not an rng draw, for the same reason
+      // `cellFor` is: it is then stable whatever else changes upstream, and it costs the level's
+      // stream nothing.
+      const turns = styleTurns(this.styleAt(f.x, f.y, f.t));
+      const turn = () => (Math.PI / 2) * (4 / turns) * (tileHash(f.x, f.y, this.styleSeed + 31) * turns | 0);
       if (layout === 'full') push('full', f.x, f.y, turn(), cell);
       else if (layout === 'half') {
         const along = rng.int(0, 1);

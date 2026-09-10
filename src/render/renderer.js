@@ -7,9 +7,9 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { TILE } from '../core/constants.js';
-import { FogOfWar, Lighting, depthTint } from './lighting.js';
+import { FogOfWar, Lighting, depthTint, splitToneLean } from './lighting.js';
 import { Atmosphere } from './atmosphere.js';
-import { createMaterials } from './materials.js';
+import { createMaterials, setTileSkin, getTileSkin } from './materials.js';
 import { PropFactory } from './props.js';
 import { DungeonView } from './dungeon.js';
 import { CharacterFactory } from './characters.js';
@@ -53,7 +53,17 @@ const GradingShader = {
       // split toning (luminance-preserving): shadows take the depth band's cold cast, highlights stay warm
       vec3 st = mix(uShadows, uHighlights, smoothstep(0.02, 0.5, lum));
       col *= st / max(1e-3, dot(st, vec3(0.299, 0.587, 0.114)));
-      col = mix(vec3(lum), col, uSat);
+      // SATURATE WITHOUT ANNIHILATING A CHANNEL - the same mistake as the flash blend below.
+      // mix(vec3(lum), col, uSat) with uSat > 1 EXTRAPOLATES away from grey, so any channel already
+      // under the luminance is driven negative and the max() further down clips it to zero. That is
+      // not more saturation, it is a hue shift: at the shallow band's uSat 1.34 a cream corridor
+      // authored rgb(216,209,194) lost its blue and arrived gold, and a lime field arrived with
+      // blue at literally 0 (measured, tools/cast.mjs). So the boost is limited per pixel to the
+      // largest one that leaves every channel non-negative; a colour that cannot take the full
+      // boost simply keeps more of its own, which is the whole point of having fields.
+      vec3 dv = col - vec3(lum);
+      vec3 lim = -vec3(lum) / min(dv, vec3(-1e-5));
+      col = vec3(lum) + dv * max(0.0, min(uSat, min(lim.r, min(lim.g, lim.b))));
       col = (col - 0.18) * uContrast + 0.18;
       col = max(col, vec3(0.0));
       float vig = smoothstep(1.12, 0.38, length(d));
@@ -154,6 +164,19 @@ export class Renderer {
     this.camera = cam;
     if (this.renderPass) this.renderPass.camera = cam;
   }
+
+  /**
+   * Put an imported tile skin on the floor atlas, or `null` for the procedural fields.
+   *
+   * Nothing is rebuilt: `setTileSkin` repaints the atlas textures the dungeon materials already
+   * hold, and every slab keeps the `aTile` cell it was built with. So this is safe to call on a
+   * live level mid-run, which is what makes two skins comparable on the SAME frame.
+   * @param {string|null} id @returns {Promise<boolean>}
+   */
+  async setTileSkin(id) { return setTileSkin(id); }
+
+  /** The skin currently on the floor, or null. */
+  get tileSkin() { return getTileSkin(); }
 
   setupComposer() {
     const w = Math.max(1, this.canvas.clientWidth), h = Math.max(1, this.canvas.clientHeight);
@@ -260,7 +283,13 @@ export class Renderer {
     const g = depthTint(depth).grade;
     const u = this.grading.uniforms;
     u.uTint.value.copy(g.tint); u.uSat.value = g.sat; u.uContrast.value = g.contrast; u.uVignette.value = g.vignette; u.uLift.value = g.lift;
-    u.uShadows.value.copy(g.shadows); u.uHighlights.value.copy(g.highlights);
+    // THE SPLIT TONE IS A CHROMA MULTIPLY (`col *= st / luma(st)`), so it washes the fields the same
+    // way the band lights did — most of a deep frame sits at the SHADOW end, and down there both
+    // ends are the same violet, which is a global tint wearing a split tone's clothes. `splitToneLean`
+    // keeps the whole difference between the two ends and neutralises only what they share; see the
+    // note on it for why leaning each end separately measured worse in the shallow bands.
+    const st = splitToneLean(g.shadows, g.highlights);
+    u.uShadows.value.copy(st.shadows); u.uHighlights.value.copy(st.highlights);
   }
 
   /** Post-processing knobs (settings menu / debug): chromatic aberration is off by default. */
