@@ -21,7 +21,7 @@ import { Score } from './audio/music.js';
 
 export { NOTE };
 const MAX_VOICES = 72;
-const LOOKAHEAD = 0.4;   // s of music scheduled ahead of the clock
+const LOOKAHEAD = 0.6;   // s of music scheduled ahead of the clock (a timer tops it up too: see buildGraph)
 const IR_PRESETS = {
   crypt: { seconds: 1.9, decay: 1.4, damp: 0.55, predelay: 0.012, early: 0.7, seed: 'ir-crypt' },
   hall: { seconds: 2.8, decay: 2.2, damp: 0.5, predelay: 0.02, early: 0.55, seed: 'ir-hall' },
@@ -108,6 +108,11 @@ export class AudioEngine {
     this.convolver = c.createConvolver();
     this.reverbReturn = c.createGain(); this.reverbReturn.gain.value = 0.9;
     this.reverbSend.connect(this.sendHp); this.sendHp.connect(this.sendTone); this.sendTone.connect(this.convolver); this.convolver.connect(this.reverbReturn); this.reverbReturn.connect(this.master);
+    // THE MUSIC HAS ITS OWN REVERB SEND. Every score voice (pad, motif, shimmer, drums) also feeds the reverb, and that
+    // send used to go straight to reverbSend, past the music bus: with the music slider at zero the score still
+    // played at full strength through the reverb. The send now follows the music volume (applyVolumes).
+    this.musicIn.__music = true;
+    this.musicSend = c.createGain(); this.musicSend.connect(this.reverbSend);
     this.setRoom('crypt');
     // shared resources
     this.noiseWhite = makeNoiseBuffer(c, 2, 'fargoal-noise-white', 'white');
@@ -118,6 +123,12 @@ export class AudioEngine {
     // the score (adaptive music + ambience)
     this.score = null;
     if (this.withMusic) { try { this.score = new Score(this); } catch { this.score = null; } }
+    // THE SCORE IS ALSO SCHEDULED FROM A TIMER. It used to be topped up only from the frame loop, and any frame slower
+    // than the lookahead (a level being built, a GC pause, a slow render) left steps that were already in the past,
+    // which `schedule` skips: a gap in the music. The timer keeps the queue full between frames.
+    if (this.score && !this.offline && typeof setInterval !== 'undefined') {
+      this.scoreTimer = setInterval(() => { try { if (this.ok && this.score) this.score.schedule(this.now + LOOKAHEAD, () => this.score.mix); } catch { /* ignore */ } }, 100);
+    }
   }
 
   /** Swap the room impulse response ('crypt' | 'hall' | 'cavern'). */
@@ -142,6 +153,8 @@ export class AudioEngine {
       this.sfxBus.gain.setTargetAtTime(curve(V.sfx), t, 0.05);
       this.uiBus.gain.setTargetAtTime(curve(V.sfx) * 0.9 * (V.ui ?? 1), t, 0.05);
       this.musicBus.gain.setTargetAtTime(curve(V.music) * 0.7, t, 0.1);
+      // the music's reverb send: 1 at the default music volume (0.5), as before, and silent at 0
+      if (this.musicSend) this.musicSend.gain.setTargetAtTime(Math.min(1.5, curve(V.music) / curve(0.5)), t, 0.1);
     } catch { /* ignore */ }
   }
 
@@ -198,7 +211,8 @@ export class AudioEngine {
   route(input, o, tm) {
     const c = this.ctx;
     let node = input;
-    if (o.drive) { const ws = c.createWaveShaper(); ws.curve = this.driveCurve(o.drive); ws.oversample = '2x'; node.connect(ws); node = ws; }
+    const made = [input];
+    if (o.drive) { const ws = c.createWaveShaper(); ws.curve = this.driveCurve(o.drive); ws.oversample = '2x'; node.connect(ws); node = ws; made.push(ws); }
     const filters = [o.filter, o.filter2].filter(Boolean);
     for (const f of filters) {
       const bq = c.createBiquadFilter();
@@ -206,15 +220,25 @@ export class AudioEngine {
       bq.frequency.setValueAtTime(clamp(f.freq ?? 1200, 20, 20000), tm.t0);
       if (f.to) bq.frequency.exponentialRampToValueAtTime(clamp(f.to, 20, 20000), tm.t0 + (f.slide ?? (tm.a + tm.h + tm.d)));
       if (f.bend) { let t = tm.t0; for (const [dt, fr] of f.bend) { t += dt; bq.frequency.exponentialRampToValueAtTime(clamp(fr, 20, 20000), t); } }
-      node.connect(bq); node = bq;
+      node.connect(bq); node = bq; made.push(bq);
     }
     const env = c.createGain();
     this.envelope(env.gain, tm, o.gain ?? 0.2, o.curve);
     node.connect(env);
     let out = env;
     if (o.pan && c.createStereoPanner) { const p = c.createStereoPanner(); p.pan.value = clamp(o.pan, -1, 1); env.connect(p); out = p; }
-    out.connect(this.busFor(o.bus));
-    if (o.send) { const s = c.createGain(); s.gain.value = clamp(o.send, 0, 1.5); out.connect(s); s.connect(this.reverbSend); }
+    const bus = this.busFor(o.bus);
+    out.connect(bus);
+    let send = null;
+    if (o.send) { send = c.createGain(); send.gain.value = clamp(o.send, 0, 1.5); out.connect(send); send.connect(bus && bus.__music ? this.musicSend : this.reverbSend); }
+    // RELEASE A FINISHED VOICE. Every note builds its own little graph (source, filters, envelope, panner, send) and
+    // left it connected to the bus for good. Chrome collects a finished branch; WebKit (Safari) keeps pulling it on
+    // the audio thread, so the render cost grew with every note played until the music stuttered. Once the voice
+    // is over (plus a margin for its tail) the branch is disconnected and nothing holds it.
+    if (!this.offline && typeof setTimeout !== 'undefined') {
+      const nodes = [...made, env, out, send];
+      setTimeout(() => { for (const nd of nodes) if (nd) { try { nd.disconnect(); } catch { /* ignore */ } } }, Math.max(0, tm.tEnd - this.now + 0.5) * 1000);
+    }
     return env;
   }
 
@@ -610,6 +634,7 @@ export class AudioEngine {
   dispose() {
     for (const u of this.unsub) u(); this.unsub = [];
     if (this.kick && typeof window !== 'undefined') for (const ev of ['pointerdown', 'keydown', 'touchstart']) window.removeEventListener(ev, this.kick);
+    if (this.scoreTimer) { clearInterval(this.scoreTimer); this.scoreTimer = null; }
     try { if (this.score) this.score.dispose(); } catch { /* ignore */ }
     try { if (this.ctx && !this.offline) this.ctx.close(); } catch { /* ignore */ }
   }

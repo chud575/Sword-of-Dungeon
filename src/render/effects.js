@@ -9,8 +9,13 @@ import { COLORS } from '../core/constants.js';
 import { ParticlePool } from './particles.js';
 import { DamageNumbers } from './damageNumbers.js';
 import { ITEM_TABLE, SPELL_TABLE } from '../game/items.js';
+import { describeMonster } from '../game/monsters.js';
+import { COMBAT_WORDS } from '../core/constants.js';
 import { attachFog, glowTexture, splatTexture, runeCircleTexture } from './propFx.js';
 import { updateProps, getPropFactory } from './props.js';
+
+/** A status ending, which the port says in cyan. Matched on sense, not on exact wording. */
+const STATUS_OVER = /\bfades\b|\bwears? off\b|\bworn off\b|\bvisible again\b/i;
 
 const easeOut = (k) => 1 - (1 - k) * (1 - k);
 const easeOutBack = (k) => { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2); };
@@ -201,8 +206,17 @@ export class Effects {
   bind() {
     const on = (n, f) => this.unsub.push(this.bus.on(n, f));
     on('entity:attacked', (p) => this.onAttacked(p));
-    on('entity:died', (p) => { const v = this.resolve(p.entity); this.deathPuff(v.x, v.z, p.entity); });
-    on('spell:cast', (p) => this.onSpell(p));
+    on('combat:start', (p) => this.combatStart(p));
+    on('entity:died', (p) => {
+      const v = this.resolve(p.entity);
+      this.deathPuff(v.x, v.z, p.entity);
+      // Grey, and the only word in the palette that is not about a number: the hero's own death is
+      // the one the run turns on, so it is the one that is spelled out and held.
+      const hero = p.entity && p.entity.kind === 'player';
+      if (hero) this.numbers.message('THOU ART SLAIN!', { life: 3.4 });
+      else this.numbers.message(`YOU HAVE SLAIN ${describeMonster(p.entity, this.playerSkill)}!`.toUpperCase());
+    });
+    on('spell:cast', (p) => { this.onSpell(p); this.spellMessage(p); });
     on('fx:teleport', (p) => this.teleport(p.from, p.to));
     on('fx:levelup', (p) => this.levelUp(p.x, p.y)); // levelUp() already shouts LEVEL UP!
     on('fx:explosion', (p) => this.explosion(p.x, p.y));
@@ -213,12 +227,24 @@ export class Effects {
     on('fx:sword-stolen', (p) => { this.burst(p.x, p.y, { color: [0x2a1040, 0x7a3ad0], count: 60, speed: 2.5, up: 2, life: 1.0, size: 0.14, y: 0.6 }); this.rings.play({ x: p.x, z: p.y, color: 0x7a3ad0, dur: 0.6, fn: (m, k) => { m.scale.setScalar(2.2 * (1 - easeOut(k)) + 0.2); m.material.opacity = 0.9 * k; } }); this.shakeRequest += 0.5; this.flash.color.set(0.3, 0, 0.5); this.flash.amount = 0.6; this.lights.pulse({ x: p.x, z: p.y, color: 0x7a3ad0, intensity: 14, dur: 0.6 }); });
     on('fx:mage', (p) => { this.castCore(p.x, p.y, 0x7fd4ff, 1.2); this.burst(p.x, p.y, { color: [0x7fd4ff, 0xffffff], count: 60, speed: 2, up: 3, life: 1.2, size: 0.12, y: 0.5, gravity: -0.5, kind: 2 }); });
     on('fx:demon', (p) => { this.burst(p.x, p.y, { color: [0xff3a2a, 0x3a0000], count: 80, speed: 2.5, up: 2, life: 1.2, size: 0.14, y: 0.5 }); this.matter.emit({ x: p.x, y: 0.4, z: p.y, count: 40, color: [0x1a0a0a, 0x3a1010], speed: 1.2, up: 1.8, life: 1.8, size: 0.28, gravity: 0.2, drag: 1, radius: 0.3, kind: 3 }, this.rng); this.flashes.play({ x: p.x, y: 0.7, z: p.y, color: 0xff3a2a, size0: 0.5, size1: 3, dur: 0.4 }); this.lights.pulse({ x: p.x, z: p.y, color: 0xff3a2a, intensity: 16, dur: 0.6 }); this.shakeRequest += 0.7; this.flash.color.set(0.5, 0, 0); this.flash.amount = 0.7; });
-    on('sword:found', (p) => { this.swordFound(p.x, p.y); this.numbers.spawn(p.x, p.y, 'THE SWORD OF FARGOAL!', { style: 'banner', y: 1.8, life: 3.0, overHero: true }); });
+    on('sword:found', (p) => { this.swordFound(p.x, p.y); this.numbers.message('THE SWORD OF FARGOAL!', { life: 3.4 }); });
     on('item:picked', (p) => this.onPicked(p));
-    on('temple:sacrifice', (p) => { const v = this.playerPos; this.numbers.spawn(v.x, v.z, `SACRIFICED ${p?.gold ?? ''} GOLD`.replace('  ', ' '), { style: 'banner', y: 1.8, life: 2.2, overHero: true }); if (p?.xp) this.numbers.spawn(v.x, v.z, `+${p.xp} XP`, { style: 'magic', y: 0.8, life: 2.0 }); this.burst(v.x, v.z, { color: [0xffd866, 0xbfe6ff], count: 80, speed: 0.8, up: 3, life: 1.6, size: 0.1, gravity: 0.6, drag: 0.5, kind: 2 }); this.pillar(v.x, v.z, 0xbfe6ff, 1.6, 0.3); this.lights.pulse({ x: v.x, z: v.z, color: 0xbfe6ff, intensity: 10, dur: 0.8 }); });
+    on('temple:sacrifice', (p) => { const v = this.playerPos; this.numbers.message(`SACRIFICE OF GOLD! ${p?.gold ?? ''}`.trim()); if (p?.xp) this.numbers.message(`${p.xp} EXPERIENCE`); this.burst(v.x, v.z, { color: [0xffd866, 0xbfe6ff], count: 80, speed: 0.8, up: 3, life: 1.6, size: 0.1, gravity: 0.6, drag: 0.5, kind: 2 }); this.pillar(v.x, v.z, 0xbfe6ff, 1.6, 0.3); this.lights.pulse({ x: v.x, z: v.z, color: 0xbfe6ff, intensity: 10, dur: 0.8 }); });
     on('trap:triggered', (p) => { if (p.type === 'teleport') { this.castCore(p.x, p.y, 0x4ee1ff, 0.9); this.burst(p.x, p.y, { color: [0x4ee1ff, 0xffffff], count: 40, speed: 2, up: 2, life: 0.7, size: 0.1 }); } });
-    on('monster:stole', (p) => { const v = this.resolve(p.entity); this.coinFountain(v.x, v.z, 14); this.numbers.spawn(v.x, v.z, `-${p.gold} gold`, { style: 'gold' }); });
-    on('player:hp', (p) => { if (p.delta > 0 && p.source !== 'regen' && p.delta >= 5) { const v = this.playerPos; this.numbers.spawn(v.x, v.z, `+${p.delta}`, { style: 'heal' }); this.burst(v.x, v.z, { color: [0x69db7c, 0xd0ffd8], count: 30, speed: 0.6, up: 2, life: 1.2, size: 0.08, gravity: 0.3, drag: 0.8, y: 0.3, kind: 2 }); this.flashes.play({ x: v.x, y: 0.5, z: v.z, color: 0x69db7c, size0: 0.4, size1: 1.4, dur: 0.35, intensity: 1 }); } });
+    on('monster:stole', (p) => { const v = this.resolve(p.entity); this.coinFountain(v.x, v.z, 14); this.numbers.message(`STOLE ${p.gold} GOLD!`); });
+    // HEALED is cyan for the same reason 'POISON HAS WORN OFF' is: a bad state ending.
+    on('player:hp', (p) => { if (p.delta > 0 && p.source !== 'regen' && p.delta >= 5) { const v = this.playerPos; this.numbers.message(`HEALED ${p.delta} HITS`, { style: 'cyan' }); this.burst(v.x, v.z, { color: [0x69db7c, 0xd0ffd8], count: 30, speed: 0.6, up: 2, life: 1.2, size: 0.08, gravity: 0.3, drag: 0.8, y: 0.3, kind: 2 }); this.flashes.play({ x: v.x, y: 0.5, z: v.z, color: 0x69db7c, size0: 0.4, size1: 1.4, dur: 0.35, intensity: 1 }); } });
+    // THE PORT'S CYAN LINE. 'POISON HAS WORN OFF' is the only cyan in the whole reference set, and
+    // the sense of it is an affliction or enchantment ENDING — not magic in general, which the
+    // measurements put firmly in white. This remake has three of those moments and until now said
+    // all three only in the side log: invisibility fading, the light betraying you, the shield
+    // fading. They come through `log` rather than an event of their own, so this matches on the
+    // SENSE of the line rather than its exact wording, with `kind` narrowing to the magic channel
+    // first so ordinary prose cannot trip it.
+    on('log', (e) => {
+      if (!e || e.kind !== 'magic' || !STATUS_OVER.test(e.text)) return;
+      this.numbers.message(String(e.text).replace(/\.\s*$/, '').toUpperCase(), { style: 'cyan' });
+    });
     on('level:enter', () => this.clearAll());
     on('fx:descend', () => { const v = this.playerPos; this.vortex(v.x, v.z, -1); });
     on('fx:ascend', () => { const v = this.playerPos; this.vortex(v.x, v.z, 1); });
@@ -233,6 +259,8 @@ export class Effects {
     this.matter.life.fill(0); this.matter.alpha.fill(0); this.matter.geometry.setDrawRange(0, 0);
     for (const s of this.numbers.active) { this.scene.remove(s); this.numbers.pool.push(s); }
     this.numbers.active.length = 0;
+    this.numbers.clearMessages();
+    this._lastAtk = null;
     for (const pool of [this.rings, this.runes, this.arcs, this.decals]) for (const it of pool.items) { it.on = false; it.m.visible = false; }
     for (const it of this.flashes.items) { it.on = false; it.s.visible = false; }
     for (const it of this.lights.items) { it.on = false; it.l.intensity = 0; }
@@ -267,6 +295,27 @@ export class Effects {
     this.shakeRequest += 0.06 * power;
   }
 
+  /**
+   * '<NAME> SPELL CAST!' in cyan, the way the port announces one, plus the one follow-on line the
+   * reference frames show verbatim: Drift reads 'LIKE A FEATHER...'.
+   */
+  spellMessage({ spell }) {
+    const name = (SPELL_TABLE[spell] && SPELL_TABLE[spell].name) || spell;
+    this.numbers.message(`${name} SPELL CAST!`.toUpperCase());
+    if (spell === 'drift') this.numbers.message('LIKE A FEATHER...');
+  }
+
+  /**
+   * A fight has begun. The port puts what you are fighting at the top of the message band before a blow
+   * is struck ("AN OGRE!"), and so does this, in the amber it uses for that line. Marking the monster as
+   * announced keeps the first blow from saying it again. The camera's step closer is renderer.js bind.
+   */
+  combatStart({ entity, announce }) {
+    if (!announce) return;
+    this.numbers.message(announce, { style: 'amber' });
+    if (entity) this._lastAtk = entity.id;
+  }
+
   onAttacked({ attacker, defender, damage, killed, crit }) {
     const d = this.resolve(defender), a = this.resolve(attacker);
     const dir = new THREE.Vector3().subVectors(d, a); if (dir.lengthSq() < 1e-4) dir.set(0, 0, 1); dir.normalize();
@@ -285,7 +334,18 @@ export class Effects {
         this.decals.play({ x: d.x + dir.x * 0.25 + this.rng.float(-0.15, 0.15), z: d.z + dir.z * 0.25 + this.rng.float(-0.15, 0.15), color: 0x2a0606, intensity: 1, dur: 8, fn: (m, k) => { m.rotation.set(-Math.PI / 2, 0, rot); m.scale.setScalar(size * 1.2 * (0.6 + 0.4 * easeOut(Math.min(1, k * 20)))); m.material.opacity = 0.85 * (1 - k * k); } });
       } else this.burst(d.x, d.z, { color: [0x9a9088, 0xd0c8c0], count: 8, speed: 1.4, up: 1.2, life: 0.5, size: 0.06, y: 0.5, gravity: -5 });
       this.lights.pulse({ x: d.x, z: d.z, color: steel ? 0xffd090 : 0xff6040, intensity: crit ? 14 : 6, dur: crit ? 0.3 : 0.14, distance: 4 });
-      this.numbers.spawn(d.x, d.z, crit ? `${damage}!` : `${damage}`, { style: isPlayer ? 'player' : crit ? 'crit' : 'normal' });
+      this.numbers.spawn(d.x, d.z, `${damage}`, { style: isPlayer ? 'hurt' : 'hit' });
+      // THE WORDS GO IN THE STACK, THE NUMBER GOES OVER THE HEAD — the iOS split. The words are the
+      // game's own COMBAT_WORDS ('CLANG', 'CHOP', 'THUD', 'CRUNCH'), which are the very ones the
+      // reference frames show, so nothing here invents vocabulary.
+      const mon = isPlayer ? attacker : defender;
+      const words = COMBAT_WORDS[mon && mon.family] || COMBAT_WORDS.creature;
+      this.numbers.message(this.rng.pick(words));
+      // and, once per engagement, who it is you are fighting
+      if (isPlayer && mon && mon.id !== this._lastAtk) {
+        this._lastAtk = mon.id;
+        this.numbers.message(`ATTACKED BY ${describeMonster(mon, this.playerSkill ?? 8)}!`.toUpperCase(), { style: 'amber' });
+      }
       this.shakeRequest += isPlayer ? Math.min(0.55, 0.14 + damage * 0.012) : crit ? 0.18 : 0.05;
       if (crit) { this.rings.play({ x: d.x, z: d.z, y: 0.03, color: 0xffffff, dur: 0.32, fn: (m, k) => { m.scale.setScalar(0.2 + easeOut(k) * 1.1); m.material.opacity = 0.9 * (1 - k); } }); this.flash.color.set(0.6, 0.55, 0.45); this.flash.amount = Math.max(this.flash.amount, 0.22); }
       if (isPlayer && damage >= 5) { this.flash.color.set(0.5, 0.05, 0.02); this.flash.amount = Math.min(0.6, 0.2 + damage * 0.02); }
@@ -296,7 +356,7 @@ export class Effects {
       this.flashes.play({ x: d.x - dir.x * 0.5, y: 0.6, z: d.z - dir.z * 0.5, color: 0xffe680, size0: 0.3, size1: 1.1, dur: 0.2 });
       this.rings.play({ x: d.x, z: d.z, y: 0.04, color: 0xffd43b, dur: 0.35, fn: (m, k) => { m.scale.setScalar(0.5 + easeOut(k) * 0.7); m.material.opacity = 0.8 * (1 - k); } });
       this.lights.pulse({ x: d.x, z: d.z, color: 0xffd43b, intensity: 8, dur: 0.2 });
-      this.numbers.spawn(d.x, d.z, 'BLOCKED', { style: 'blocked' });
+      this.numbers.message('CLANG!');
     }
     if (killed && !isPlayer) this.shakeRequest += 0.15;
   }
@@ -427,7 +487,7 @@ export class Effects {
     this.flash.color.set(1, 0.85, 0.4); this.flash.amount = 0.4;
     this.lights.pulse({ x, y: 1.2, z, color: 0xffd866, intensity: 14, dur: 1.2, distance: 7 });
     this.shakeRequest += 0.25;
-    this.numbers.spawn(x, z, 'LEVEL UP!', { style: 'banner', y: 1.35, life: 2.2 });
+    this.numbers.message('LEVEL UP!');
   }
 
   /** Vertical glowing pillar that fades out. */
@@ -534,11 +594,11 @@ export class Effects {
   onPicked({ item, entity }) {
     if (!item) return;
     const x = item.x ?? entity.x, z = item.y ?? entity.y;
-    if (item.type === 'gold') { this.coinFountain(x, z, item.gold || 20); if (item.gold) this.numbers.spawn(x, z, `+${item.gold} GOLD`, { style: 'gold', y: 1.7, life: 2.0, overHero: true }); }
+    if (item.type === 'gold') { this.coinFountain(x, z, item.gold || 20); if (item.gold) this.numbers.message(`${item.gold} GOLD PIECES`); }
     else if (item.type === 'sword') return;
     else {
       // Name it out loud: particles alone do not say WHAT was picked up.
-      this.numbers.spawn(x, z, this.pickupLabel(item), { style: SPELL_TABLE[item.type] ? 'magic' : 'banner', y: 1.7, life: 2.2, overHero: true });
+      this.numbers.message(String(this.pickupLabel(item)).toUpperCase());
       const col = COLORS.spells[item.type] ? new THREE.Color(COLORS.spells[item.type]).getHex() : item.type === 'potion' ? 0xff5a48 : 0x9fd0ff;
       this.burst(x, z, { color: [0xffffff, col], count: 34, speed: 0.8, up: 2.2, life: 0.9, size: 0.08, y: 0.3, gravity: -0.5, kind: 2 });
       this.flashes.play({ x, y: 0.4, z, color: col, size0: 0.3, size1: 1.3, dur: 0.3, intensity: 1.3 });
@@ -640,6 +700,7 @@ export class Effects {
     // The hero is the sprite that owns the frame: hand the numbers his box so none of them can park
     // on top of him (damageNumbers.js "NEVER OVER THE HERO"). It is the player's tile, not a mesh
     // bound, so it costs nothing and it is right even while he is mid-step between two flagstones.
+    if (p && typeof p.skill === 'number') this.playerSkill = p.skill;
     this.numbers.setProtect(p.x, p.z);
     this.numbers.update(dt);
   }

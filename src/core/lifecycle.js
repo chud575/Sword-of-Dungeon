@@ -38,7 +38,7 @@ export class Lifecycle {
   /** The tab was hidden: pause (the sword timer stops with it) and save. */
   hidden() {
     const g = this.getGame();
-    if (!g || g.over || this.debugMode) return;
+    if (!g || g.over || g.placeholder || this.debugMode) return;
     g.setPaused(true);
     this.autoSave('hidden');
   }
@@ -46,7 +46,7 @@ export class Lifecycle {
   /** Called once per frame with unpaused-play seconds; drives the periodic autosave. */
   update(dt) {
     const g = this.getGame();
-    if (!g || g.over || g.paused || this.debugMode) return;
+    if (!g || g.over || g.placeholder || g.paused || this.debugMode) return;
     const every = Number(this.getSettings().autosaveInterval) || 0;
     if (every <= 0) return;
     this.playClock += dt;
@@ -62,7 +62,7 @@ export class Lifecycle {
   /** Save right now. Returns true when written. */
   saveNow(reason = 'manual', { quiet = false } = {}) {
     const g = this.getGame();
-    if (!g || g.over) return false;
+    if (!g || g.over || g.placeholder) return false;
     const ok = saveGame(g, { reason });
     this.lastSave = { reason, at: Date.now(), ok };
     if (ok) this.saves++;

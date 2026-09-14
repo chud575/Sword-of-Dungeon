@@ -176,8 +176,24 @@ export function billboardMaterial(tex, color, { cylindrical = false, intensity =
   });
 }
 
-/** Procedural flame billboard (cylindrical). Scale the mesh to flicker; uTime is driven by updateFlames(). */
-export function flameMaterial() {
+/**
+ * Procedural flame billboard. Scale the mesh to flicker; uTime is driven by updateFlames().
+ *
+ * `spherical` stands the flame up along the CAMERA's up rather than the world's. Under this camera
+ * (17 degrees off vertical) a cylindrical billboard keeps sin(17°) = 0.29 of its height, which is
+ * why a wall torch measured as a warm pool with no flame in it: a 0.4-unit flame was four texels of
+ * screen. A spherical one is its full height on screen, like the cast. It shares the cylindrical
+ * material's uniforms by reference, so the one clock and the fog drive both.
+ */
+export function flameMaterial(spherical = false) {
+  if (spherical) {
+    return memo('flame:spherical', () => {
+      const base = flameMaterial(false);
+      const m = base.clone();
+      m.uniforms = { ...base.uniforms, uCylindrical: { value: 0 } };
+      return m;
+    });
+  }
   return memo('flame', () => {
     const m = new THREE.ShaderMaterial({
       uniforms: { ...fogUniforms(), uTime: { value: 0 }, uCylindrical: { value: 1 } },
@@ -251,9 +267,9 @@ export function groundGlow(color, radius, { opacity = 0.55, y = 0.015, tex = glo
  * Flame billboard mesh (userData.flame so DungeonView flickers its scale). The size is baked into
  * the geometry because DungeonView drives `scale` with a unit flicker factor each frame.
  */
-export function flame(size = 0.3, aspect = 1.6) {
+export function flame(size = 0.3, aspect = 1.6, { spherical = false } = {}) {
   const key = `geo:flame:${size}:${aspect}`;
-  const m = new THREE.Mesh(memo(key, () => new THREE.PlaneGeometry(size, size * aspect).translate(0, size * aspect * 0.5, 0)), flameMaterial());
+  const m = new THREE.Mesh(memo(key, () => new THREE.PlaneGeometry(size, size * aspect).translate(0, size * aspect * 0.5, 0)), flameMaterial(spherical));
   m.userData.flame = true; m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false; m.renderOrder = 7;
   return m;
 }

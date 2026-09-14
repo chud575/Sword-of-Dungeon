@@ -32,6 +32,7 @@ export class Minimap {
     this.el = document.createElement('div');
     this.el.className = 'panel hud px'; this.el.id = 'minimap';
     this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div>
+      <div class="mc-band"><span class="mc-title">Map</span><span class="mc-meta"></span><span class="mc-code">L1</span></div>
       <div class="cap"><span class="label">${icon('maps')}Map</span><span class="meta"></span><span class="hint">M</span></div>
       <div class="wrap"><canvas></canvas><div class="toast"></div></div>
       <div class="legend">
@@ -42,6 +43,7 @@ export class Minimap {
       </div>`;
     this.canvas = this.el.querySelector('canvas');
     this.meta = this.el.querySelector('.meta');
+    this.bandMeta = this.el.querySelector('.mc-meta'); this.bandCode = this.el.querySelector('.mc-code');
     this.toastEl = this.el.querySelector('.toast');
     this.g2d = this.canvas.getContext('2d');
     this.layer = document.createElement('canvas'); this.l2d = this.layer.getContext('2d');
@@ -72,6 +74,18 @@ export class Minimap {
     for (const v of VARS) this.colors[v] = (cs.getPropertyValue('--mm-' + v) || '').trim() || '#fff';
     this.colors.quest = (cs.getPropertyValue('--quest') || '').trim() || '#c58cff';
     this.colors.gold2 = (cs.getPropertyValue('--gold') || '').trim() || '#e8c15a';
+    // Optional palette overrides a UI theme may set (the module cover does). Unset, each falls back to
+    // the classic look it has always drawn: corridors and edges derived from the floor colour, a dark
+    // ground with a faint yellow dither and a warm vignette, gold compass ink, full-strength glows.
+    const opt = (name) => (cs.getPropertyValue('--mm-' + name) || '').trim();
+    this.colors.corridor = opt('corridor') || null;
+    this.colors.edge = opt('edge') || null;
+    this.colors.bg = opt('bg') || '#060504';
+    this.colors.dither = opt('dither') || 'rgba(208,220,113,.09)';
+    this.colors.ink = opt('ink') || 'rgba(232,193,90,.55)';
+    this.vignette = opt('vignette') !== '0';
+    const gk = parseFloat(opt('glow')); this.glowK = Number.isFinite(gk) ? gk : 1;
+    this.dither = null; this.layerKey = '';
   }
 
   /**
@@ -139,7 +153,7 @@ export class Minimap {
     c.clearRect(0, 0, W * s, H * s);
     const seen = (x, y) => allLit || lv.isExplored(x, y);
     const at = (x, y) => (lv.inBounds(x, y) ? lv.tiles[y * W + x] : TILE.WALL);
-    const floorCol = C.floor, corrCol = shade(C.floor, 0.78), wallCol = C.wall;
+    const floorCol = C.floor, corrCol = C.corridor || shade(C.floor, 0.78), wallCol = C.wall;
     // pass 1: fills
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       if (!seen(x, y)) continue;
@@ -154,7 +168,7 @@ export class Minimap {
     }
     // pass 2: wall outlines — a hairline wherever explored open floor meets rock (the C64 rule)
     const lw = s >= 6 ? 1.5 : 1;
-    c.strokeStyle = shade(C.floor, 1.55); c.lineWidth = lw; c.lineCap = 'butt';
+    c.strokeStyle = C.edge || shade(C.floor, 1.55); c.lineWidth = lw; c.lineCap = 'butt';
     c.beginPath();
     const half = lw / 2;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -184,6 +198,7 @@ export class Minimap {
   draw() {
     const g = this.ctx.getGame(); if (!g || !g.level) return;
     const lv = g.level, p = g.player, C = this.colors;
+    glowK = this.glowK;
     const s = this.cur;
     const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1);
     if (dpr !== this.dpr) { this.dpr = dpr; this.layerKey = ''; }
@@ -196,14 +211,16 @@ export class Minimap {
     const pct = this.buildLayer(lv, s, allLit);
     const c = this.g2d;
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.fillStyle = '#060504'; c.fillRect(0, 0, W, H);
+    c.fillStyle = C.bg; c.fillRect(0, 0, W, H);
     // the C64's yellow/black checkerboard for unexplored rock, whispered
-    if (!this.dither) { const d = document.createElement('canvas'); d.width = d.height = 4; const x = d.getContext('2d'); x.fillStyle = 'rgba(208,220,113,.09)'; x.fillRect(0, 0, 2, 2); x.fillRect(2, 2, 2, 2); this.dither = c.createPattern(d, 'repeat'); }
+    if (!this.dither) { const d = document.createElement('canvas'); d.width = d.height = 4; const x = d.getContext('2d'); x.fillStyle = C.dither; x.fillRect(0, 0, 2, 2); x.fillRect(2, 2, 2, 2); this.dither = c.createPattern(d, 'repeat'); }
     c.fillStyle = this.dither; c.fillRect(0, 0, W, H);
     // parchment vignette under the ink
-    const grad = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.7);
-    grad.addColorStop(0, 'rgba(46, 36, 24, .55)'); grad.addColorStop(1, 'rgba(10, 8, 5, 0)');
-    c.fillStyle = grad; c.fillRect(0, 0, W, H);
+    if (this.vignette) {
+      const grad = c.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.7);
+      grad.addColorStop(0, 'rgba(46, 36, 24, .55)'); grad.addColorStop(1, 'rgba(10, 8, 5, 0)');
+      c.fillStyle = grad; c.fillRect(0, 0, W, H);
+    }
     // cached tiles, dimmed to "memory" except where the player currently sees
     c.drawImage(this.layer, 0, 0, W, H);
     if (!allLit) {
@@ -261,10 +278,14 @@ export class Minimap {
     c.closePath(); c.fill(); c.globalAlpha = 1;
     dot(c, px, py, Math.max(1.5, s * 0.42), C.player);
     // compass + border vignette
-    if (s >= 5) { c.fillStyle = 'rgba(232,193,90,.55)'; c.font = `600 ${Math.max(7, s * 1.2)}px ${'Cinzel, Palatino, Georgia, serif'}`; c.textAlign = 'left'; c.textBaseline = 'top'; c.fillText('N', 4, 3); chevron(c, 4 + s * 0.4, 3 + s * 1.8, s * 0.7, -1, 'rgba(232,193,90,.55)'); }
+    if (s >= 5) { const font = (getComputedStyle(this.el).getPropertyValue('--font-display') || '').trim() || 'Cinzel, Palatino, Georgia, serif'; c.fillStyle = C.ink; c.font = `${this.vignette ? 600 : 800} ${Math.max(7, s * 1.2)}px ${font}`; c.textAlign = 'left'; c.textBaseline = 'top'; c.fillText('N', 4, 3); chevron(c, 4 + s * 0.4, 3 + s * 1.8, s * 0.7, -1, C.ink); }
     // caption
     const meta = `Lv <b>${lv.depth}</b> · <b>${pct}%</b>${this.big && this.userZoom !== 1 ? ` · <b>${Math.round(this.userZoom * 100)}%</b>` : ''}`;
-    if (this.metaHtml !== meta) { this.metaHtml = meta; this.meta.innerHTML = meta; }
+    if (this.metaHtml !== meta) {
+      this.metaHtml = meta; this.meta.innerHTML = meta;
+      this.bandMeta.textContent = `${pct}%${this.big && this.userZoom !== 1 ? ` · ${Math.round(this.userZoom * 100)}%` : ''}`;
+      this.bandCode.textContent = `L${lv.depth}`;
+    }
   }
 
   dispose() { for (const u of this.unsub) u(); this.el.remove(); }
@@ -272,7 +293,9 @@ export class Minimap {
 
 function dot(c, x, y, r, col) { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); }
 function ring(c, x, y, r, col, alpha = 0.85, lw = 1, dashed = false) { c.globalAlpha = alpha; c.strokeStyle = col; c.lineWidth = lw; if (dashed) c.setLineDash([Math.max(1, r * 0.8), Math.max(1, r * 0.6)]); c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.stroke(); if (dashed) c.setLineDash([]); c.globalAlpha = 1; }
-function glow(c, x, y, r, col, alpha = 0.45) { const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)'); c.globalAlpha = alpha; c.fillStyle = g; c.fillRect(x - r, y - r, r * 2, r * 2); c.globalAlpha = 1; }
+/** Theme multiplier on every glow's opacity (the module cover is flat print and keeps them faint); set per draw. */
+let glowK = 1;
+function glow(c, x, y, r, col, alpha = 0.45) { alpha *= glowK; if (alpha <= 0) return; const g = c.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, col); g.addColorStop(1, 'rgba(0,0,0,0)'); c.globalAlpha = alpha; c.fillStyle = g; c.fillRect(x - r, y - r, r * 2, r * 2); c.globalAlpha = 1; }
 function chevron(c, cx, cy, s, dir, col) { c.strokeStyle = col; c.lineWidth = Math.max(1, s * 0.18); c.lineCap = 'round'; c.lineJoin = 'round'; const w = s * 0.3, h = s * 0.18 * dir; c.beginPath(); c.moveTo(cx - w, cy - h); c.lineTo(cx, cy + h); c.lineTo(cx + w, cy - h); c.stroke(); }
 function cross(c, cx, cy, r, col, lw) { c.strokeStyle = col; c.lineWidth = lw; c.lineCap = 'butt'; c.beginPath(); c.moveTo(cx - r, cy); c.lineTo(cx + r, cy); c.moveTo(cx, cy - r); c.lineTo(cx, cy + r); c.stroke(); }
 function diamond(c, cx, cy, r, col) { c.fillStyle = col; c.beginPath(); c.moveTo(cx, cy - r); c.lineTo(cx + r, cy); c.lineTo(cx, cy + r); c.lineTo(cx - r, cy); c.closePath(); c.fill(); }

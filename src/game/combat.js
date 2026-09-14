@@ -106,6 +106,32 @@ export function monsterHits(game, monster, { damage, crit, glancing }, { fromSid
 }
 
 /**
+ * ONE blow of a fight, by one side. A fight alternates these (game.js step): the side that started it
+ * strikes first, the other answers, combatTurnTime apart. A full exchange — both blows — is one
+ * `combat:turn`, and one "Turn N" on the HUD.
+ * @param {'p'|'m'} side
+ * @returns {{damage:number, killed:boolean, playerDead:boolean}}
+ */
+export function resolveBlow(game, monster, side) {
+  const p = game.player, depth = Math.max(1, game.level.depth), rng = game.rngs.combat, c = game.state.combat;
+  makeNoise(game.level, p.x, p.y, AI.combatNoise, game.state.time, 'combat');
+  const opener = c ? (c.playerInitiated ? 'p' : 'm') : side;
+  if (side === opener) {
+    if (c) c.rounds++;
+    if (game.stats) game.stats.combatTurns = (game.stats.combatTurns || 0) + 1;
+    game.emit('combat:turn', { entity: monster, turn: c ? c.rounds : 1, total: game.stats ? game.stats.combatTurns : 0 });
+  }
+  if (side === 'p') {
+    p.facing = { dx: Math.sign(monster.x - p.x), dy: Math.sign(monster.y - p.y) };
+    const hit = playerStrikeDamage(rng, monster, p, depth);
+    return { damage: hit.damage, killed: playerHits(game, monster, hit), playerDead: false };
+  }
+  monster.facing = { dx: Math.sign(p.x - monster.x), dy: Math.sign(p.y - monster.y) };
+  const hit = monsterStrikeDamage(rng, monster, p, depth);
+  return { damage: hit.damage, killed: false, playerDead: monsterHits(game, monster, hit) };
+}
+
+/**
  * One exchange of blows. Player-initiated: player strikes first; ambush: monster first.
  * @returns {{playerDamage:number, monsterDamage:number, killed:boolean, playerDead:boolean}}
  */
@@ -216,16 +242,22 @@ export function monsterAttack(game, monster) {
   }
   const combat = game.state.combat;
   if (!combat) {
-    game.state.combat = { monsterId: monster.id, playerInitiated: false, timer: game.balance.combatRoundTime, rounds: 0 };
+    // THE FIGHT IS ANNOUNCED, THEN FOUGHT [after the 2009 iOS port]. Nobody swings on the tick a fight
+    // starts: there is a standoff (combatOpening) under the announcement, then the two sides take turns,
+    // one blow each, combatTurnTime apart (game.js step). An ambusher still strikes first, as on the C64.
+    game.state.combat = { monsterId: monster.id, playerInitiated: false, timer: game.balance.combatOpening, next: 'm', rounds: 0 };
     game.log(`YOU ARE ATTACKED BY ${name}!`, 'danger');
-    game.emit('combat:start', { entity: monster, playerInitiated: false });
+    game.emit('combat:start', { entity: monster, playerInitiated: false, announce: `ATTACKED BY ${name}!`.toUpperCase() });
     game.emit('sfx:attacked', {});
-    game.state.combat.rounds++;
-    resolveRound(game, monster, { playerFirst: false });
     return true;
   }
   if (combat.monsterId !== monster.id) {
-    // A second attacker joins: it just lands its blow this phase.
+    // A second attacker joins: it lands a blow of its own, but no more than once an exchange. Monsters
+    // move at close to walking pace now and act several times a second; ungated, a flanker would hit
+    // on every one of those acts.
+    const now = game.state.time;
+    if ((monster.nextFlankAt ?? -Infinity) > now) return true;
+    monster.nextFlankAt = now + 2 * game.balance.combatTurnTime;
     const depth = Math.max(1, level.depth);
     const hit = monsterStrikeDamage(game.rngs.combat, monster, p, depth);
     makeNoise(level, p.x, p.y, AI.combatNoise, game.state.time, 'combat');
@@ -249,22 +281,19 @@ export function playerAttack(game, monster) {
   }
   if (!combat || combat.monsterId !== monster.id) {
     if (combat) game.endCombat('switch');
-    game.state.combat = { monsterId: monster.id, playerInitiated: true, timer: game.balance.combatRoundTime, rounds: 0 };
-    game.log(`${describeMonster(monster, p.skill)}!`, 'combat');
-    game.emit('combat:start', { entity: monster, playerInitiated: true });
+    const name = describeMonster(monster, p.skill);
+    game.state.combat = { monsterId: monster.id, playerInitiated: true, timer: game.balance.combatOpening, next: 'p', rounds: 0 };
+    game.log(`${name}!`, 'combat');
+    game.emit('combat:start', { entity: monster, playerInitiated: true, announce: `${name}!`.toUpperCase() });
     // Being struck wakes anything: the monster turns to fight even if it never saw you coming.
     if (monster.state !== 'flee' && monster.special !== 'mage' && monster.special !== 'demon') {
       const was = monster.state;
       monster.state = 'hunt'; monster.lastSeen = { x: p.x, y: p.y }; monster.target = monster.lastSeen; monster.hadPrey = true;
       if (was !== 'hunt') game.emit('monster:noticed', { entity: monster, how: 'struck' });
     }
-  } else if (game.state.combat.timer > 0) {
-    return false; // too soon: rounds are 250 ms apart
+    p.facing = { dx: Math.sign(monster.x - p.x), dy: Math.sign(monster.y - p.y) };
+    return true;
   }
-  p.facing = { dx: Math.sign(monster.x - p.x), dy: Math.sign(monster.y - p.y) };
-  game.state.combat.timer = game.balance.combatRoundTime;
-  game.state.combat.idle = 0;
-  game.state.combat.rounds++;
-  resolveRound(game, monster, { playerFirst: true });
-  return true;
+  // Already fighting it: the blows come on their own turns (game.js step), not on the key.
+  return false;
 }

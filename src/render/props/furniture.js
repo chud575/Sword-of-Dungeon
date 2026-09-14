@@ -50,6 +50,7 @@ import {
   shift as tone,
 } from '../props.js';
 import { makePropModel, modelBounds } from './models.js';
+import { buildKitProp, isKitProp } from './kitProps.js';
 
 // ------------------------------------------------------------------------------- the materials
 // One base colour per material in the dungeon, shared by every piece that is made of it, so the
@@ -979,6 +980,10 @@ export function furnitureArt(type, variant = 0) {
 export function buildFurniture(type, o = {}) {
   const f = FURNITURE[type];
   if (!f) return null;
+  // THE SOLID PIECE FIRST (props/kitProps.js). The painted billboard below stays as the art the plates
+  // and tests read and as the fallback for a type the kit does not cut yet.
+  const solid = buildKitProp(type, o, f);
+  if (solid) return solid;
   const v = Math.max(0, Math.min(f.v - 1, o.variant | 0));
   const key = `furn:${type}:${v}`;
   const pal = palOf(type, f.pal);
@@ -1071,7 +1076,7 @@ const MODEL_LIFT = 0.012;
 const MODEL_YAW = { s: 0, w: Math.PI / 2, n: Math.PI, e: -Math.PI / 2 };
 
 /** Is `type` served by an imported model rather than a painted billboard? */
-export function isModelled(type) { return Object.prototype.hasOwnProperty.call(MODEL_BOX, type); }
+export function isModelled(type) { return Object.prototype.hasOwnProperty.call(MODEL_BOX, type) && !isKitProp(type); }
 
 /**
  * Build one decor entry as an imported model, ready for DungeonView to drop on its tile.

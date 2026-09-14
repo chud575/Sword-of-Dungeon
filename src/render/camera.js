@@ -3,7 +3,7 @@
 //  - tasteful zoom stops (wheel / [ ]) that couple distance with elevation and a touch of FOV
 //  - trauma-based screen shake (smooth seeded noise + roll) and directional recoil on hits
 //  - stairs dive / rise with FOV rush and roll, pit free-fall with a landing thud, arrival push-in
-//  - temple sanctum: low reverent tilt, gentle dolly and slow yaw drift while near an altar
+//  - temple sanctum: a gentle dolly in and a raised look height near an altar (no yaw: see wanted())
 //  - per-depth yaw variation, overview framing and a cinematic breathing orbit for the title
 // Everything is deterministic (seeded noise, pure functions of time) so debug.step is repeatable.
 import * as THREE from 'three';
@@ -31,6 +31,12 @@ const BASE_YAW = 0;
 const BASE_TILES_TALL = 14.0; // world tiles visible top-to-bottom at zoom 1
 /** Zoom stops: each wheel notch moves to the neighbouring stop. */
 export const ZOOM_STOPS = [0.72, 0.85, 1, 1.18, 1.4];
+/**
+ * How much closer the camera may step for a fight. The frame is drawn on whole texel sizes (CLAUDE.md
+ * rule 2), so "a little closer" can only ever be ONE texel closer — and that is only slight when the
+ * texels are already big: 3 -> 4 is x1.33, but 2 -> 3 would be x1.5. A step larger than this is skipped.
+ */
+const COMBAT_ZOOM_MAX = 1.34;
 const DEAD_ZONE = { x: 0.42, z: 0.32 }; // half extents, tiles
 // Camera sway is off: the rig no longer leads the player or drifts while idle. Deliberate motion
 // (hit shake, stairs dive, pit fall) still plays; only the continuous sway is gone.
@@ -88,6 +94,7 @@ export class CameraRig {
     this.distance = BASE_DIST;
     this.zoom = 1;
     this.currentZoom = 1;
+    this.combatFocus = 0; this.currentCombatFocus = 0;
     this._lastFrustumZoom = -1;
     this.currentDistance = this.distance;
     this.currentElevation = this.elevation;
@@ -165,7 +172,9 @@ export class CameraRig {
     // Overview must not crop, so round DOWN to the texel size (a larger view); normal play rounds to
     // the nearest, which keeps the intended framing.
     const raw = this.viewportPx / (wantTiles * pxPerTile);
-    const S = Math.max(1, ov ? Math.floor(raw) : Math.round(raw));
+    let S = Math.max(1, ov ? Math.floor(raw) : Math.round(raw));
+    // In a fight, one whole texel closer — never a fraction of one (see COMBAT_ZOOM_MAX).
+    if (!ov && this.currentCombatFocus > 0.5 && (S + 1) / S <= COMBAT_ZOOM_MAX) S += 1;
     this.texelSize = S;
     const h = this.viewportPx / (S * pxPerTile); // world units tall
     this.viewHeight = h;
@@ -266,6 +275,12 @@ export class CameraRig {
   /** Continuous zoom (no stop snapping), for scripted cameras. */
   setZoomExact(z) { this.zoom = clamp(z, 0.5, 2); }
 
+  /**
+   * Step in for a fight, back out when it ends: one whole texel closer (applyFrustum), on top of the
+   * player's own zoom rather than a change to it, so the wheel setting survives every fight.
+   */
+  setCombatFocus(on) { this.combatFocus = on ? 1 : 0; }
+
   /** Add shake energy (0..1); quadratic response, decays on its own. */
   shake(amount) {
     const tr = this.transition;
@@ -291,6 +306,7 @@ export class CameraRig {
     this.smoothTarget.copy(dst);
     this.velocity.set(0, 0, 0);
     this.currentZoom = this.zoom;
+    this.currentCombatFocus = this.combatFocus;
     this.sanctum = this.sanctumFactor();
     const want = this.wanted();
     this.currentDistance = want.distance; this.currentElevation = want.elevation; this.currentYaw = want.yaw;
@@ -340,7 +356,14 @@ export class CameraRig {
     const s = this.sanctum;
     const elev = this.elevation; // fixed plan-view tilt; zoom and sanctum no longer swing it
     const dist = (this.distance / z) * (1 - s * 0.14);
-    const yaw = this._yaw + this.depthYaw + s * Math.sin(this.time * 0.35) * 3.5 * DEG;
+    // NO YAW IN THE SANCTUM. This used to add `s * sin(time * 0.35) * 3.5deg` — a slow drift around
+    // Y while the hero stood near an altar. It reads as the room turning under you, and it is the
+    // one thing in the rig that breaks the view's own rule: the plan view is SQUARE TO THE GRID
+    // (see BASE_YAW and depthYaw, which is hard 0 for exactly this reason), so corridors run as
+    // clean rows and a tile's texels stay on the pixel grid. A few degrees of yaw resamples every
+    // floor texel off that grid for as long as the drift lasts. The sanctum still reads as its own
+    // place through the dolly-in and the raised look height below, neither of which turns anything.
+    const yaw = this._yaw + this.depthYaw;
     return { distance: dist, elevation: elev, yaw, lookHeight: 0.3 + s * 0.35 };
   }
 
@@ -403,6 +426,7 @@ export class CameraRig {
     // context
     this.sanctum = damp(this.sanctum, this.sanctumFactor(), 3, dt);
     this.currentZoom = damp(this.currentZoom, this.zoom, 6, dt);
+    this.currentCombatFocus = damp(this.currentCombatFocus, this.combatFocus, 5, dt);
 
     // follow spring toward anchor + look-ahead (+ cinematic drift in overview)
     const dst = ov ? this._dst.copy(ov.center) : this._dst.copy(this.anchor).add(this.lookAhead).add(FRAME_BIAS);
@@ -455,7 +479,8 @@ export class CameraRig {
     // Transient "fov punch" effects become a small zoom nudge so hits and stairs still read.
     const punch = (this.fovOffset + (this._trFov || 0)) * -0.006;
     const z = this.currentZoom * (1 + punch);
-    if (Math.abs(z - this._lastFrustumZoom) > 1e-4) { this._lastFrustumZoom = z; this._frustumZoom = z; this.applyFrustumForZoom(z); }
+    const focus = this.currentCombatFocus > 0.5;
+    if (Math.abs(z - this._lastFrustumZoom) > 1e-4 || focus !== this._lastFocus) { this._lastFrustumZoom = z; this._lastFocus = focus; this._frustumZoom = z; this.applyFrustumForZoom(z); }
     if (c.isPerspectiveCamera) {
       // Match the orthographic framing at the plane the camera is looking at, so the toggle is a
       // change of projection and nothing else. `viewHeight` is the world height the ortho frustum

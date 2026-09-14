@@ -26,6 +26,17 @@ export const DEFAULT_SETTINGS = {
   cameraTilt: 17,          // degrees off straight-down; higher leans the plan view further forward
   flatDecor: true,          // false strips the painted 2D dressing and draws only real geometry
   tileSkin: '',             // '' = the procedural fields (render/tiles.js); otherwise a render/tileSkins.js id
+  // Lighting layers (Settings -> Lighting). All on is the shipping look; each one off is a
+  // diagnostic, not a style — they are here so a frame can be taken apart layer by layer.
+  lightAmbient: true,       // the hemisphere fill
+  lightKey: true,           // the raked directional key light
+  lightLantern: true,       // the player's spot + point glow
+  lightTorches: true,       // the five pooled wall torches
+  lightDecor: true,         // braziers, hearths, candles standing in the rooms
+  lightTemple: true,        // the temple pillars
+  lightShadows: true,       // both shadow casters (the lantern, and the nearest torch)
+  lightGrade: true,         // the depth band's post grade: tint, split tone, saturation, vignette
+  torchColor: 'lantern',    // the hero's lantern colour — an id from ui/torchColor.js TORCH_COLORS
   minimapSize: 'small',     // 'off' | 'small' | 'large' - M cycles it (ui/minimap.js)
   perspectiveCamera: false, // false = the orthographic plan view (exact pixel grid); true = a real
                             // perspective camera, which gives imported geometry depth to read
@@ -81,7 +92,8 @@ export const saveStatus = { at: 0, ok: null, bytes: 0, reason: '' };
  * @returns {boolean} true if written
  */
 export function saveGame(game, opts = {}) {
-  if (!game || game.over) return false;
+  // a placeholder (the game built at boot, behind the title screen) must never overwrite a real quest
+  if (!game || game.over || game.placeholder) return false;
   let data;
   try { data = game.serialize(); } catch { return false; }
   const meta = buildMeta(game);

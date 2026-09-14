@@ -12,7 +12,7 @@ export class MessageLog {
     this.ctx = ctx; this.bus = ctx.bus;
     this.el = document.createElement('div');
     this.el.className = 'panel hud ornate'; this.el.id = 'log';
-    this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div><div class="lines"></div>
+    this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div><div class="mc-band"><span class="mc-title">Chronicle</span></div><div class="lines"></div>
       <div class="foot"><span class="pin">${icon('pin')}<span class="pin-t">Hover to expand · click to pin</span></span><span class="cnt"></span></div>`;
     this.lines = this.el.querySelector('.lines');
     this.pinText = this.el.querySelector('.pin-t');

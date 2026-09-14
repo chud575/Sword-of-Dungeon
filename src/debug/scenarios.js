@@ -382,6 +382,15 @@ export const scenarios = {
     ctx.step(400);
   },
 
+  /**
+   * AS PLAYED: a fresh quest exactly as a player starts it — the URL's seed and `difficulty`, depth 1,
+   * the hero at the spawn, nothing revealed, no spell cast, the real fog. Settles for two seconds.
+   */
+  async 'as-played'(ctx) {
+    ctx.reset();
+    ctx.step(2000);
+  },
+
   /** Audio showcase: unseen threats in the dark (captioned in the log), low HP heartbeat, water drips, deep-level score. */
   async 'audio-cues'(ctx) {
     const g = ctx.reset();
@@ -418,6 +427,21 @@ export const scenarios = {
     g.revealAll();
     ctx.renderer.fog.override = 'all';
     fitOverview(ctx, 62);
+    ctx.step(600);
+  },
+
+  /** The outdoor forest (?biome=forest): glades, trails and the stream, the whole level revealed from above. */
+  async 'forest-overview'(ctx) {
+    const g = ctx.reset(undefined, { biome: 'forest' });
+    g.revealAll();
+    ctx.renderer.fog.override = 'all';
+    fitOverview(ctx, 62);
+    ctx.step(600);
+  },
+
+  /** The outdoor forest at the play camera: the hero at the way in, in his first glade. */
+  async 'forest'(ctx) {
+    ctx.reset(undefined, { biome: 'forest' });
     ctx.step(600);
   },
 
@@ -1585,6 +1609,62 @@ export const scenarios = {
     ctx.renderer.fog.override = 'all';
     ctx.renderer.rebuildLevel();
     ctx.step(3000);
+  },
+
+  /**
+   * THE LANTERN PICKER, open, with the lantern already on a chosen colour.
+   *
+   * Clicking the hero on ordinary floor opens this (ui/torchColor.js). A scenario cannot get there
+   * through the click, because `runScenario` freezes the loop and a frozen loop drops every input
+   * action — so it reaches for the picker directly through the debug API. The hero is walked off
+   * the up-stairs first: standing on stairs a click ACTS instead, which is the whole point of the
+   * gesture being free to reuse.
+   */
+  async 'lantern-picker'(ctx) {
+    const g = ctx.reset();
+    const lv = g.level;
+    let plain = null;
+    for (let r = 1; r < 12 && !plain; r++) for (let dy = -r; dy <= r && !plain; dy++) for (let dx = -r; dx <= r && !plain; dx++) {
+      const x = g.player.x + dx, y = g.player.y + dy;
+      if (lv.get(x, y) === TILE.FLOOR && !lv.monsterAt(x, y) && !lv.isTemple(x, y) && !lv.climbableAt(x, y)) plain = { x, y };
+    }
+    if (plain) g.teleportTo(plain.x, plain.y);
+    ctx.debug.setLanternColor('emerald');
+    ctx.step(500);
+    const c = document.getElementById('game-canvas').getBoundingClientRect();
+    ctx.debug.torchPicker.open(c.left + c.width / 2 + 46, c.top + c.height / 2 + 34);
+    ctx.step(200);
+  },
+
+  /**
+   * THE OVERHEAD TEXT, as the 2009 iOS port does it.
+   *
+   * The port splits it in two: NUMBERS float over the fighters (green for the blow you land, red
+   * for the one you take) and WORDS go in a stack at the top centre — all caps, white, with spell
+   * and status lines in cyan, each line fading in at the bottom of the band, rising, fading out at
+   * the top. This drives the real events so the whole chain is exercised, then freezes mid-flight
+   * with three lines up at three different opacities, which is what the reference frames show.
+   */
+  async 'ios-text'(ctx) {
+    const g = ctx.reset();
+    const p = g.player;
+    const spot = neighbours(g.level, p.x, p.y).find((n) => !g.level.monsterAt(n.x, n.y));
+    const m = spot && g.spawnMonster('hobgoblin', spot.x, spot.y, { depth: g.depth, state: 'hunt' });
+    if (m) freeze(m);
+    ctx.step(120);
+    // Oldest first, so the stack is caught with risen-and-fading lines above a fresh one — and one
+    // of each of the port's three band colours, plus both damage numbers:
+    //   cyan   a status ending      (the log line, routed by effects.js)
+    //   amber  ATTACKED BY ...      (once per engagement)
+    //   white  the onomatopoeia     (and everything else the port says)
+    g.log('Your shield fades.', 'magic');
+    ctx.step(300);
+    ctx.bus.emit('spell:cast', { spell: 'drift', x: p.x, y: p.y, target: p });
+    ctx.step(420);
+    if (m) ctx.bus.emit('entity:attacked', { attacker: p, defender: m, damage: 7, killed: false, crit: false, kind: 'melee' });
+    ctx.step(380);
+    if (m) ctx.bus.emit('entity:attacked', { attacker: m, defender: p, damage: 4, killed: false, crit: false, kind: 'melee' });
+    ctx.step(260);
   },
 
   /**

@@ -5,11 +5,28 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import net from 'node:net';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+/**
+ * A port nothing is listening on, asked of the OS on EVERY interface. `vite --port 0` does not mean
+ * "any free port": Vite falls back to 5173 and counts up, and a dev server someone left running on
+ * 0.0.0.0:5174 let the test's own 127.0.0.1:5174 start anyway — after which page loads hung and
+ * screenTruth's before() hook (which index.js turns into a hook for EVERY test file) failed the lot.
+ */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.unref();
+    srv.on('error', reject);
+    srv.listen(0, () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+  });
+}
+
 export async function startServer() {
-  const proc = spawn(process.execPath, [path.join(ROOT, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', '0', '--strictPort', 'false'], {
+  const port = await freePort();
+  const proc = spawn(process.execPath, [path.join(ROOT, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
     cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NO_COLOR: '1' },
   });
   const url = await new Promise((resolve, reject) => {

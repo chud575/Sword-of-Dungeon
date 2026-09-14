@@ -47,15 +47,16 @@ test('damage formulas stay within the VIC bounds and shields block', () => {
   for (let i = 0; i < 50; i++) assert.equal(monsterStrikeDamage(rng, m, p, 5).damage, 0);
 });
 
-test('killing grants XP, skill and ends invisibility; player-initiated fights can be fled', () => {
+test('killing grants XP, skill and ends invisibility; player-initiated fights can be left by stepping away', () => {
   const g = new Game({ seed: 9, bus: new EventBus() });
   const p = g.player;
   const spot = adjacentFree(g);
   const m = g.spawnMonster('dire-wolf', spot.x, spot.y);
-  m.hp = 1;
+  m.hp = 1; m.flags.flees = false;   // it has to stand and take the blow, not run during the standoff
   p.invisible = true; addStatus(p, 'invisible', {});
   const xpBefore = p.xp, skillBefore = p.skill;
   g.move(spot.x - p.x, spot.y - p.y);
+  g.update(1);   // the fight is announced, then the first blow lands after the opening standoff
   assert.equal(m.state, 'dead');
   assert.equal(p.kills, 1);
   assert.ok(p.xp > xpBefore && p.skill > skillBefore);
@@ -69,7 +70,13 @@ test('killing grants XP, skill and ends invisibility; player-initiated fights ca
   g.move(spot2.x - p.x, spot2.y - p.y);
   assert.ok(g.state.combat && g.state.combat.playerInitiated);
   g.setHeld(0, 0);
-  assert.equal(g.state.combat, null, 'released the stick: fight over');
+  assert.ok(g.state.combat, 'letting go no longer ends the fight: the blows trade on their own turns');
+  g.update(0.3);   // the step after the bump is ready again; still inside the opening standoff
+  const away = [[1, 0], [-1, 0], [0, 1], [0, -1]].map(([dx, dy]) => ({ dx, dy }))
+    .find(({ dx, dy }) => g.level.isWalkable(p.x + dx, p.y + dy) && !g.level.entityAt(p.x + dx, p.y + dy) && Math.max(Math.abs(p.x + dx - m2.x), Math.abs(p.y + dy - m2.y)) > 1);
+  assert.ok(away, 'the test map has somewhere to step away to');
+  g.move(away.dx, away.dy);
+  assert.equal(g.state.combat, null, 'stepping away ends a fight you started');
   g.level.removeEntity(m2);
 });
 

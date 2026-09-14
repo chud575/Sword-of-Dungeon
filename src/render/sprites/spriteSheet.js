@@ -64,7 +64,7 @@ export function packSheet(built, { pad = 1, order = null, facings = ['S', 'E', '
     fr.foot = footMetrics(fr.pix, fr.px, fr.py);
     delete fr.pix;
   }
-  return { width: W, height: H, data, frames, anims, rows };
+  return { width: W, height: H, data, frames, anims, rows, eastMirrored: !!built.eastMirrored };
 }
 
 function pow2(n) { let p = 1; while (p < n) p <<= 1; return p; }

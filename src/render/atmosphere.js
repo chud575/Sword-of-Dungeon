@@ -9,7 +9,7 @@
 import * as THREE from 'three';
 import { TILE } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
-import { depthTint, torchFlicker, LIGHT_MOODS, MOOD_KEYS } from './lighting.js';
+import { depthTint, forestTint, torchFlicker, LIGHT_MOODS, MOOD_KEYS } from './lighting.js';
 
 const MAX_LIGHTS = 12;
 const DUST_COUNT = 900;
@@ -236,7 +236,7 @@ export class Atmosphere {
     this.root.add(this.dust);
     // --- billboards (halos + shafts + pools), rebuilt per level ---
     this.billUniforms = {
-      ...fogU, uTime: { value: 0 }, uTorchColor: { value: new THREE.Color(0xff8c2a) },
+      ...fogU, uTime: { value: 0 }, uTorchColor: { value: new THREE.Color(0xff7424) },
       uShaftColor: { value: new THREE.Color(0xb9cbe6) }, uShaftStrength: { value: 0.4 },
     };
     this.billMat = new THREE.ShaderMaterial({
@@ -327,7 +327,7 @@ export class Atmosphere {
    */
   setLevel(level, torchSpots) {
     this.dispose();
-    const look = depthTint(level.depth);
+    const look = level.biome === 'forest' ? forestTint() : depthTint(level.depth);
     this.dustUniforms.uTint.value.copy(look.atmo.dust);
     this.dustBase = look.atmo.dustDensity;
     this.dustUniforms.uDensity.value = this.dustBase;

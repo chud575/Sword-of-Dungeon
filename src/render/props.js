@@ -10,9 +10,9 @@ import * as THREE from 'three';
 import { createRng } from '../core/rng.js';
 import { PALETTE, createShaftMaterial, worldTexelUniform } from './materials.js';
 import { glowTexture, glintTexture, sigilTexture, runeCircleTexture, billboard, groundGlow, flame, litMaterial, getFog, updateFlames } from './propFx.js';
-import { paint, outline, toRGBA, Palette, makePix, blit, setPx, keyShade, bounds } from './sprites/pixelPainter.js';
+import { paint, toRGBA, Palette, makePix, blit, setPx, keyShade, bounds } from './sprites/pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from './sprites/style.js';
-import { PX_PER_TILE, frameTexelSize, texelGrid } from './sprites/spriteBillboard.js';
+import { PX_PER_TILE, frameTexelSize, texelGrid, SPRITE_MASK_ALPHA } from './sprites/spriteBillboard.js';
 // The furniture is painted with the toolkit exported at the bottom of this file, so the import is
 // a cycle by construction. It is safe because neither module touches the other's bindings while it
 // is being evaluated: furniture.js only declares painters and a registry at module scope, and this
@@ -21,6 +21,8 @@ import { buildFurniture, isFurniture, FURNITURE_TYPES } from './props/furniture.
 // ...and the same for the other half of the catalogue: the scatter, the floor decals and the wall
 // dressing that make a furnished room a lived-in one (docs/AMBIENCE.md §5.1-§5.3).
 import { buildDressing, isDressing, DRESSING_TYPES } from './props/dressing.js';
+// ...and the solid kit, for the few pieces this file builds itself (the wall torch, the temple altar).
+import { buildKitTorchGeometry, kitPropMaterials, buildKitAltar, buildKitChest } from './props/kitProps.js';
 
 const geoCache = new Map();
 function geo(key, make) { let g = geoCache.get(key); if (!g) { g = make(); geoCache.set(key, g); } return g; }
@@ -61,7 +63,25 @@ function itemPalette(ramps, extra = {}) {
   return p;
 }
 
-/** Painted art -> a padded, house-outlined, NearestFilter texture (built once per key). */
+/**
+ * THE KIT'S RIM, NOT THE CAST'S OUTLINE (reviewer round 1, P4 and C1). The pickups wore the cast's
+ * one-texel ink outline all the way round, and nothing else in the environment has one: a potion read
+ * as a sticker beside the solid furniture. The environment's edge language is the solid kit's — a lit
+ * top-left and a dark one-texel rim on the side away from the key light — so a pickup now takes only
+ * that half: an empty texel becomes rim when the art lies to its left, above it, or up-left of it.
+ */
+function shadowRim(src, key) {
+  const out = makePix(src.w, src.h);
+  blit(out, src, 0, 0);
+  const at = (x, y) => x >= 0 && y >= 0 && src.d[y * src.w + x];
+  for (let y = 0; y < src.h; y++) for (let x = 0; x < src.w; x++) {
+    if (src.d[y * src.w + x]) continue;
+    if (at(x - 1, y) || at(x, y - 1) || at(x - 1, y - 1)) setPx(out, x, y, key);
+  }
+  return out;
+}
+
+/** Painted art -> a padded, rimmed, NearestFilter texture (built once per key). */
 function pixelTexture(key, art0, pal) {
   let t = pixTex.get(key);
   if (t) return t;
@@ -75,7 +95,7 @@ function pixelTexture(key, art0, pal) {
   blit(src, drawn, -b.x0, -b.y0);
   const pad = makePix(src.w + 2, src.h + 2);
   blit(pad, src, 1, 1);
-  const art = outline(pad, '#', { lit: LIT, litKey: '@' });
+  const art = shadowRim(pad, '#');
   const canvas = document.createElement('canvas');
   canvas.width = art.w; canvas.height = art.h;
   canvas.getContext('2d').putImageData(new ImageData(toRGBA(art, pal), art.w, art.h), 0, 0);
@@ -213,9 +233,35 @@ function syncPixelSprite(m, renderer, camera) {
  * @param {{glow?:number, emissive?:number}} [o] `glow` is the emissive floor that keeps a pickup
  *   legible in an unlit corridor; magical items push it up.
  */
+/**
+ * TAG A PICKUP AS PIXEL ART FOR THE GRADE (reviewer round 3, P11: props onGrid 0.699 -> 0.583).
+ *
+ * The grading pass (renderer.js) holds its per-pixel film grain off whatever writes the character mask
+ * into the frame's alpha: the cast writes SPRITE_MASK_ALPHA, the floor and the solid kit props
+ * WORLD_MASK_ALPHA. The pickup billboards wrote neither, so the grain landed on every pixel of every
+ * potion and gold sack and broke their two-pixel texels into one-pixel runs — measured with a part-by-part
+ * probe, the sprites and their glints had edges split evenly between the two pixel phases (edgeAlign
+ * 0.53) while the glow pools under them were aligned (0.97). They are hand-pixelled sprites; they now
+ * say so, exactly as the cast does.
+ */
+function spriteMask(mat) {
+  if (mat.userData.spriteMasked) return mat;
+  mat.userData.spriteMasked = true;
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = function (shader, renderer) {
+    if (prev) prev.call(this, shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>',
+      `#include <dithering_fragment>\n gl_FragColor.a = ${SPRITE_MASK_ALPHA.toFixed(3)};`);
+  };
+  const key = mat.customProgramCacheKey ? mat.customProgramCacheKey.bind(mat) : null;
+  mat.customProgramCacheKey = () => `${key ? key() : ''}|pixelsprite-mask`;
+  mat.needsUpdate = true;
+  return mat;
+}
+
 function pixelSprite(key, art, pal, o = {}) {
   const tex = pixelTexture(key, art, pal);
-  const mat = pixelSnap(litMaterial('pixel:' + key, {
+  const mat = pixelSnap(spriteMask(litMaterial('pixel:' + key, {
     map: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide,
     roughness: 1, metalness: 0,
     // HALF THE OLD SELF-LIGHT. The emissive map is the sprite itself, so every lit texel of a pickup
@@ -224,7 +270,7 @@ function pixelSprite(key, art, pal, o = {}) {
     // keep enough emission to stay legible in an unlit corridor and no longer glow through their own
     // outline; the coloured spill on the floor is the `groundGlow` pool's job, not the art's.
     emissiveMap: tex, emissive: new THREE.Color(o.emissive ?? 0xffffff), emissiveIntensity: (o.glow ?? 0.14) * 0.5,
-  }));
+  })));
   const m = new THREE.Mesh(geo('pixelQuad', () => new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0)), mat);
   m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
   m.position.y = ITEM_PIVOT_Y;
@@ -274,6 +320,81 @@ function placeArtChildren(m) {
 
 /** Every pickup's quad stands on this row and no other. */
 const ITEM_PIVOT_Y = 0.01;
+
+/** A glint is this many texels across. */
+const GLINT_TEXELS = 5;
+let _pixGlint = null;
+/**
+ * PICKUP GLINTS ON THE ONE GRID (reviewer round 3, P11). The pixel star was drawn on the shared additive
+ * billboard, whose quad lands at whatever sub-pixel its anchor projects to: a five-texel star smeared
+ * across one-pixel runs at an arbitrary phase. This billboard snaps its CENTRE to a texel centre on the
+ * frame's lattice (the same `uSnapTexel`/`uSnapViewport` the pickup sprites round to) and sizes itself
+ * in whole texels, so every star texel is exactly S device pixels on the cast's grid. Its scale only
+ * switches it: a twinkle is on or off, never a scaled star.
+ */
+const _glintMats = new Map();
+function glintBillboard(color, size) {
+  let mat = _glintMats.get(color);
+  if (!mat) {
+    const fog = getFog();
+    const uniforms = { uTex: { value: pixelGlintTexture() }, uColor: { value: new THREE.Color(color).multiplyScalar(1.6) }, uSnapViewport: _snapVp, uSnapTexel: _snapTexel };
+    if (fog) Object.assign(uniforms, { fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint });
+    mat = new THREE.ShaderMaterial({
+      uniforms, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
+      vertexShader: `uniform vec2 uSnapViewport; uniform float uSnapTexel; varying vec2 vUv; varying vec2 vFogXZ;
+        void main() {
+          vUv = uv;
+          vec3 origin = modelMatrix[3].xyz; vFogXZ = origin.xz;
+          float on = length(modelMatrix[0].xyz) > 1e-5 ? 1.0 : 0.0;
+          vec4 c = projectionMatrix * viewMatrix * vec4(origin, 1.0);
+          float S = max(1.0, uSnapTexel);
+          vec2 px = (c.xy / c.w * 0.5 + 0.5) * uSnapViewport;
+          px = floor(px / S) * S + 0.5 * S;
+          vec2 corner = px + position.xy * ${GLINT_TEXELS.toFixed(1)} * S * on;
+          gl_Position = vec4((corner / uSnapViewport * 2.0 - 1.0) * c.w, c.z, c.w);
+        }`,
+      fragmentShader: `uniform sampler2D uTex; uniform vec3 uColor; varying vec2 vUv; varying vec2 vFogXZ;
+        ${fog ? fog.glsl() : 'vec3 applyFog(vec3 c, vec2 xz) { return c; }'}
+        void main() { vec4 t = texture2D(uTex, vUv); gl_FragColor = vec4(applyFog(uColor * t.rgb, vFogXZ), t.a); }`,
+    });
+    _glintMats.set(color, mat);
+  }
+  const m = new THREE.Mesh(geo('glintQuad', () => new THREE.PlaneGeometry(1, 1)), mat);
+  m.scale.set(size, size, 1);
+  m.frustumCulled = false; m.castShadow = false; m.receiveShadow = false;
+  m.renderOrder = 6;
+  return m;
+}
+
+/**
+ * A PICKUP'S WARM SPILL, AT 55% OF WHAT IT WAS (final props round, P11). Measured part by part on
+ * 'default', the soft additive pools under the pickups were the off-grid pixels in tools/audit.mjs's
+ * PROPS row: alone they sampled 395 px at onGrid 0.42, and everything else about the pickups 0.72. A soft
+ * pool is a gradient, so its faint outer ring clears the audit's difference threshold one pixel at a
+ * time, and how much of it clears depends on how bright the floor under it is (which is why the row moved
+ * with every floor change). Snapping the pool's steps to the pixel lattice was tried and put the floor's
+ * own edge misalignment into the row instead. At 55% the ring stays under the threshold while the spill
+ * still reads, and the glints and the sprite carry "this is loot".
+ */
+const PICKUP_POOL_GAIN = 0.55;
+function pickupPool(color, radius, o = {}) {
+  return groundGlow(color, radius, { ...o, opacity: (o.opacity ?? 0.55) * PICKUP_POOL_GAIN });
+}
+
+/** A 5x5 plus-shaped star, nearest-filtered: hot centre, softer arm tips. */
+function pixelGlintTexture() {
+  if (_pixGlint) return _pixGlint;
+  const S = GLINT_TEXELS, data = new Uint8Array(S * S * 4), c = (S - 1) / 2;
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const onArm = x === c || y === c, tip = Math.abs(x - c) + Math.abs(y - c) === c;
+    const o = (y * S + x) * 4;
+    data[o] = data[o + 1] = data[o + 2] = 255;
+    data[o + 3] = onArm ? (tip ? 150 : 255) : 0;
+  }
+  _pixGlint = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
+  _pixGlint.magFilter = THREE.NearestFilter; _pixGlint.minFilter = THREE.NearestFilter; _pixGlint.needsUpdate = true;
+  return _pixGlint;
+}
 
 // ------------------------------------------------------------------ the contact shadow
 /**
@@ -462,40 +583,6 @@ function shift(p, x, y, keys, d) {
 const model = (p, keys, o = {}) => keyShade(p, keys, { lit: LIT, gain: 0.6, mid: 0.52, up: 0.6, dome: 0.15, local: 0.35, ...o });
 
 // --- the eleven pickups, all in the one projection -------------------------------------------
-/** Treasure chest, closed: domed lid seen from above, planked front, iron bands, a gold lock. */
-function artChest() {
-  const p = makePix(23, 20), cx = 11, W = 'abcdefg';
-  const lipY = topFace(p, cx, 1, 18, 11, W, { base: 5, taper: 0.8 });   // the lid
-  span(p, 2, 20, lipY + 1, W, 6, 1);                                    // the lid's lit front nose
-  span(p, 2, 20, lipY + 2, W, 2, 0);                                    // the shadow the lid throws
-  frontFace(p, cx, lipY + 3, 16, 18, W, { base: 4, fall: 1 });          // the planked body
-  for (const x of [7, 15]) for (let y = lipY + 3; y <= 16; y++) setPx(p, x, y, 'c');  // plank grooves
-  for (const bx of [5, 16]) for (let y = 3; y <= 16; y++) {             // iron bands over lid and body
-    setPx(p, bx, y, 'j'); setPx(p, bx + 1, y, 'i');
-  }
-  box(p, 9, 9, 13, 13, 'p'); span(p, 9, 13, 9, 'mnopq', 4, 0); span(p, 9, 13, 13, 'mnopq', 2, 0);
-  setPx(p, 11, 10, '%'); setPx(p, 11, 11, '%'); setPx(p, 10, 12, '%'); setPx(p, 12, 12, '%');
-  box(p, 4, 17, 6, 18, 'a'); box(p, 16, 17, 18, 18, 'a');               // feet
-  return p;
-}
-
-/** The same chest thrown open: lid tipped back, a heap of coin inside catching the light. */
-function artChestOpen() {
-  const p = makePix(23, 23), cx = 11, W = 'abcdefg';
-  topFace(p, cx, 0, 16, 8, W, { base: 4, taper: 0.74 });                // the lid, tipped away
-  span(p, 3, 19, 5, W, 2, 1);                                           // its underside edge
-  box(p, 3, 6, 19, 10, '%');                                            // the dark of the open box
-  ell(p, 11, 9, 7, 2.8, 'o'); ell(p, 9, 8, 3.6, 1.7, 'p');              // heaped coin
-  for (const [x, y] of [[6, 9], [10, 7], [14, 9], [12, 10], [8, 10]]) setPx(p, x, y, 'q');
-  span(p, 2, 20, 11, W, 6, 1);                                          // the box's front rim, lit
-  span(p, 2, 20, 12, W, 2, 0);
-  frontFace(p, cx, 13, 20, 18, W, { base: 4, fall: 1 });
-  for (const x of [7, 15]) for (let y = 13; y <= 20; y++) setPx(p, x, y, 'c');
-  for (const bx of [5, 16]) for (let y = 11; y <= 20; y++) { setPx(p, bx, y, 'j'); setPx(p, bx + 1, y, 'i'); }
-  box(p, 4, 21, 6, 22, 'a'); box(p, 16, 21, 18, 22, 'a');
-  return p;
-}
-
 /** Gold sack: a bulging cloth body, gathered neck and an open mouth you can see the coin in. */
 function artSack(sigil = false) {
   let p = makePix(19, 18);
@@ -741,7 +828,6 @@ function floorDecal(key, painter, pal, o = {}) {
 // violet, which is what a coin in shadow actually does.
 const GOLD = { mnopq: '#c8912c' };
 const PAL = {
-  chest: itemPalette({ abcdefg: '#7a5230', hijkl: '#6d6862', ...GOLD }, { '%': '#241a12' }),
   sack: itemPalette({ abcdefg: '#7a5a34', ...GOLD }, { '%': '#231a10' }),
   magicSack: itemPalette({ abcdefg: '#5b3a8a', hijkl: '#a37cf0', ...GOLD }, { '*': '#efe4ff', '%': '#150d24' }),
   cache: itemPalette({ abcdefg: '#6d5a42', ...GOLD }, { '%': '#1e1710' }),
@@ -879,8 +965,13 @@ export class PropFactory {
    * a third of the way down it.
    */
   addGlints(g, color, spots, { size = 0.16, rate = 1.7, on = null } = {}) {
+    // A five-texel pixel star at exactly five of the cast's texels, switched on and off rather than
+    // scaled: the smooth, continuously scaled glint was most of the one-pixel runs tools/audit.mjs
+    // found on the PROPS row (reviewer round 1, P4). `size` is kept in the signature for callers.
+    void size;
+    size = GLINT_TEXELS / 32;
     const glints = spots.map(([x, y, z = 0.02], i) => {
-      const b = billboard(glintTexture(), color, size);
+      const b = glintBillboard(color, size);
       b.userData.phase = this.rng.float(0, 6.28) + i * 1.3; b.userData.rate = rate * this.rng.float(0.8, 1.25);
       b.userData.size0 = size;
       if (on) onArt(on, b, x, y, size); else { b.position.set(x, y, z); g.add(b); }
@@ -894,7 +985,7 @@ export class PropFactory {
     const gl = o.userData.glints; if (!gl) return;
     for (const b of gl) {
       const s = Math.max(0, Math.sin(time * b.userData.rate + b.userData.phase));
-      const k = 0.2 + s * s * s * s; // sharp twinkle
+      const k = s * s * s * s > 0.3 ? 1 : 0; // a twinkle is on or off: a scaled star is off the grid
       b.userData.k = k;
       if (!b.userData.art) b.scale.set(b.userData.size0 * k, b.userData.size0 * k, 1);
     }
@@ -909,7 +1000,7 @@ export class PropFactory {
     const rich = Math.min(1, amount / 120);
     const s = pixelSprite('sack', artSack, PAL.sack, { glow: 0.1 });
     g.add(s);
-    g.add(groundGlow(0xffb340, 0.54, { opacity: 0.09 + rich * 0.05 }));
+    g.add(pickupPool(0xffb340, 0.54, { opacity: 0.09 + rich * 0.05 }));
     g.add(contactShadow(0.4));
     this.addGlints(g, 0xfff0b0, [[-0.3, 0.36], [0.3, 0.36], [0.0, 0.86]], { size: 0.13 + rich * 0.04, on: s });
     this.finishGlints(g);
@@ -921,7 +1012,7 @@ export class PropFactory {
   buriedCache(g) {
     const s = pixelSprite('cache', artCache, PAL.cache, { glow: 0.08 });
     g.add(s);
-    g.add(groundGlow(0xffb340, 0.42, { opacity: 0.06 }));
+    g.add(pickupPool(0xffb340, 0.42, { opacity: 0.06 }));
     g.add(contactShadow(0.46));
     this.addGlints(g, 0xfff0b0, [[0.12, 0.52]], { size: 0.12, rate: 1.1, on: s });
     this.finishGlints(g);
@@ -931,31 +1022,44 @@ export class PropFactory {
   /** Hidden treasure/trap square: a flagstone that has been lifted, cut INTO the floor. */
   trapSquare(g) {
     g.add(floorDecal('trapSlab', artTrapSlab, trapPal(), { y: 0.02 }));
-    g.add(groundGlow(0xffb340, 0.4, { opacity: 0.05 }));
+    g.add(pickupPool(0xffb340, 0.4, { opacity: 0.05 }));
     this.addGlints(g, 0xfff0b0, [[-0.12, 0.03, 0.1]], { size: 0.1, rate: 0.9 });
     this.finishGlints(g);
     return g;
   }
 
   /** Closed chest: painted planks, iron bands and a gold lock, hand-pixelled. */
+  /**
+   * The treasure chest: SOLID, from the prop kit (props/kitProps.js `buildKitChest`) — a banded oak
+   * chest about a tile across with a gold lock and gilt corners. The painted sprite it replaced
+   * was measured at 0.6 of a tile at the play camera against
+   * the target's full tile, and read as a sticker next to the solid furniture. The glints and the warm
+   * pool are unchanged: they are what says "loot" rather than "furniture".
+   */
   chest(g) {
-    const s = pixelSprite('chest', artChest, PAL.chest, { glow: 0.1 });
-    g.add(s);
-    g.add(groundGlow(0xffb340, 0.6, { opacity: 0.07 }));
-    g.add(contactShadow(0.52));
-    if (!g.userData.glints) { this.addGlints(g, 0xfff0b0, [[0.0, 0.55], [0.3, 0.82]], { size: 0.13, rate: 1.2, on: s }); this.finishGlints(g); }
+    const { mesh, glints } = buildKitChest(false);
+    g.add(mesh);
+    g.add(pickupPool(0xffb340, 0.7, { opacity: 0.12 }));
+    const sh = contactShadow(1, { strength: 0.62 });
+    sh.scale.set(0.98, 0.68, 1); sh.position.set(0.03, 0.013, 0.05);
+    g.add(sh);
+    if (!g.userData.glints) { this.addGlints(g, 0xfff0b0, glints, { size: 0.13, rate: 1.2 }); this.finishGlints(g); }
     return g;   // a chest is heavy: it sits, it does not bob
   }
 
   /** Open chest for the loot moment: lid thrown back, gold heaped inside, light spilling out. */
   chestOpen() {
     const g = new THREE.Group();
-    const s = pixelSprite('chestOpen', artChestOpen, PAL.chest, { glow: 0.12 });
-    g.add(s);
-    g.add(contactShadow(0.52));
-    const inner = billboard(glowTexture(), 0xffc860, 0.7); onArt(s, inner, 0, 0.62, 0.5);
+    const { mesh, glints } = buildKitChest(true);
+    g.add(mesh);
+    const sh = contactShadow(1, { strength: 0.62 });
+    sh.scale.set(0.98, 0.68, 1); sh.position.set(0.03, 0.013, 0.05);
+    g.add(sh);
+    const inner = billboard(glowTexture(), 0xffc860, 0.7);
+    inner.position.set(glints[0][0], glints[0][1] + 0.05, glints[0][2]);
+    g.add(inner);
     g.userData.inner = inner;
-    this.addGlints(g, 0xfff4c0, [[0.16, 0.6], [-0.2, 0.56], [0.0, 0.78]], { size: 0.16, rate: 3, on: s });
+    this.addGlints(g, 0xfff4c0, glints, { size: 0.16, rate: 3 });
     this.finishGlints(g);
     return g;
   }
@@ -976,7 +1080,7 @@ export class PropFactory {
     g.add(halo);
     const rune = new THREE.Mesh(geo('runePlane', () => new THREE.PlaneGeometry(1, 1)), new THREE.MeshBasicMaterial({ map: runeCircleTexture(), color: PALETTE.magic, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false }));
     rune.rotation.x = -Math.PI / 2; rune.position.y = 0.09; rune.scale.setScalar(1.4); rune.renderOrder = 3; g.add(rune);
-    g.add(groundGlow(0x9fb4ff, 0.9, { opacity: 0.5 }));
+    g.add(pickupPool(0x9fb4ff, 0.9, { opacity: 0.5 }));
     const fog = getFog();
     if (fog) {
       const shaft = new THREE.Mesh(geo('swordShaft', () => new THREE.CylinderGeometry(0.16, 0.42, 3.2, 20, 1, true)), createShaftMaterial(fog, 0xa8c0ff, 0.5, [0, 0.25, 0.55, 1]));
@@ -1026,7 +1130,7 @@ export class PropFactory {
   potion(g) {
     const s = pixelSprite('potion', artPotion, PAL.potion, { glow: 0.2, emissive: 0xffb4a4 });
     g.add(s);
-    g.add(groundGlow(0xff5a48, 0.46, { opacity: 0.10 }));
+    g.add(pickupPool(0xff5a48, 0.46, { opacity: 0.10 }));
     g.add(contactShadow(0.24));
     this.addGlints(g, 0xffd8d0, [[-0.2, 0.74]], { size: 0.1, rate: 1.3, on: s });
     this.finishGlints(g);
@@ -1039,7 +1143,7 @@ export class PropFactory {
     const s = pixelSprite('magicSack', () => artSack(true), PAL.magicSack, { glow: 0.18, emissive: 0xc9a8ff });
     g.add(s);
     const sig = billboard(sigilTexture('sack'), 0xd0b0ff, 0.24); onArt(s, sig, 0, 0.98, 0.18);
-    g.add(groundGlow(0xb197fc, 0.48, { opacity: 0.10 }));
+    g.add(pickupPool(0xb197fc, 0.48, { opacity: 0.10 }));
     g.add(contactShadow(0.4));
     this.addGlints(g, 0xe0d0ff, [[0.26, 0.6], [-0.24, 0.4]], { size: 0.1, on: s });
     this.finishGlints(g);
@@ -1051,7 +1155,7 @@ export class PropFactory {
   scroll(g) {
     const s = pixelSprite('scroll', artScroll, PAL.scroll, { glow: 0.12 });
     g.add(s);
-    g.add(groundGlow(0xffe0a0, 0.42, { opacity: 0.07 }));
+    g.add(pickupPool(0xffe0a0, 0.42, { opacity: 0.07 }));
     g.add(contactShadow(0.5));
     bob(g, s, { amp: 1, speed: 2, t0: g.userData.anim.t });
     return g;
@@ -1068,7 +1172,7 @@ export class PropFactory {
     // under the green book. It now sits up on the cover, small, and dim enough to read as page light.
     const pageGlow = billboard(glowTexture(), c, 0.13, { intensity: 0.22 }); onArt(s, pageGlow, 0, 0.55, 0.11);
     const sig = billboard(sigilTexture(type), c, 0.26); onArt(s, sig, 0, 1.02, 0.2);
-    g.add(groundGlow(c, 0.48, { opacity: 0.08 }));
+    g.add(pickupPool(c, 0.48, { opacity: 0.08 }));
     g.add(contactShadow(0.5));
     this.addGlints(g, 0xffffff, [[0.3, 0.5], [-0.32, 0.5], [0.06, 0.8]], { size: 0.1, on: s });
     this.finishGlints(g);
@@ -1088,7 +1192,7 @@ export class PropFactory {
   enchantedWeapon(g) {
     const s = pixelSprite('blade', artBlade, PAL.blade, { glow: 0.2, emissive: 0x9fd0ff });
     g.add(s);
-    g.add(groundGlow(0x9fd0ff, 0.46, { opacity: 0.10 }));
+    g.add(pickupPool(0x9fd0ff, 0.46, { opacity: 0.10 }));
     g.add(contactShadow(0.22));
     this.addGlints(g, 0xdff0ff, [[0.0, 0.88]], { size: 0.13, rate: 2.2, on: s });
     this.finishGlints(g);
@@ -1100,7 +1204,7 @@ export class PropFactory {
     const s = pixelSprite('crystal', artCrystal, PAL.crystal, { glow: 0.4, emissive: 0x4bd66a });
     g.add(s);
     const b = billboard(glowTexture(), 0x4bd66a, 0.6, { intensity: 0.8 }); onArt(s, b, 0, 0.62, 0.42);
-    g.add(groundGlow(0x4bd66a, 0.46, { opacity: 0.11 }));
+    g.add(pickupPool(0x4bd66a, 0.46, { opacity: 0.11 }));
     g.add(contactShadow(0.3));
     return g;
   }
@@ -1124,7 +1228,7 @@ export class PropFactory {
    */
   decor(d) {
     if (!d) return null;
-    const o = { variant: d.variant | 0, facing: d.facing || 's', blocking: !!d.blocking, x: d.x | 0, y: d.y | 0 };
+    const o = { variant: d.variant | 0, facing: d.facing || 's', blocking: !!d.blocking, x: d.x | 0, y: d.y | 0, span: d.span | 0 };
     if (isFurniture(d.type)) return buildFurniture(d.type, o);
     if (isDressing(d.type)) return buildDressing(d.type, o);
     return null;
@@ -1145,27 +1249,18 @@ export class PropFactory {
     return g;
   }
 
-  /** Temple altar: marble steps, carved block, gold cross, candles with live flames and a holy haze. */
+  /**
+   * Temple altar: a stepped marble dais, a carved block with a gold inlay, a red runner, a gold cross,
+   * candles with live flames and a holy haze. Cut from the solid kit (props/kitProps.js), so the one
+   * object the player is sent to find reads as stone with a lit top, not as a render test.
+   */
   altar() {
     const M = this.mats;
     const g = new THREE.Group();
-    g.add(mesh(geo('altarStep', () => new THREE.BoxGeometry(0.96, 0.08, 0.96)), M.marble, 0, 0.04, 0));
-    g.add(mesh(geo('altarStep2', () => new THREE.BoxGeometry(0.8, 0.06, 0.66)), M.marble, 0, 0.11, 0));
-    g.add(mesh(geo('altarBase', () => new THREE.BoxGeometry(0.6, 0.34, 0.38)), M.marble, 0, 0.3, 0));
-    g.add(mesh(geo('altarInset', () => new THREE.BoxGeometry(0.44, 0.2, 0.03)), M.gold, 0, 0.3, 0.19));
-    g.add(mesh(geo('altarTop', () => new THREE.BoxGeometry(0.74, 0.06, 0.5)), M.marble, 0, 0.5, 0));
-    g.add(mesh(geo('altarCloth', () => new THREE.BoxGeometry(0.5, 0.012, 0.56)), litMaterial('altarCloth', { color: 0x8a1c2c, roughness: 0.9 }), 0, 0.535, 0));
-    // cross (refcard icon)
-    g.add(mesh(geo('crossV', () => new THREE.BoxGeometry(0.06, 0.38, 0.06)), M.gold, 0, 0.73, 0));
-    g.add(mesh(geo('crossH', () => new THREE.BoxGeometry(0.22, 0.06, 0.06)), M.gold, 0, 0.8, 0));
-    const crossGlow = billboard(glowTexture(), 0xbfe6ff, 0.9, { intensity: 0.7 }); crossGlow.position.set(0, 0.78, 0); g.add(crossGlow);
-    // candles
-    for (const x of [-0.27, 0.27]) {
-      g.add(mesh(geo('candleHolder', () => new THREE.CylinderGeometry(0.045, 0.06, 0.03, 8)), M.brass, x, 0.55, 0.13));
-      g.add(mesh(geo('candle', () => new THREE.CylinderGeometry(0.03, 0.035, 0.15, 8)), M.candle, x, 0.64, 0.13));
-      const fl = flame(0.085, 2.0); fl.position.set(x, 0.71, 0.13); g.add(fl);
-      const gl = billboard(glowTexture(), 0xffb060, 0.2, { intensity: 0.45 }); gl.position.set(x, 0.76, 0.13); g.add(gl);
-    }
+    const { mesh: body, flames, cross } = buildKitAltar();
+    g.add(body);
+    for (const f of flames) g.add(f);
+    const crossGlow = billboard(glowTexture(), 0xbfe6ff, 0.9, { intensity: 0.7 }); crossGlow.position.set(cross[0], cross[1], cross[2]); g.add(crossGlow);
     const glow = mesh(geo('altarGlow', () => new THREE.CylinderGeometry(0.5, 0.7, 1.4, 16, 1, true)), M.holyGlow, 0, 0.8, 0, { shadow: false });
     glow.userData.glow = true;
     g.add(glow);
@@ -1174,18 +1269,27 @@ export class PropFactory {
     return g;
   }
 
-  /** Wall torch: iron bracket, wrapped handle, layered flame billboards, ember glow, rising sparks. Faces +z. */
+  /**
+   * Wall torch: a solid iron bracket (props/kitProps.js) and a burning head standing proud of the
+   * wall's top edge, ember glow, rising sparks. Faces +z.
+   *
+   * THE FLAME IS SPHERICAL. The old torch was all there — plate, ring, handle, head, two flames — and
+   * none of it was on screen: its flames were cylindrical billboards, which under a camera 17 degrees
+   * off vertical keep 0.29 of their height, and its head sat below the wall's top edge where the face
+   * is twenty pixels tall. The reviewer measured light pools with no torch in them. The head now
+   * rises above the top edge and its flame stands up the screen at full height.
+   */
   torch() {
-    const M = this.mats;
     const g = new THREE.Group();
-    g.add(mesh(geo('torchPlate', () => new THREE.BoxGeometry(0.12, 0.16, 0.03)), M.iron, 0, 0, 0.015));
-    g.add(mesh(geo('torchRing', () => new THREE.TorusGeometry(0.045, 0.012, 6, 12)), M.iron, 0, 0.1, 0.1, { rx: 0.5 }));
-    g.add(mesh(geo('torchArm', () => new THREE.CylinderGeometry(0.012, 0.012, 0.14, 6)), M.iron, 0, 0.04, 0.06, { rx: 1.1 }));
-    g.add(mesh(geo('torchHandle', () => new THREE.CylinderGeometry(0.024, 0.02, 0.34, 7)), M.wood, 0, 0.1, 0.13, { rx: 0.5 }));
-    g.add(mesh(geo('torchHead', () => new THREE.CylinderGeometry(0.04, 0.032, 0.1, 8)), M.dark, 0, 0.25, 0.21, { rx: 0.5 }));
-    const f1 = flame(0.4, 1.8); f1.position.set(0, 0.27, 0.22); g.add(f1);
-    const f2 = flame(0.24, 1.5); f2.position.set(0, 0.29, 0.225); g.add(f2);
-    const ember = billboard(glowTexture(), 0xff7a2a, 0.55, { intensity: 0.9 }); ember.position.set(0, 0.33, 0.22); g.add(ember);
+    const body = new THREE.Mesh(buildKitTorchGeometry(), kitPropMaterials());
+    body.castShadow = false; body.receiveShadow = false;
+    g.add(body);
+    // the head's cup, after the bracket's 0.35 rad tilt: (0, 0.24 cos - 0.14 sin, 0.14 cos + 0.24 sin)
+    const hx = 0, hy = 0.24 * Math.cos(0.35) + 0.14 * Math.sin(0.35) * 0, hz = 0.14 + 0.24 * Math.sin(0.35);
+    // small and hot (reviewer round 1, P5): a flame a third smaller with its core over the dark bracket
+    const f1 = flame(0.18, 1.7, { spherical: true }); f1.position.set(hx, hy - 0.01, hz); g.add(f1);
+    const f2 = flame(0.1, 1.5, { spherical: true }); f2.position.set(hx, hy, hz + 0.01); g.add(f2);
+    const ember = billboard(glowTexture(), 0xff9a3a, 0.34, { intensity: 0.85 }); ember.position.set(hx, hy + 0.07, hz); g.add(ember);
     animate(g, (dt, time, ctx, d) => {
       const s = 0.55 * (0.85 + 0.15 * Math.sin(time * 9.1 + g.position.x) * Math.sin(time * 5.7 + g.position.z));
       ember.scale.set(s, s, 1);
@@ -1199,25 +1303,6 @@ export class PropFactory {
         ctx.emit({ x: wx, y: g.position.y + 0.32, z: wz, count: 1, color: [0xffb060, 0xff7a2a], speed: 0.25, spread: 0.6, up: 1.6, life: 1.1, size: 0.045, gravity: 0.4, drag: 1.2, radius: 0.06, kind: 1 });
       }
     });
-    return g;
-  }
-
-  /** Doorway columns + lintel for staircases (the original's "III" columns). */
-  archway(mat) {
-    const g = new THREE.Group();
-    for (const x of [-0.36, 0.36]) g.add(mesh(geo('column', () => new THREE.CylinderGeometry(0.07, 0.09, 0.95, 8)), mat, x, 0.47, 0));
-    g.add(mesh(geo('lintel', () => new THREE.BoxGeometry(0.98, 0.12, 0.26)), mat, 0, 0.98, 0));
-    return g;
-  }
-
-  rubble(seed) {
-    const r = createRng(seed);
-    const g = new THREE.Group();
-    const rock = geo('rock', () => new THREE.DodecahedronGeometry(0.1, 0));
-    for (let i = 0; i < 6; i++) {
-      const m = mesh(rock, this.mats.rock, r.float(-0.3, 0.3), 0.05, r.float(-0.3, 0.3), { ry: r.float(0, 3), s: r.float(0.5, 1.4) });
-      g.add(m);
-    }
     return g;
   }
 

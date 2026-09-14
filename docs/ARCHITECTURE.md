@@ -37,8 +37,9 @@ src/world/level.js          Level class: tiles grid, entities, explored/visible 
 src/world/fov.js            computeVisibility(level, x, y, radius) (symmetric shadowcasting), fog-of-war memory
 src/world/pathfinding.js    aStar(level, from, to, opts), flowField for monsters
 src/render/renderer.js      Renderer: Three scene, camera rig, post-processing (bloom, vignette, SSAO-ish), resize, render(alpha)
-src/render/dungeon.js       DungeonView: builds/updates instanced tile meshes for a Level (floors, walls, water, stairs, pits, temple, traps)
-src/render/materials.js     procedural canvas/shader textures & materials (stone, moss, water, gold, magic) + palette
+src/render/dungeon.js       DungeonView: builds a Level's diorama — ONE flat floor mesh wearing the level's painted floor field, merged wall runs whose caps sample the same field, water, stairs, pits, temple, traps
+src/render/floorField.js    paintFloorField(level) -> the whole level's ground as one 32-texels-a-tile picture: coursed flagstone laid over rooms/corridors/wall mass (not per tile; head joints bonded off the course below, bed joints kept off the 1m phase), temple rings, thresholds at doorways, the forest's grass/trails/stream bank and fords (streamFords); fieldTextures() uploads it; FIELD_LAYOUT_TUNE holds its live-tunable layout choices. tools/fieldpreview.mjs renders it without a browser
+src/render/materials.js     procedural canvas/shader textures & materials (stone, moss, water, gold, magic) + palette; `field`/`fieldCap` materials sample the floor field on the world texel grid, with a highlight shoulder (FIELD_TONE; the renderer picks the revealed/lit knee each frame via syncFieldTone); the 8x12 atlas now serves only stair treads, kerbs, pit lips and tile skins
 src/render/characters.js    CharacterFactory: procedural low-poly meshes + rigs for player and every monster; animation clips
 src/render/props.js         item/treasure/torch/altar prop meshes and pickup animations
 src/render/lighting.js      ambient + torch flicker + player light + fog-of-war darkness shader (explored/visible/unknown)
@@ -62,7 +63,7 @@ tools/shot.mjs, smoke.mjs   screenshot and smoke tools (do not modify without re
 export const TILE = { WALL: 0, FLOOR: 1, CORRIDOR: 2, STAIRS_DOWN: 3, STAIRS_UP: 4, PIT: 5, TEMPLE: 6, WATER: 7, DOOR: 8, TRAP_TELEPORT: 9, TRAP_PIT: 10, RUBBLE: 11 };
 // Level (world/level.js)
 class Level { depth, width, height, seed, tiles: Uint8Array, explored: Uint8Array, visible: Uint8Array,
-  rooms: [{x,y,w,h,type}], entities: Entity[], items: ItemInstance[], stairsUp:{x,y}, stairsDown:{x,y}|null, temples:[{x,y}],
+  rooms: [{x,y,w,h,type}], entities: Entity[], items: ItemInstance[], stairsUp:{x,y}, stairsDown:{x,y}|null, temples:[{x,y}], biome: null|'forest' (world/forest.js: WALL is woods, FLOOR glades, CORRIDOR trails),
   get(x,y), set(x,y,t), isWalkable(x,y), inBounds(x,y), entityAt(x,y), itemsAt(x,y), addEntity(e), removeEntity(e) }
 // Entity (monsters + player share this shape)
 { id, kind:'player'|'monster', type:'kobold'|..., x, y, px, py (render-interpolated position), facing:{dx,dy}, hp, maxHp, level, xpValue,
@@ -80,6 +81,7 @@ class Level { depth, width, height, seed, tiles: Uint8Array, explored: Uint8Arra
 - 'trap:triggered' {type, x, y}, 'temple:sacrifice' {gold, xp}, 'sword:found', 'sword:timer' {remaining}
 - 'log' {text, kind:'info'|'combat'|'loot'|'danger'|'magic'|'quest'}
 - 'game:over' {victory:boolean, cause, stats}, 'game:paused' {paused}
+- 'render:context' {state:'lost'|'restored'|'dead', losses} — the WebGL context. 'dead' means the renderer stopped letting three.js ask for it back (a burst of losses) and stopped drawing; the UI offers a reload
 - 'fx:*' arbitrary visual-effect requests (renderer listens), 'sfx:*' audio requests (audio listens)
 
 ## Debug API (required — screenshot tools depend on it)

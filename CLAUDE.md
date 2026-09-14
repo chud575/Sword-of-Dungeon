@@ -61,7 +61,8 @@ Every one of these boots a headless Chromium and renders real frames.
 | --- | --- |
 | `node tools/shot.mjs --scenario default --out shots/x.png` | one frame from a named scenario |
 | `node tools/audit.mjs --scenario default` | `litMedian`, `edgeAlign`, `runTexels`, contact shadow, off real pixels |
-| `node tools/lumen.mjs` | mean scene luminance and histogram — the board-bright meter |
+| `node tools/lumen.mjs` | mean scene luminance and histogram (a lower mean is not a defect now — see Art direction) |
+| `node tools/fieldpreview.mjs` | a level's painted floor field as a PNG, in node, no browser |
 | `node tools/cast.mjs --depths 4,20` | how much of a floor field's OWN colour survives to the screen — the band-wash meter |
 | `node tools/tilepreview.mjs shots/tiles.png` | every floor style as a labelled field |
 | `node tools/decordump.mjs --seed 7 --depth 8` | furniture placement as ASCII |
@@ -69,32 +70,80 @@ Every one of these boots a headless Chromium and renders real frames.
 | `node tools/play.mjs` | scripted play, for the game loop |
 | `node tools/bundle.mjs` | fold the build into one self-contained HTML file |
 
-`src/debug/scenarios.js` lists 79 scenarios. For art review: `default`, `dungeon-overview`,
+`src/debug/scenarios.js` lists 84 scenarios. For art review: `default`, `dungeon-overview`,
 `deep-level`, `treasure`, `temple`, `room-crypt`, `cavern`, `dressing`, `bestiary`.
 
 Debug API in the browser: `?debug=1&seed=42&scenario=treasure` exposes `window.__game.debug`.
 
 ## Art direction
 
-The reference is the HeroQuest board: every room one saturated colour-and-pattern field, corridors
-one continuous pale cobble you trace the layout by, the wall band chunky near-white blocks framing
-it. Bright and legible — no large dark areas. `src/render/tiles.js` authors that vocabulary and is
-approved; do not restyle it.
+**Changed 2026-09-13.** The HeroQuest-board direction (saturated flat room fields, near-white wall
+band, "bright board") is retired. The targets are now the user's painted concept panels, kept in
+`docs/art-ref/`: `target-dungeon.png` for the dungeon, `target-forest.png` for the forest.
+`topdown-map-x3.png` is drawn at nearly our camera angle — copy from it before the 45° panels.
+
+- **The camera does not change** for the art: near-plan orthographic, tilt ~17°. We see TOPS. Brick
+  courses on wall faces, tall silhouettes and long raking shadows cannot be copied; don't chase them.
+- **Floor:** chunky irregular bevelled flagstones, several stones to a tile, so the 1m grid disappears.
+  Stone width:height ≈ 0.85–1.5 — longer, thinner courses read as "brick wall laid flat", and that
+  regression has happened twice. Rooms stay distinct by stone type and restrained tint.
+- **Light:** warm orange torch pools (hue ~20–30°) against cool blue-grey stone. Moody is correct — a
+  lower scene mean is not a defect; a dark FLOOR or near-black play area is.
+- **Wall tops** lighter than the floor, but only ~1.3×, never a glare field.
+- **Props:** solid, sheared low-poly pieces with a baked top-left light and a contact shadow, on the
+  same 2px texel grid. Nothing flat is drawn on wall faces or as loud floor decals.
+- **Forest:** olive-to-yellow-lime grass with tufts and flowers, clumpy three-tone canopies darker and
+  bluer than the grass, pale ruins, a winding stream with bridges where trails cross.
 
 ## Where it stands
 
-The authored tile atlas was reviewed at 8–9/10. The rendered frame was reviewed at **4/10** — the
-transform between them is wrong, in four measured ways:
+A five-round floor / props / reviewer pass (2026-09-13) took the environment from roughly 3/10 to
+7–8.5/10 against those targets, scored by a reviewer reading real play-camera frames:
 
-- ACES tone mapping at 0.92 exposure (`render/renderer.js`) delivers a cream corridor authored at
-  luminance 0.82 to the screen at 0.29. Scene mean is 0.16; a board under room light is 0.5–0.6.
-- Corridor 0.29 vs wall top 0.50 — inverted. The floor should be the light anchor.
-- ~~`depthTint` applies band colour as a hue multiplier on albedo, so room fields vanish below
-  depth 13.~~ **LARGELY FIXED** — see below. Measure it with `tools/cast.mjs` before believing
-  anything about floor colour.
-- Pixels per texel is 2.008 horizontal, ~1.92 vertical after the tilt, so grout flickers 2–3px wide.
+| area | before | after |
+| --- | --- | --- |
+| dungeon floor | 4 | 7 |
+| dungeon props | 3 | 8.5 |
+| forest ground | 2 | 8 |
+| forest props | 2 | 8 |
 
-`tools/workflows/boardfix.js` targets all four with numeric gates.
+- **Floor** is one painted texture per level (`render/floorField.js`, preview with
+  `node tools/fieldpreview.mjs`), not per-tile slabs; stones are laid per region and cross tile lines.
+  `tools/tilepreview.mjs` still previews the old per-tile atlas, which now only feeds stair treads,
+  pool kerbs and pit lips.
+- **Props** are built from `render/props/kit.js` (painted atlas, shear, baked light) — dungeon pieces in
+  `props/kitProps.js`, outdoor pieces in `props/forest.js`. The old painted billboards remain as the
+  fallback and for tests; pickups are still billboards.
+- **Gates the pass held to** (the meters were scratch scripts, not in the repo): tile-edge seam dip
+  ≤0.12; ≤15% of the play area above luma 0.6; lit floors ≥0.12 and near-black ≤3% outside unexplored
+  fog; torch-pool vs shade warmth split ≥0.17; audit PROPS onGrid ≥0.68 (was 0.41).
+- **Not yet seen on real hardware.** Open Safari before trusting it: torch flicker across the pools
+  (default's north wall tops are the most striped), the floor's highlight shoulder at level-up /
+  sacrifice / Sword / death / victory, the pool softening's seven samples under real mipmapping,
+  canopy and bridge-rail edges under MSAA, and depth 8/9/20 darkness.
+- **Accepted residuals:** the default start room's pools sit at hue 30.9° and read slightly striped;
+  stones stack in short vertical files in the guardroom and deep levels; the forest canopy would only
+  improve further with a generated texture.
+
+**The floor is now the user's own art (2026-09-14).** The default dungeon floor is the hand-painted tiles from their
+earlier game, Dungeon Crawlers: `src/assets/tiles/dc/atlasN.png` (three rows of eight 128px tiles = six materials ×
+four variants) with matching `atlasN_nrm.png` normal maps, one atlas per dungeon level (1–5, then round again).
+Material 5 of each atlas (a brick or cobble run) paves the corridors; rooms take one of the other five. Loading,
+per-material tone (`DC_TONE`: dark materials lifted, warm ones desaturated so torches don't blow them out) and the
+normal-map green flip live in `render/paintedTiles.js`; laying them into the field is `paintPaintedTiles` in
+`render/floorField.js`. `?tiles=painted` shows the generated flagstones instead; `?tiles=0` the procedural stone.
+The user called these tiles "what was missing" — prefer their assets (Dropbox `Dungeon Crawlers/…/Atlases/`,
+which also holds props, banners and decals) over generated or procedural art.
+
+**The UI** is the late-70s TSR module-cover theme (`src/ui/module.css`, `body.ui-module`); `?ui=classic` restores
+the old parchment HUD. Futura / Avenir Next Condensed are Apple system fonts — bundle open-licence equivalents
+(e.g. Jost, Barlow Condensed) before shipping to other machines.
+
+**Saves:** the game built at boot (behind the title screen) is marked `placeholder` and nothing saves it; before
+that, every page load overwrote the player's quest (the title menu pauses the game and a pause autosaves).
+`tests/saveGuard.test.js` holds the line.
+
+Measure floor colour with `tools/cast.mjs` before believing anything about it.
 
 ### The band wash, and the three places it came from
 
@@ -125,10 +174,13 @@ is now 97/255 against boardfix's gate of 30.
 
 ### Known-failing tests — the baseline
 
-`npm test` is **87/88**. The one failure is real, and it is an ART fact rather than a lighting bug:
+`npm test` is **111/112** (2026-09-14, after the module-cover UI, the Dungeon Crawlers floor tiles and the
+save / audio fixes). The one failure is real, and it is an ART fact rather than a lighting bug:
 
-- `no body is lit down its own middle` — 29 cast entries over the 15% pillow-shading ceiling
-  (ogre 30%, hobgoblin 26%, dwarven-guard 26%).
+- `no body is lit down its own middle` — cast entries over the 15% pillow-shading ceiling (24 listed
+  on 2026-09-13, e.g. hobgoblin 28%, demon 22%, gargoyle 22%; it was 33 before the environment pass,
+  whose floor and light changes alter what sits behind the cast). The count tracks the cast list and
+  the scene, not a lighting bug: it was 29 when the list was shorter.
 
 **Do not try to fix this with the lighting.** It was measured. Swinging the sprite gains hard —
 `uAmbientGain` 0.82 → 0.30 and `uDirectGain` 0.88 → 1.40, far past anything shippable — moves the

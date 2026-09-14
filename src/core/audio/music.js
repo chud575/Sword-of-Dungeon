@@ -45,7 +45,7 @@ export class Score {
     this.walk = 0;                          // motif random-walk position (scale degrees)
     this.amb = { drip: 2, gust: 6, rumble: 9, water: false };
     this.layer = {};
-    for (const n of LAYERS) { const g = c.createGain(); g.gain.value = 0; g.connect(e.musicIn); this.layer[n] = g; }
+    for (const n of LAYERS) { const g = c.createGain(); g.gain.value = 0; g.__music = true; g.connect(e.musicIn); this.layer[n] = g; }
     this.layer.pad.gain.value = 0.0001;
     this.buildPad();
     this.buildAmbience();
@@ -60,7 +60,7 @@ export class Score {
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 520; lp.Q.value = 0.7;
     const lfo = c.createOscillator(); lfo.frequency.value = 0.045; const lg = c.createGain(); lg.gain.value = 160; lfo.connect(lg); lg.connect(lp.frequency); lfo.start();
     lp.connect(this.layer.pad);
-    const send = c.createGain(); send.gain.value = 0.35; lp.connect(send); send.connect(this.e.reverbSend);
+    const send = c.createGain(); send.gain.value = 0.35; lp.connect(send); send.connect(this.e.musicSend || this.e.reverbSend);   // through the music's own send, so the music volume reaches it
     this.padVoices = [];
     // three chord voices, each two detuned saws (+ a slow chorus via the LFO on detune)
     for (let v = 0; v < 3; v++) {

@@ -282,7 +282,7 @@ export class Input {
 
   saveNow() {
     const g = this.getGame();
-    if (!g || g.over) { this.chip('Nothing to save', 'danger'); return false; }
+    if (!g || g.over || g.placeholder) { this.chip('Nothing to save', 'danger'); return false; }
     return this.lifecycle.saveNow('manual');
   }
 
@@ -307,7 +307,9 @@ export class Input {
     const g = this.getGame();
     if (g && !g.over) {
       const p = g.player;
-      if (t.x === p.x && t.y === p.y) { this.action({ action: 'interact', source: 'click' }); return; }
+      // the click position rides along: clicking yourself on ordinary floor opens the lantern
+      // picker (ui/torchColor.js), and a popup needs somewhere to be
+      if (t.x === p.x && t.y === p.y) { this.action({ action: 'interact', source: 'click', cx: e.clientX, cy: e.clientY }); return; }
       const m = g.level.monsterAt(t.x, t.y);
       const adjacent = m && Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) <= 1;
       if (!adjacent && this.preview.enabled) {

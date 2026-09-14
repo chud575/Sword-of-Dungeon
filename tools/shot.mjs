@@ -2,6 +2,7 @@
 //        [--eval "<js>"] runs a snippet against the loaded page AFTER the scenario and before the
 //        capture, so a setting can be flipped for one shot without inventing a scenario for it:
 //        --eval "__game.renderer.setCameraProjection('perspective')"
+//        [--params "a=1&b=2"] appends raw query parameters to the page URL (difficulty, look, ...)
 //        node tools/shot.mjs --list
 // Scenarios are defined in the game itself: window.__game.debug.scenarios (see docs/ARCHITECTURE.md).
 // The tool loads the game, calls window.__game.debug.runScenario(name, {seed}), waits, and captures a PNG.
@@ -16,12 +17,13 @@ const width = Number(args.w || 1600), height = Number(args.h || 900);
 const seed = Number(args.seed || 42);
 const wait = Number(args.wait || 1500);
 const out = args.out || `shots/${scenario}.png`;
+const extra = typeof args.params === 'string' ? '&' + args.params.replace(/^[&?]/, '') : ''; // --params "difficulty=classic&look=2"
 
 const server = await startServer();
 const b = await launchBrowser({ width, height });
 let code = 0;
 try {
-  await b.page.goto(server.url + `?debug=1&seed=${seed}&scenario=${encodeURIComponent(scenario)}`, { waitUntil: 'load' });
+  await b.page.goto(server.url + `?debug=1&seed=${seed}&scenario=${encodeURIComponent(scenario)}${extra}`, { waitUntil: 'load' });
   await waitReady(b.page);
   if (args.list) {
     const names = await b.page.evaluate(() => Object.keys(window.__game?.debug?.scenarios || {}));
@@ -34,7 +36,8 @@ try {
     if (ok === 'no-debug-api') { console.error('window.__game.debug.runScenario missing'); code = 2; }
     else if (ok === false) { console.error('unknown scenario: ' + scenario); code = 3; }
     if (typeof args.eval === 'string') {
-      await b.page.evaluate((src) => { /* eslint-disable-next-line no-new-func */ return new Function(src)(); }, args.eval);
+      const got = await b.page.evaluate((src) => { /* eslint-disable-next-line no-new-func */ return new Function(src)(); }, args.eval);
+      if (got !== undefined) console.log('eval: ' + JSON.stringify(got));
     }
     await advance(b.page, wait);
     fs.mkdirSync(path.dirname(out), { recursive: true });

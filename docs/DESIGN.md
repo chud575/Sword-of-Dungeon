@@ -408,14 +408,16 @@ the sword timer keeps ticking in real seconds.
 |---|---|---|
 | Player step | 1 poll while held | **6 tiles/s** max (167 ms per tile), instant response |
 | Monster phase | every `20−L` polls | every `max(0.2, (20 − depth) / 6)` s → 3.2 s at L1, 1.7 s at L10, 0.5 s at L17, 0.2 s at L19+ |
+| Monster movement | once per phase | **[changed, after the iOS port]** `monsterTilesPerSecond(depth)`: 3.7 tiles/s at L1 rising to 5.7 at L15+ (× the monster's speedMul, × AI.pace for its state). The phase above is still the clock for cooldowns, breath charge-ups and staggers |
 | Idle heal tick | 1 poll | 100 ms |
-| Combat round | 1 poll | **250 ms** per exchange (auto-repeats while you hold the direction into the monster) |
+| Combat | 1 poll per exchange | **[changed, after the iOS port]** the fight is announced, a 0.8 s standoff, then the two sides alternate one blow each every 0.5 s until one falls or the fight breaks |
 | Sword timer | 60 Hz jiffy clock, 2000 s | wall-clock game seconds, 2000 s; **pauses while the game is paused** |
 
 ### 7.2 Initiating combat
 - **Bump to attack**: move into a monster. The monster's name is printed (e.g. "A WEAK DIRE WOLF",
   "AN EXPER WAR LORD"). Keep the joystick pushed to fight; **centre the stick at any moment to
   disengage** ("if you attack, you always have the option to leave the battle") [VIC 264, 279].
+  **[remake, after the iOS port]** a bump starts the fight and the blows then trade on their own turns; letting go no longer disengages — step away to leave a fight you started.
 - **Monster-initiated**: a monster stepping onto you starts a fight **you cannot walk out of** —
   "YOU ARE ATTACKED BY <name>": only the panic button (Teleport) ends it early; and if you carry the
   sword it is stolen instead of a fight starting. Being ambushed is therefore the main risk, and
@@ -430,10 +432,11 @@ Let `x = monsterStrength / battleSkill` (the "damage ratio").
 | Player hit | `monsterHP −= int((1/x) × 4 × level × rnd + 1 + enchantments)` |
 | Monster hit | `playerHP −= int(x × 4 × level × rnd + 1)` — **skipped entirely if Shield is up** |
 | Order | Player-initiated: you strike first each round. Monster-initiated: monster strikes first |
+| Pacing [remake] | One blow per turn, alternating, `combatTurnTime` (0.5 s) apart, after a `combatOpening` (0.8 s) standoff under the announcement. A monster joining from the side strikes at most once per exchange |
 | Feedback | Only *your* HP is shown ("HITS: n" + a random combat word: CRUNCH / SLASH ...); monster HP is hidden |
 | Kill | `monsterHP < 0` → "YOU HAVE SLAIN <name>" (or "YOU VANQUISHED"), XP `(str + initialHP) × level`, skill `+int(5·rnd+1)`, kills+1; Shield and Invisibility end; recover stolen gold if it was the thief |
 | Death | `playerHP < −5` inside a fight → slain. (Between fights HP < 0 auto-drinks a potion.) |
-| Fleeing | Player-initiated only: release the stick; Shield is cancelled on fleeing |
+| Fleeing | Player-initiated only: release the stick (remake: step away); Shield is cancelled on fleeing |
 
 No hit rolls, no misses, no criticals: every round both sides deal damage. **[designed]** the remake
 shows floating damage numbers for both sides and adds a visual "crit" flag when a roll is in the top

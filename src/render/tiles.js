@@ -25,33 +25,50 @@ export const VARIANTS = 4;
  */
 export const TILE_STYLES = {
   // --- warm woods and earths
-  plank:      { name: 'Plank',        pattern: 'basketweave', base: 0x7d5a34, alt: 0x6a4a2a, grout: 0x2a1d11, edge: 0x9a744a, wear: 0.5 },
-  tanBrick:   { name: 'Tan brick',    pattern: 'brick',       base: 0xb8894e, alt: 0xa2763f, grout: 0x3a2915, edge: 0xd0a068, wear: 0.5 },
-  goldBrick:  { name: 'Gold brick',   pattern: 'brick',       base: 0xc39a4e, alt: 0xab8340, grout: 0x3d2f14, edge: 0xdcb266, wear: 0.4 },
-  goldBar:    { name: 'Gold bar',     pattern: 'bars',        base: 0xc9a63f, alt: 0xab8b30, grout: 0x3b2d10, edge: 0xe0bd58, wear: 0.35 },
-  goldCross:  { name: 'Gold cross',   pattern: 'xcross',      base: 0xc6a541, alt: 0xa88a33, grout: 0x3a2c11, edge: 0xdfbc5a, wear: 0.4 },
-  oliveBlock: { name: 'Olive block',  pattern: 'grid',        base: 0xb09a3a, alt: 0x97832f, grout: 0x332c0f, edge: 0xc9b452, wear: 0.45 },
+  plank:      { name: 'Plank',        pattern: 'basketweave', base: 0x7a5c3e, alt: 0x684d33, grout: 0x231910, edge: 0x98795a, wear: 0.5 },
+  tanBrick:   { name: 'Tan brick',    pattern: 'brick',       base: 0x9c8e7a, alt: 0x8a7e6c, grout: 0x322b22, edge: 0xb9ab96, wear: 0.5 },
+  goldBrick:  { name: 'Gold brick',   pattern: 'brick',       base: 0xa09482, alt: 0x8d8272, grout: 0x332c22, edge: 0xbcb09c, wear: 0.4 },
+  goldBar:    { name: 'Gold bar',     pattern: 'bars',        base: 0x9d9180, alt: 0x8a7f70, grout: 0x322b21, edge: 0xb8ac99, wear: 0.35 },
+  goldCross:  { name: 'Gold cross',   pattern: 'xcross',      base: 0x9f9483, alt: 0x8c8373, grout: 0x332d23, edge: 0xbbb09e, wear: 0.4 },
+  oliveBlock: { name: 'Olive block',  pattern: 'grid',        base: 0x979274, alt: 0x827d62, grout: 0x2d2b1e, edge: 0xb4af90, wear: 0.45 },
   // --- reds
-  redCrack:   { name: 'Red crack',    pattern: 'crackedPoly', base: 0xb04a33, alt: 0x933c28, grout: 0x38150e, edge: 0xc86147, wear: 0.8 },
-  emberCrack: { name: 'Ember crack',  pattern: 'crackedPoly', base: 0xbf5334, alt: 0xa04328, grout: 0x3c1810, edge: 0xd76a45, wear: 0.75 },
-  redCheck:   { name: 'Red check',    pattern: 'checker',     base: 0xbd6a54, alt: 0x9e5442, grout: 0x3a1c14, edge: 0xd4826a, wear: 0.4 },
-  rustSpeck:  { name: 'Rust speckle', pattern: 'speckle',     base: 0xa5705c, alt: 0x8d5c4a, grout: 0x33201a, edge: 0xbb8a74, wear: 0.55 },
+  redCrack:   { name: 'Red crack',    pattern: 'crackedPoly', base: 0xa2604c, alt: 0x8c5242, grout: 0x341812, edge: 0xbd7a64, wear: 0.8 },
+  emberCrack: { name: 'Ember crack',  pattern: 'crackedPoly', base: 0x9e6a52, alt: 0x885a45, grout: 0x351c12, edge: 0xba846a, wear: 0.75 },
+  redCheck:   { name: 'Red check',    pattern: 'checker',     base: 0xa37868, alt: 0x8a6053, grout: 0x351e17, edge: 0xbf9282, wear: 0.4 },
+  rustSpeck:  { name: 'Rust speckle', pattern: 'speckle',     base: 0x947a6e, alt: 0x80685d, grout: 0x30211b, edge: 0xb09486, wear: 0.55 },
   // --- greens and olives
-  greenCrack: { name: 'Green crack',  pattern: 'crackedPoly', base: 0x6f9a4a, alt: 0x5c8340, grout: 0x1e2c14, edge: 0x88b25f, wear: 0.75 },
-  oliveCrack: { name: 'Olive crack',  pattern: 'crackedPoly', base: 0x93a044, alt: 0x7c8838, grout: 0x2b2f13, edge: 0xaab75c, wear: 0.7 },
-  limeCrack:  { name: 'Lime crack',   pattern: 'crackedPoly', base: 0xa9b34c, alt: 0x8f9a3e, grout: 0x2f3315, edge: 0xc0c964, wear: 0.65 },
+  greenCrack: { name: 'Green crack',  pattern: 'crackedPoly', base: 0x71866a, alt: 0x60755a, grout: 0x1f2a1c, edge: 0x8ea286, wear: 0.75 },
+  oliveCrack: { name: 'Olive crack',  pattern: 'crackedPoly', base: 0x8a8d6e, alt: 0x77795d, grout: 0x2a2b1d, edge: 0xa6a988, wear: 0.7 },
+  limeCrack:  { name: 'Lime crack',   pattern: 'crackedPoly', base: 0x959a72, alt: 0x80855f, grout: 0x2c2e1d, edge: 0xb0b48c, wear: 0.65 },
   // --- teals
-  tealTile:   { name: 'Teal tile',    pattern: 'grid',        base: 0x5f9a94, alt: 0x4e837e, grout: 0x172e2c, edge: 0x79b3ad, wear: 0.45 },
-  tealDiamond:{ name: 'Teal diamond', pattern: 'diamond',     base: 0x6fa39d, alt: 0x5b8b86, grout: 0x1a3230, edge: 0x8bbcb6, wear: 0.4 },
+  tealTile:   { name: 'Teal tile',    pattern: 'grid',        base: 0x6f8a88, alt: 0x5e7775, grout: 0x1c2828, edge: 0x8fa8a6, wear: 0.45 },
+  tealDiamond:{ name: 'Teal diamond', pattern: 'diamond',     base: 0x7d9594, alt: 0x6a8180, grout: 0x1d2a2a, edge: 0x9bb1b0, wear: 0.4 },
   // --- greys and whites
-  greyStone:  { name: 'Grey stone',   pattern: 'grid',        base: 0x8f8d86, alt: 0x7a7871, grout: 0x2a2926, edge: 0xa8a69e, wear: 0.55 },
-  greyBrick:  { name: 'Grey brick',   pattern: 'brick',       base: 0xa9a69c, alt: 0x918e85, grout: 0x2f2e2a, edge: 0xc0bdb2, wear: 0.5 },
-  paleSpeck:  { name: 'Pale speckle', pattern: 'speckle',     base: 0xd9d6cd, alt: 0xc3bfb4, grout: 0x3c3a34, edge: 0xefece3, wear: 0.4 },
-  paleCheck:  { name: 'Pale check',   pattern: 'checker',     base: 0xd2d0c8, alt: 0xa5a29a, grout: 0x383631, edge: 0xe8e6dd, wear: 0.35 },
-  slabGrey:   { name: 'Grey slab',    pattern: 'bigSlab',     base: 0x8a8378, alt: 0x756f66, grout: 0x282521, edge: 0xa39c8f, wear: 0.6 },
+  greyStone:  { name: 'Grey stone',   pattern: 'grid',        base: 0x8a8d92, alt: 0x777a80, grout: 0x232428, edge: 0xa9acb2, wear: 0.55 },
+  greyBrick:  { name: 'Grey brick',   pattern: 'brick',       base: 0x96938c, alt: 0x827f79, grout: 0x2a2926, edge: 0xb3b0a9, wear: 0.5 },
+  paleSpeck:  { name: 'Pale speckle', pattern: 'speckle',     base: 0xb2afa7, alt: 0x9d9a93, grout: 0x33322e, edge: 0xcdcac2, wear: 0.4 },
+  paleCheck:  { name: 'Pale check',   pattern: 'checker',     base: 0xb5b2aa, alt: 0x86837c, grout: 0x31302c, edge: 0xcfccc4, wear: 0.35 },
+  slabGrey:   { name: 'Grey slab',    pattern: 'bigSlab',     base: 0x857f78, alt: 0x726c66, grout: 0x25221f, edge: 0xa39d95, wear: 0.6 },
   // --- the two the board uses everywhere else
-  corridor:   { name: 'Corridor',     pattern: 'cobble',      base: 0xd8d1c2, alt: 0xb9b1a1, grout: 0x3a362e, edge: 0xefe8d8, wear: 0.5 },
-  wallTop:    { name: 'Wall top',     pattern: 'wallBlock',   base: 0xe0d9c9, alt: 0xc2bbab, grout: 0x33302a, edge: 0xf5eedd, wear: 0.4 },
+  corridor:   { name: 'Corridor',     pattern: 'cobble',      base: 0xa09a90, alt: 0x908a81, grout: 0x2a2825, edge: 0xc4beb2, wear: 0.5 },
+  wallTop:    { name: 'Wall top',     pattern: 'wallBlock',   base: 0x8c877f, alt: 0x7f7a73, grout: 0x24232a, edge: 0xc9c1b2, wear: 0.4 },
+};
+
+/**
+ * THE FOREST'S GROUND (world/forest.js). Painted by floorField.js `paintForest`, not four more
+ * rooms in TILE_STYLES: a glade is never a keep's room, so these must never be dealt to one, never be
+ * cast by a tile skin, and never crowd the flagstone atlas. Same painter, same 32 texels a tile, so the
+ * ground sits on the one pixel grid with everything else.
+ *
+ * Ground has NO JOINTS. The four patterns below skip the grout and the bevel the stone fields are read
+ * by; their tone is a soft mottle and their detail — grass tufts, moss, fallen leaves, trail grit — is
+ * drawn on 8-texel lattices that divide the tile, so a tile meets its neighbour without a seam.
+ */
+export const FOREST_STYLES = {
+  meadow: { name: 'Meadow grass', pattern: 'grass',  base: 0x6e9a45, alt: 0x5a8639, grout: 0x2a3d1c, edge: 0xa6c963, wear: 0.3 },
+  moss:   { name: 'Moss bank',    pattern: 'moss',   base: 0x5c8a4c, alt: 0x4a7440, grout: 0x213421, edge: 0x8fb86a, wear: 0.25 },
+  litter: { name: 'Leaf litter',  pattern: 'litter', base: 0x86703f, alt: 0x6f5b33, grout: 0x382b17, edge: 0xd2a24c, wear: 0.4 },
+  trail:  { name: 'Forest trail', pattern: 'trail',  base: 0xb0936a, alt: 0x977c56, grout: 0x4a3a26, edge: 0xd4b88c, wear: 0.5 },
 };
 
 /**
@@ -77,11 +94,13 @@ export const PATTERN_TURNS = {
   basketweave: 2, brick: 2, bars: 2,
   cobble: 4, crackedPoly: 4, speckle: 4, grid: 4, checker: 4, diamond: 4, xcross: 4,
   bigSlab: 4, wallBlock: 4,
+  // the forest's ground (FOREST_STYLES): no course and no joints, so any turn
+  grass: 4, moss: 4, litter: 4, trail: 4,
 };
 
 /** Quarter turns a style's field survives (see PATTERN_TURNS). Unknown styles are held still. */
 export function styleTurns(id) {
-  const st = TILE_STYLES[id];
+  const st = TILE_STYLES[id] || FOREST_STYLES[id];
   return (st && PATTERN_TURNS[st.pattern]) || 1;
 }
 
@@ -197,10 +216,6 @@ function unitAt(pattern, px, py, S, seed) {
   }
 }
 
-/**
- * Paint one 32x32 tile of a style into albedo/height buffers at (x0,y0) of a W-wide field.
- * @param {object} o buffers and placement
- */
 export function paintTile({ alb, hgt, W, x0, y0, S = TEXELS_PER_TILE, style, seed = 0 }) {
   const base = hexRgb(style.base), alt = hexRgb(style.alt), grout = hexRgb(style.grout), edge = hexRgb(style.edge);
   for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {

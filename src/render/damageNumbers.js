@@ -37,57 +37,90 @@ import { PX_PER_TILE, frameTexelSize } from './sprites/spriteBillboard.js';
 import { hashString } from '../core/rng.js';
 
 // ------------------------------------------------------------------------------------- the font
-const GW = 5, GH = 7;                 // glyph cell, in texels
-const FONT = {
-  '0': ['.###.', '#...#', '#..##', '#.#.#', '##..#', '#...#', '.###.'],
-  '1': ['..#..', '.##..', '..#..', '..#..', '..#..', '..#..', '.###.'],
-  '2': ['.###.', '#...#', '....#', '...#.', '..#..', '.#...', '#####'],
-  '3': ['####.', '....#', '....#', '.###.', '....#', '....#', '####.'],
-  '4': ['...##', '..#.#', '.#..#', '#...#', '#####', '....#', '....#'],
-  '5': ['#####', '#....', '####.', '....#', '....#', '#...#', '.###.'],
-  '6': ['..##.', '.#...', '#....', '####.', '#...#', '#...#', '.###.'],
-  '7': ['#####', '....#', '...#.', '..#..', '.#...', '.#...', '.#...'],
-  '8': ['.###.', '#...#', '#...#', '.###.', '#...#', '#...#', '.###.'],
-  '9': ['.###.', '#...#', '#...#', '.####', '....#', '...#.', '.##..'],
-  A: ['.###.', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
-  B: ['####.', '#...#', '#...#', '####.', '#...#', '#...#', '####.'],
-  C: ['.###.', '#...#', '#....', '#....', '#....', '#...#', '.###.'],
-  D: ['####.', '#...#', '#...#', '#...#', '#...#', '#...#', '####.'],
-  E: ['#####', '#....', '#....', '####.', '#....', '#....', '#####'],
-  F: ['#####', '#....', '#....', '####.', '#....', '#....', '#....'],
-  G: ['.###.', '#...#', '#....', '#.###', '#...#', '#...#', '.###.'],
-  H: ['#...#', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
-  I: ['.###.', '..#..', '..#..', '..#..', '..#..', '..#..', '.###.'],
-  J: ['..###', '...#.', '...#.', '...#.', '...#.', '#..#.', '.##..'],
-  K: ['#...#', '#..#.', '#.#..', '##...', '#.#..', '#..#.', '#...#'],
-  L: ['#....', '#....', '#....', '#....', '#....', '#....', '#####'],
-  M: ['#...#', '##.##', '#.#.#', '#.#.#', '#...#', '#...#', '#...#'],
-  N: ['#...#', '##..#', '#.#.#', '#.#.#', '#..##', '#...#', '#...#'],
-  O: ['.###.', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
-  P: ['####.', '#...#', '#...#', '####.', '#....', '#....', '#....'],
-  Q: ['.###.', '#...#', '#...#', '#...#', '#.#.#', '#..#.', '.##.#'],
-  R: ['####.', '#...#', '#...#', '####.', '#.#..', '#..#.', '#...#'],
-  S: ['.####', '#....', '#....', '.###.', '....#', '....#', '####.'],
-  T: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
-  U: ['#...#', '#...#', '#...#', '#...#', '#...#', '#...#', '.###.'],
-  V: ['#...#', '#...#', '#...#', '#...#', '#...#', '.#.#.', '..#..'],
-  W: ['#...#', '#...#', '#...#', '#.#.#', '#.#.#', '##.##', '#...#'],
-  X: ['#...#', '#...#', '.#.#.', '..#..', '.#.#.', '#...#', '#...#'],
-  Y: ['#...#', '#...#', '.#.#.', '..#..', '..#..', '..#..', '..#..'],
-  Z: ['#####', '....#', '...#.', '..#..', '.#...', '#....', '#####'],
-  '+': ['.....', '..#..', '..#..', '#####', '..#..', '..#..', '.....'],
-  '-': ['.....', '.....', '.....', '#####', '.....', '.....', '.....'],
-  '!': ['..#..', '..#..', '..#..', '..#..', '..#..', '.....', '..#..'],
-  '.': ['.....', '.....', '.....', '.....', '.....', '.....', '..#..'],
-  '%': ['#...#', '#..#.', '...#.', '..#..', '.#...', '.#..#', '#...#'],
+const GW = 7, GH = 7;                 // glyph cell, in texels
+/**
+ * THE PORT'S FACE, READ OFF THE REFERENCE FRAMES.
+ *
+ * The 2009 build does not set its overhead text in a plain geometric pixel font — it uses a
+ * LOMBARDIC/UNCIAL one, and the difference is the most visible thing left between this remake's
+ * band and the port's. Read at 22x off the fully-opaque lines of photo10 ('SLAIN BY AN EXPERIENCED
+ * SWORDSMAN', white on near-black, a 30:1 contrast), photo3 ('YOU ARE') and photo4 ('POISON'), the
+ * face has four marks that a geometric font does not:
+ *
+ *   · E is drawn as a rounded 'Є' — a C with a middle bar — in PELL, ARE and EXPERIENCED alike
+ *   · Y is the uncial form: a fork over a tail that curls LEFT, not a plain V on a stem
+ *   · stems carry SERIF FEET (L, I, N, P, B, R, U, H) and X is serifed at all four terminals
+ *   · bowls are ROUND (B, C, D, G, O, P, R, S), never squared off
+ *
+ * Two honest limits. The sources are 480x320 JPEGs of a 7-texel face, so these are the port's
+ * LETTERFORMS rather than its exact texels — thresholding the line gives ringing, not a bitmap
+ * (measured: a 128 threshold on photo10's cleanest line returns mush). And the reference Y drops
+ * its tail below the other letters' baseline; that would need a 9-row cell, which would move the
+ * cap height every measurement in this file is pinned to, so the tail is drawn INSIDE the 7 rows.
+ *
+ * The cell went 5 wide to 7 to hold the serifs. Nothing else needed changing: `METRICS` below reads
+ * each glyph's width off the bitmap, so the advance follows the art. Measured against the port:
+ * cap height 7 texels and an advance of about 10 against its 9.4.
+ */
+export const FONT = {
+  '0': ['..###..', '.##.##.', '.#..##.', '.#.#.#.', '.##..#.', '.##.##.', '..###..'],
+  '1': ['..##...', '.###...', '...#...', '...#...', '...#...', '...#...', '.#####.'],
+  '2': ['..###..', '.##..#.', '.....#.', '....#..', '...#...', '.##....', '.#####.'],
+  '3': ['.####..', '.....#.', '.....#.', '..###..', '.....#.', '.#...#.', '.####..'],
+  '4': ['....##.', '...#.#.', '..#..#.', '.#...#.', '.#####.', '.....#.', '....###'],
+  '5': ['.#####.', '.#.....', '.####..', '.....#.', '.....#.', '.#...#.', '.####..'],
+  '6': ['..###..', '.##....', '.#.....', '.####..', '.#...#.', '.##..#.', '..###..'],
+  '7': ['.#####.', '.....#.', '....#..', '...#...', '...#...', '..#....', '..#....'],
+  '8': ['..###..', '.##.##.', '.#...#.', '..###..', '.#...#.', '.##.##.', '..###..'],
+  '9': ['..###..', '.##..#.', '.#...#.', '..####.', '.....#.', '....##.', '..###..'],
+  A: ['..###..', '.##.##.', '.#...#.', '.#####.', '.#...#.', '.#...#.', '##...##'],
+  B: ['####...', '.#..##.', '.#...#.', '.####..', '.#...#.', '.#..##.', '####...'],
+  C: ['..####.', '.##...#', '.#.....', '.#.....', '.#.....', '.##...#', '..####.'],
+  D: ['####...', '.#..##.', '.#...#.', '.#...#.', '.#...#.', '.#..##.', '####...'],
+  E: ['..####.', '.##...#', '.#.....', '.####..', '.#.....', '.##...#', '..####.'],
+  F: ['.#####.', '.#...#.', '.#.....', '.####..', '.#.....', '.#.....', '###....'],
+  G: ['..####.', '.##...#', '.#.....', '.#..###', '.#...#.', '.##..#.', '..###..'],
+  H: ['###.###', '.#...#.', '.#...#.', '.#####.', '.#...#.', '.#...#.', '###.###'],
+  I: ['.#####.', '...#...', '...#...', '...#...', '...#...', '...#...', '.#####.'],
+  J: ['...####', '....#..', '....#..', '....#..', '....#..', '.#..#..', '..##...'],
+  K: ['###.##.', '.#..#..', '.#.#...', '.##....', '.#.#...', '.#..#..', '###.##.'],
+  L: ['###....', '.#.....', '.#.....', '.#.....', '.#.....', '.#...#.', '.#####.'],
+  M: ['##...##', '.##.##.', '.#.#.#.', '.#...#.', '.#...#.', '.#...#.', '###.###'],
+  N: ['##...##', '.##..#.', '.#.#.#.', '.#..##.', '.#...#.', '.#...#.', '###.###'],
+  O: ['..###..', '.##.##.', '.#...#.', '.#...#.', '.#...#.', '.##.##.', '..###..'],
+  P: ['####...', '.#..##.', '.#...#.', '.####..', '.#.....', '.#.....', '###....'],
+  Q: ['..###..', '.##.##.', '.#...#.', '.#...#.', '.#.#.#.', '.##.#..', '..###.#'],
+  R: ['####...', '.#..##.', '.#...#.', '.####..', '.#.#...', '.#..#..', '###..##'],
+  S: ['..####.', '.##...#', '.#.....', '..###..', '.....#.', '##...##', '.####..'],
+  T: ['#######', '...#...', '...#...', '...#...', '...#...', '...#...', '..###..'],
+  U: ['###.###', '.#...#.', '.#...#.', '.#...#.', '.#...#.', '.##.##.', '..###..'],
+  V: ['##...##', '.#...#.', '.#...#.', '.##.##.', '..#.#..', '..###..', '...#...'],
+  W: ['##...##', '.#...#.', '.#...#.', '.#.#.#.', '.##.##.', '.##.##.', '..#.#..'],
+  X: ['##...##', '.##.##.', '..###..', '...#...', '..###..', '.##.##.', '##...##'],
+  Y: ['##...##', '.##.##.', '..###..', '...#...', '...#...', '..##...', '.##....'],
+  Z: ['.#####.', '....#..', '...#...', '..#....', '.#.....', '##...#.', '.#####.'],
+  '+': ['.......', '...#...', '...#...', '.#####.', '...#...', '...#...', '.......'],
+  '-': ['.......', '.......', '.......', '.#####.', '.......', '.......', '.......'],
+  '!': ['...#...', '...#...', '...#...', '...#...', '...#...', '.......', '...#...'],
+  '.': ['.......', '.......', '.......', '.......', '.......', '..##...', '..##...'],
+  '%': ['##...#.', '##..#..', '...#...', '..#....', '.#.....', '.#..##.', '....##.'],
 };
 /**
  * THE GAP IS THE WHOLE GAME. A one-texel contour eats one texel of air on each side of a glyph, so
- * anything closer than three texels welds two glyphs into one blob (which is what the old
- * `GW + 1 = 6` advance did to every pair of digits on screen). Metrics are measured off the bitmap
+ * anything closer than three texels welds two glyphs into one blob (which is what a one-texel
+ * advance did to every pair of digits on screen). Metrics are measured off the bitmap
  * rather than declared, so a narrow glyph like "1" keeps its own width and the gap stays constant.
  */
 const GAP = 3;
+/**
+ * ...AND WHEN THERE IS NO CONTOUR THERE IS NO GAP TO KEEP. The port sets its band TIGHT: measured
+ * on photo10, 'SLAIN BY AN EXPERIENCED SWORDSMAN' runs 258 px for 33 characters on an 8 px cap —
+ * an advance of 7.8, i.e. 0.98 of the cap height. At GAP 3 this face ran 33.5 px on a 28 px cap,
+ * a ratio of 1.20, and the band read visibly letterspaced against the reference. Uncontoured text
+ * (the stack, and the two flat iOS numbers) therefore takes GAP_TIGHT, which brings the ratio to
+ * about 1.04. Contoured text keeps GAP 3, because there the ink really does need the air.
+ */
+const GAP_TIGHT = 1;
 const METRICS = (() => {
   const m = {};
   for (const c in FONT) {
@@ -103,38 +136,164 @@ const METRICS = (() => {
  * Rasterise a string into a 0 = air / 1 = body mask, tight on both sides.
  * @param {string} text @returns {{w:number, h:number, d:Uint8Array}}
  */
-function textMask(text) {
+export function textMask(text, gap = GAP) {
   const chars = [...text.toUpperCase()].filter((c) => c === ' ' || FONT[c]);
   if (!chars.length) return { w: 1, h: GH, d: new Uint8Array(GH) };
-  const w = chars.reduce((a, c) => a + METRICS[c].w + GAP, 0) - GAP;
+  const w = chars.reduce((a, c) => a + METRICS[c].w + gap, 0) - gap;
   const d = new Uint8Array(w * GH);
   let x = 0;
   for (const c of chars) {
     const g = FONT[c], me = METRICS[c];
     if (g) for (let y = 0; y < GH; y++) for (let i = 0; i < me.w; i++) if (g[y][me.lo + i] === '#') d[y * w + x + i] = 1;
-    x += me.w + GAP;
+    x += me.w + gap;
   }
   return { w, h: GH, d };
 }
 
+/** The advance a style wants: tight when nothing is outlined, wide enough to clear ink when it is. */
+const gapFor = (st) => (st.contour === false ? GAP_TIGHT : GAP);
+
 // ------------------------------------------------------------------------------------ the palette
 // One size language: `big` is the only size axis, colour is the only meaning axis.
+/**
+ * ONE FONT, ONE TWEEN, AND COLOUR IS THE ONLY THING THAT CARRIES MEANING.
+ *
+ * Every piece of floating text in the game comes through `spawn()`, so it is already one 7x7 pixel
+ * font on the cast's texel grid and one motion — a linear rise at `RISE`, held opaque to 70% of its
+ * life and then faded (see `update`). What was NOT consistent was the palette: a monster's damage
+ * was cream, a critical was gold, a level-up and a gold pickup and the Sword itself were all the
+ * same gold banner. Three different events, one colour; one event, three colours.
+ *
+ * So the table below is SEMANTIC. A style names what happened, not what it looks like, and the only
+ * axis that separates two events on screen is hue.
+ *
+ * BUT READ THIS FIRST: matching the iOS port took most of these OUT OF SERVICE. The port floats
+ * only damage over the cast and says everything else in the top-centre stack, so `spawn()` now has
+ * exactly ONE caller in the whole game — the damage number in `effects.js`, with `hit` or `hurt`.
+ * `sleep` is used by the mark below and `banner`/`quest` only alias each other. Everything from
+ * `normal` down to `blocked` is currently UNREACHABLE from game code. They are kept because they
+ * are the fallback `spawn()` resolves to and because the semantic argument still holds if floating
+ * text is ever wanted again — not because anything draws them today.
+ *
+ *   damage   red      something lost hit points
+ *   heal     green    something got them back
+ *   gold     yellow   coin changed hands — picked up, stolen, or given at the temple
+ *   levelUp  green    the hero grew
+ *   death    grey     something died. Deliberately the quietest thing here: a kill is already told
+ *                     by the puff, the sound and the corpse, and a shout on every rat is noise
+ *   magic    violet   a spell, or experience
+ *   blocked  steel    an attack that did nothing
+ *   quest    pale     the Sword. One event in the whole run, and it gets its own colour
+ *   sleep    blue     the sleep mark — a STATE, not an event, so it stays out of the event palette
+ *
+ * `big` is scale ONLY (1.5x, see `_texelPx`). It used to also buy a longer life, which meant a
+ * critical hung around half a second after an ordinary one — a second, invisible axis of meaning.
+ * Life is now one number for everything, and the few announcements that need longer to read pass
+ * `life` explicitly at the call site.
+ *
+ * `top` is the gradient's upper colour: the same hue lifted toward white, never a different hue.
+ */
+/**
+ * HOW FAR ABOVE THE ANCHOR A FLAT NUMBER FLOATS, IN TEXELS.
+ *
+ * The port's numbers are flat and unoutlined, which only works because it never draws one ON a
+ * creature: in img0629 the green 2 stands on open floor a clear glyph-height above the barbarian's
+ * helmet, and the red 4 the same above the hero. This remake's billboards are much taller on screen
+ * relative to their tile, and the old 0.95-world anchor put the number across the CHEST — so a flat
+ * green 7 landed on a green hobgoblin and read as part of the sprite. Measured in the frame: the
+ * anchor sat ~58 px below where it needed to be at 2 px per texel, i.e. about one figure's height.
+ * Lifting is the faithful fix here, not restoring the outline the port does not have.
+ */
+const NUM_LIFT = 30;
+
 const STYLES = {
-  normal: { color: '#f2e9d6', top: '#ffffff', big: false },
-  player: { color: '#ff6f5c', top: '#ffc4b6', big: false },
-  crit: { color: '#ffd257', top: '#fff4c8', big: true },
-  heal: { color: '#8ce8a2', top: '#dcffe6', big: false },
-  gold: { color: '#ffcf4d', top: '#fff1b4', big: false },
-  magic: { color: '#c6a8ff', top: '#eadfff', big: false },
-  banner: { color: '#ffdf8a', top: '#fff7d6', big: true },
+  // THE iOS NUMBERS. Only damage floats over the fighters in the 2009 build, in two colours: green
+  // over the monster you just hit, red over the blow you just took. Everything else the port says,
+  // it says in the top-centre stack (see MSG_STYLES).
+  //
+  // MEASURED, not styled. The green in img0629 is rgb(0,230,0) — fully saturated, and the mean of
+  // the brightest 4% equals the single peak pixel, so there is no gradient across the stroke and no
+  // lighter top row. The red on the same frame peaks at #c34e39 over a tan brick wall at a 0.625
+  // downscale, which is where a flat #e60000 lands after that much wall bleeds through it. So both
+  // are FLAT: one colour, `top` equal to `color`, no contour, no shadow. This is deliberately
+  // unlike every other style in this table — see the ring numbers in `_paint`.
+  hit: { color: '#00e600', top: '#00e600', big: false, contour: false, shadow: false, lift: NUM_LIFT },
+  hurt: { color: '#e60000', top: '#e60000', big: false, contour: false, shadow: false, lift: NUM_LIFT },
+  // --- damage. Both are red, because damage is red; the hero's own is the hotter, brighter one so
+  // "I am being hit" still reads differently from "I am hitting" without leaving the hue.
+  normal: { color: '#d8422f', top: '#ff8a72', big: false },
+  player: { color: '#ff5340', top: '#ffb3a4', big: false },
+  crit: { color: '#ff4326', top: '#ffc0ac', big: true },   // a crit shouts by being BIGGER, not by changing colour
+  heal: { color: '#4fd167', top: '#c4ffd2', big: false },
+  gold: { color: '#ffc32e', top: '#ffeaa0', big: false },
+  levelUp: { color: '#4fd167', top: '#c4ffd2', big: true },
+  death: { color: '#9aa0a8', top: '#d8dde3', big: false },
+  magic: { color: '#b98cff', top: '#e4d6ff', big: false },
   blocked: { color: '#cbd3e0', top: '#f2f6ff', big: false },
+  quest: { color: '#9fd0ff', top: '#e6f4ff', big: true },
   // the sleep mark: cool and quiet, so it never competes with a damage number for the eye
   sleep: { color: '#9fc4e8', top: '#e8f4ff', big: false },
 };
+/** Anything that still asks for the old catch-all banner gets the quest look. */
+STYLES.banner = STYLES.quest;
+
+/**
+ * THE iOS MESSAGE STACK — measured off the 2009 iPhone build, not invented.
+ *
+ * The iOS port does not put words over the cast. It keeps a stack of short, ALL-CAPS lines at the
+ * TOP CENTRE of the screen, and only numbers float over the fighters. Measured from the shipped
+ * 480x320 screenshots (TouchArcade's 2009 preview set, archived):
+ *
+ *   · glyph cap height  8 px of 320  = 2.5% of screen height
+ *   · line pitch       10 px of 320  = 3.1%
+ *   · newest line's centre at y 53.5 of 320 = 16.7% down, horizontally centred
+ *   · COLOUR. Only the newest line is fully opaque, so only the newest line in a frame measures
+ *     its own colour — the faded ones read as whatever is behind them, which is what made the
+ *     first pass of this wrong. Taking the newest line from each frame:
+ *       photo10 'SLAIN BY AN EXPERIENCED SWORDSMAN'  #fefdff  WHITE
+ *       photo3  'YOU ARE FILLED WITH DREAD!'         #f9fffe  WHITE
+ *       photo6  'TELEPORT SPELL CAST!'               #f2d7d0  white, warm-cast by a brown wall —
+ *               the older 'AN ASSASSIN!' in the same frame carries the identical cast, so the cast
+ *               is the frame and not the text. SPELL CASTS ARE WHITE, not cyan.
+ *       photo4  'POISON HAS WORN OFF'                #73b7cf  CYAN, hue 196, and genuinely so:
+ *               every other line in that frame reads hue 245 off the blue-violet wall behind it.
+ *               Cyan is not "magic" — it is an affliction ENDING.
+ *     And one more, off img0629: 'ATTACKED BY AN INFERIOR BARBARIAN!' reads #a07220, hue 38,
+ *     saturation 80%, directly under a white THUD / CHOP! in the same band. AMBER, for the line
+ *     that names what just engaged you. (One low-resolution frame, but the hue is unambiguous.)
+ *   · MOTION: a line fades IN at the bottom of the band, rises, and fades OUT at the top. That is
+ *     the only reading consistent with all five reference frames — in one of them the bottom line
+ *     is the dimmest of three (just arriving) while the top one is also dim (nearly gone).
+ */
+const MSG_STYLES = {
+  white: { color: '#ffffff', top: '#ffffff', big: false, contour: false },
+  cyan: { color: '#73b7cf', top: '#73b7cf', big: false, contour: false },
+  amber: { color: '#e0a01e', top: '#e0a01e', big: false, contour: false },
+};
+const MSG_CAP = 8 / 320;        // glyph cap height as a fraction of screen height
+const MSG_PITCH = 10 / 320;     // line pitch
+const MSG_CENTRE = 53.5 / 320;  // the newest line's centre, measured from the top
+const MSG_LIFE = 1.9;           // seconds a line lives
+const MSG_FADE_IN = 0.12;       // seconds to fade in at the bottom of the band
+const MSG_HOLD = 0.55;          // fraction of life at full opacity before fading out
+const MSG_RISE_T = 0.85;        // seconds to climb one line pitch
+const MSG_DRAIN = 0.22;         // seconds an over-cap line gets to fade before it goes
+/**
+ * HOW MANY LINES STAND AT ONCE.
+ *
+ * The reference frames run to five (CLANG! / SWOOSH! / CHOP! / INVISIBILITY SPELL CAST! / SLAIN BY
+ * AN EXPERIENCED SWORDSMAN), spanning roughly 2%-18% of the screen height. That top 9% is where
+ * this remake parks its DUNGEON LEVEL banner, which the iPhone screen does not have — it keeps
+ * FLOOR, HITS and GOLD along the bottom. So the band keeps the port's measured spawn point, pitch,
+ * colours and fade, and holds THREE lines rather than five, which lands the oldest just clear of
+ * the banner. Capping the climb instead was the wrong fix: lines then pile onto one row.
+ */
+const MSG_MAX = 3;
 
 const PAD = 2;                        // texels of air around the glyph block (contour + drop shadow)
 const RISE = 0.85;                    // world units per second — CONSTANT, so gaps never close
-const LIFE = 1.25, LIFE_BIG = 1.7;
+/** ONE life for every piece of floating text. An announcement that needs longer passes `life`. */
+const LIFE = 1.25;
 const SHADOW_A = 150;                 // the drop shadow is ink at part strength, never a second ink
 const MAX_DRIFT_X = 90;               // device pixels a number may be pushed sideways to clear the hero
 const MAX_DRIFT_Y = 320;
@@ -197,6 +356,9 @@ export class DamageNumbers {
   constructor(scene, rng, overlay = null) {
     this.scene = scene; this.overlay = overlay || scene; this.rng = rng;
     this.pool = []; this.active = [];
+    /** the iOS-style top-centre message stack; kept apart from `active` because these are anchored
+     *  to the SCREEN, and the world-space slot search and separation pass must not touch them */
+    this.msgs = [];
     /** persistent marks that track a living entity, keyed by entity id (see `syncSleep`) */
     this.marks = new Map();
     this.time = 0;
@@ -234,16 +396,18 @@ export class DamageNumbers {
   spawn(x, z, text, o = {}) {
     const st = STYLES[o.style] || STYLES.normal;
     const s = this.pool.pop() || this._make();
-    const mask = textMask(text);
+    const mask = textMask(text, gapFor(st));
     this._paint(s, mask, st);
     const u = s.userData;
     u.t = 0;
+    u.msg = false; u.px = 0; u.rise = 0; u.drain = -1; u.lift = 0;   // may have been a stack line
     u.big = st.big;
     // A pickup banner is deliberately placed high above the hero's head, so it does not need the
     // keep-off-the-hero push that combat numbers do — that push slides a wide label sideways and
     // the announcement stops reading as "this happened to ME".
     u.overHero = !!o.overHero;
-    u.life = o.life ?? (st.big ? LIFE_BIG : LIFE);
+    u.lift = st.lift || 0;
+    u.life = o.life ?? LIFE;
     u.texW = mask.w + PAD * 2; u.texH = GH + PAD * 2;
     const base = o.y ?? 0.95;
     u.x0 = x; u.z0 = z; u.y0 = base;
@@ -267,8 +431,86 @@ export class DamageNumbers {
       s.material.uniforms.uOpacity.value = k < 0.7 ? 1 : Math.max(0, 1 - (k - 0.7) / 0.3);
       if (k >= 1) { this.overlay.remove(s); this.active.splice(i, 1); this.pool.push(s); }
     }
+    // the stack: fade in at the bottom of the band, rise, fade out at the top
+    const rise = (MSG_PITCH * this._vpH) / MSG_RISE_T;
+    for (let i = this.msgs.length - 1; i >= 0; i--) {
+      const s = this.msgs[i], u = s.userData;
+      u.t += dt;
+      u.rise += rise * dt;
+      u.px = this._msgTexelPx();
+      const k = u.t / u.life;
+      const fadeIn = Math.min(1, u.t / MSG_FADE_IN);
+      const fadeOut = k < MSG_HOLD ? 1 : Math.max(0, 1 - (k - MSG_HOLD) / (1 - MSG_HOLD));
+      // A line pushed past the cap drains on its own clock, multiplied into whatever opacity it had
+      // reached. Shortening its life instead would snap it part-way down the fade curve.
+      let drain = 1;
+      if (u.drain >= 0) { u.drain += dt; drain = Math.max(0, 1 - u.drain / MSG_DRAIN); }
+      s.material.uniforms.uOpacity.value = fadeIn * fadeOut * drain;
+      if (k >= 1 || drain <= 0) { this.overlay.remove(s); this.msgs.splice(i, 1); this.pool.push(s); continue; }
+      this._syncMsg(s);
+    }
     this._separate(dt);
     for (const s of this.active) this._syncAnchor(s);
+  }
+
+  /**
+   * Texel size for the stack. The port's band is 8/320 of the screen tall, but this project has ONE
+   * PIXEL GRID (CLAUDE.md rule 2) and the cast is drawn on it — so the stack takes the nearest
+   * INTEGER MULTIPLE of the world texel size rather than whatever the iOS proportion asks for.
+   * Picking the proportion directly put pixel text at 3px texels into frames whose cast is on 2px
+   * ones, and `tools/audit.mjs` caught it: the grid fit for 'combat' moved off by a pixel.
+   */
+  _msgTexelPx() {
+    const S = Math.max(1, this._texelPx(false));
+    const want = (this._vpH * MSG_CAP) / GH;
+    return S * Math.max(1, Math.round(want / S));
+  }
+
+  /**
+   * Push a line onto the top-centre stack (the iOS port's only overhead text besides the numbers).
+   * @param {string} text @param {{style?:'white'|'cyan', life?:number}} [o]
+   */
+  message(text, o = {}) {
+    const st = MSG_STYLES[o.style] || MSG_STYLES.white;
+    const mask = textMask(String(text), gapFor(st));
+    const s = this.pool.pop() || this._make();
+    this._paint(s, mask, st);
+    const u = s.userData;
+    u.msg = true; u.t = 0; u.life = o.life ?? MSG_LIFE; u.big = false;
+    u.texW = mask.w + PAD * 2; u.texH = GH + PAD * 2;
+    u.dx = 0; u.dy = 0; u.rise = 0; u.drain = -1;
+    u.px = this._msgTexelPx();
+    s.material.uniforms.uOpacity.value = 0;
+    // Older lines step up so the newest always has a clear pitch beneath them. In a burst of hits
+    // this reproduces the even ~10px spacing the reference frames show; when messages are seconds
+    // apart the gaps stay ragged, which the reference also shows.
+    const pitch = MSG_PITCH * this._vpH;
+    this.msgs.forEach((m, k) => { m.userData.rise = Math.max(m.userData.rise, pitch * (k + 1)); });
+    this.msgs.unshift(s);
+    // Anything past the cap is drained on the spot rather than merely started fading: given the
+    // port's pitch, a fourth line is already level with the DUNGEON LEVEL banner, so it gets
+    // MSG_DRAIN seconds to go rather than the rest of MSG_LIFE.
+    for (let i = MSG_MAX; i < this.msgs.length; i++) {
+      const uu = this.msgs[i].userData;
+      if (uu.drain < 0) uu.drain = 0;
+    }
+    this.overlay.add(s);
+    this._syncMsg(s);
+    return s;
+  }
+
+  /** Drop every live line (level change, new game). */
+  clearMessages() {
+    for (const s of this.msgs) { this.overlay.remove(s); this.pool.push(s); }
+    this.msgs.length = 0;
+  }
+
+  /** Anchor a stack line: centred horizontally, its own rise above the band. */
+  _syncMsg(s) {
+    const u = s.userData;
+    s.visible = true;
+    const y = this._vpH * (1 - MSG_CENTRE) + u.rise;   // the shader's space has its origin bottom-left
+    s.material.uniforms.uAnchorPx.value.set(Math.round(this._vpW / 2), Math.round(y));
   }
 
   // ------------------------------------------------------------------------- placement
@@ -303,7 +545,8 @@ export class DamageNumbers {
     const v = this._v.set(s.position.x, s.position.y, s.position.z).project(this._cam);
     if (!Number.isFinite(v.x) || !Number.isFinite(v.y) || v.z > 1) { s.visible = false; return; }
     s.visible = true;
-    s.material.uniforms.uAnchorPx.value.set((v.x * 0.5 + 0.5) * this._vpW, (v.y * 0.5 + 0.5) * this._vpH);
+    const lift = (s.userData.lift || 0) * this._texelPx(s.userData.big);   // bottom-left origin: up is +
+    s.material.uniforms.uAnchorPx.value.set((v.x * 0.5 + 0.5) * this._vpW, (v.y * 0.5 + 0.5) * this._vpH + lift);
   }
 
   /** World point -> device pixels (origin bottom-left, the space the quad shader works in). */
@@ -448,7 +691,7 @@ export class DamageNumbers {
         const mask = textMask('Z');
         this._paint(m, mask, STYLES.sleep);
         const u = m.userData;
-        u.big = false; u.texW = mask.w + PAD * 2; u.texH = GH + PAD * 2;
+        u.big = false; u.msg = false; u.px = 0; u.lift = 0; u.texW = mask.w + PAD * 2; u.texH = GH + PAD * 2;
         u.t = 0; u.life = Infinity; u.overHero = false;
         // The breath phase is HASHED FROM THE ENTITY ID, never drawn from `this.rng`. Taking it
         // from the shared stream would have advanced it once per sleeping monster per level, which
@@ -481,7 +724,16 @@ export class DamageNumbers {
   _make() {
     const canvas = document.createElement('canvas'); canvas.width = 8; canvas.height = 8;
     const tex = new THREE.CanvasTexture(canvas);
-    tex.colorSpace = THREE.SRGBColorSpace;
+    // NoColorSpace, AND THAT IS NOT AN OVERSIGHT — flagging it sRGB silently darkened every colour
+    // in this file. These quads are drawn by a custom ShaderMaterial into the default framebuffer
+    // AFTER the composer, so three injects neither `tonemapping_fragment` nor `colorspace_fragment`
+    // into the shader: whatever it writes reaches the screen verbatim. An sRGB-flagged texture is
+    // given an sRGB8 internal format, so the GPU decodes it to LINEAR on sample — and with nothing
+    // re-encoding on the way out, the authored byte was displayed as its own linear value.
+    // Measured, cyan #73b7cf: decode gives (0.176, 0.473, 0.617), which lands on screen as
+    // #2d799d; the frame came back #2c799f. Raw pass-through is what a post-composite overlay of
+    // authored sRGB bytes actually wants.
+    tex.colorSpace = THREE.NoColorSpace;
     tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
     const s = new THREE.Mesh(_quad(), makeMaterial(tex));
     s.userData.canvas = canvas; s.userData.tex = tex;
@@ -500,6 +752,13 @@ export class DamageNumbers {
   _paint(s, mask, st) {
     const W = mask.w + PAD * 2, H = mask.h + PAD * 2;
     const canvas = s.userData.canvas;
+    // A POOLED QUAD'S CANVAS CHANGES SIZE, AND THE GL TEXTURE MUST BE THROWN AWAY WHEN IT DOES.
+    // Resizing the canvas and only setting `needsUpdate` re-uploads into the OLD allocation, so the
+    // new image is sampled across the quad at the old width — a 33-texel line smeared over a
+    // 534-pixel quad. Every number this pool ever drew was 9-13 texels wide, so the fault stayed
+    // invisible until the message stack started reusing the same quads for 178-texel lines.
+    // Disposing makes three allocate the texture afresh at the new size on the next frame.
+    if (canvas.width !== W || canvas.height !== H) s.userData.tex.dispose();
     canvas.width = W; canvas.height = H;
     const ctx = canvas.getContext('2d');
     const img = ctx.createImageData(W, H);
@@ -527,15 +786,29 @@ export class DamageNumbers {
         outside[j] = 1; stack.push(j);
       }
     }
-    // drop shadow first (it is the lowest layer), then the contour over it
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      if (!outside[y * W + x]) continue;
-      if (at(x - PAD - 1, y - PAD - 1)) put(x, y, ink, SHADOW_A);
+    // Drop shadow first (it is the lowest layer), then the contour over it. BOTH ARE OPT-OUT,
+    // because the port does not treat its two kinds of text the same way and the difference is
+    // measurable. Ring test, one pixel out from the glyph, against the same rows clear of it:
+    //   stack line, photo3 'YOU ARE FILLED WITH DREAD!'  ring 49.9 vs background 68.1  = -27%
+    //   damage number, img0629 green 2                    ring 81.7 vs background 86.1  = -5%
+    // So the stack carries a soft shadow and no outline; the numbers carry NEITHER. A -5% ring on
+    // a 7px glyph cannot hide a one-pixel shadow — it would move the mean by far more than that.
+    if (st.shadow !== false) {
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        if (!outside[y * W + x]) continue;
+        if (at(x - PAD - 1, y - PAD - 1)) put(x, y, ink, SHADOW_A);
+      }
     }
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      if (!outside[y * W + x]) continue;
-      const mx = x - PAD, my = y - PAD;
-      if (at(mx - 1, my) || at(mx + 1, my) || at(mx, my - 1) || at(mx, my + 1)) put(x, y, ink, 255);
+    // A FULL CONTOUR IS FOR A NUMBER OVER A BUSY FLOOR, NOT FOR THE STACK. At the stack's size a
+    // one-texel ink ring around a one-texel stroke is more ink than letter, and the line reads as a
+    // black bar — which is exactly what it did. The port's top-centre lines carry a soft drop
+    // shadow and no outline, so a style may turn the contour off and keep the shadow.
+    if (st.contour !== false) {
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        if (!outside[y * W + x]) continue;
+        const mx = x - PAD, my = y - PAD;
+        if (at(mx - 1, my) || at(mx + 1, my) || at(mx, my - 1) || at(mx, my + 1)) put(x, y, ink, 255);
+      }
     }
     for (let y = 0; y < mask.h; y++) for (let x = 0; x < mask.w; x++) {
       if (!mask.d[y * mask.w + x]) continue;
@@ -568,7 +841,7 @@ export class DamageNumbers {
    */
   _sync(s, renderer, camera) {
     const u = s.userData, uni = s.material.uniforms;
-    const S = this._texelPx(u.big);
+    const S = u.px || this._texelPx(u.big);   // the stack sizes itself off the viewport, not the world grid
     uni.uViewport.value.set(this._vpW, this._vpH);
     uni.uSizePx.value.set(u.texW * S, u.texH * S);
     uni.uOffsetPx.value.set(u.dx, u.dy);

@@ -189,8 +189,14 @@ export class Menus {
         <div class="t1">The Sword of</div>
         ${logoSvg('FARGOAL')}
         ${swordRule()}
+        <div class="mc-cover">
+          <div class="mc-cover-top"><span class="mc-code">F1</span><span class="mc-kicker">Dungeon Module</span><span class="mc-kicker r">Epyx · 1983</span></div>
+          <div class="mc-cover-t1">The Sword of</div>
+          <div class="mc-cover-title">Fargoal</div>
+          <div class="mc-cover-sub">An adventure beneath the mountains · for character levels 1 and up</div>
+        </div>
       </div>
-      <div class="menu"><div class="menu-list"></div></div>
+      <div class="menu"><div class="mc-band"><span class="mc-title">Begin the Quest</span></div><div class="menu-list"></div></div>
       <div class="tagline"></div>
       <div class="foot"><kbd>↑↓</kbd> choose &nbsp;·&nbsp; <kbd>Enter</kbd> select &nbsp;·&nbsp; today's daily seed <b>${daily}</b>${attempted ? ' (attempted)' : ''}</div>`;
     const items = [
@@ -282,6 +288,18 @@ export class Menus {
     ] });
   }
 
+  /**
+   * The renderer stopped asking for a WebGL context the browser kept taking away (Renderer.onContextLost).
+   * There is nothing to draw with, so this cannot be dismissed: the only way forward is a reload.
+   * @param {() => void} onReload
+   */
+  showGraphicsLost(onReload) {
+    if (this.stack.some((e) => e.name === 'graphics-lost')) return;
+    this.openModal({ name: 'graphics-lost', dismissible: false, html: heading({ eyebrow: 'The lanterns have gone out', title: 'Graphics reset', sub: 'The browser shut down the game\u2019s graphics and would not bring them back. Reload the page to carry on.' }), items: [
+      { label: 'Reload', onSelect: () => onReload() },
+    ] });
+  }
+
   // ------------------------------------------------------------------ help
   showHelp() {
     const groups = HELP_GROUPS.map(([name, keys]) => `<div class="kgroup"><h2>${name}</h2><div class="keys">${keys.map((k) => `<div class="k"><span>${k[0]}</span><span>${k[1].split(' · ').map((x) => `<kbd>${esc(x)}</kbd>`).join(' <em>·</em> ')}</span></div>`).join('')}</div></div>`);
@@ -316,6 +334,15 @@ export class Menus {
       { id: 'reduceFlash', name: 'Reduce flashes', desc: 'softer explosion and trap flashes', type: 'toggle' },
       { id: 'fontScale', name: 'Interface scale', type: 'range', min: 0.8, max: 2, step: 0.1 },
       { id: 'colorblind', name: 'Colour-blind palette', desc: 'Okabe–Ito accents for log, map and spells', type: 'toggle' },
+      { group: 'Lighting' },
+      { id: 'lightAmbient', name: 'Ambient fill', desc: 'the hemisphere light — omnidirectional, models nothing, lifts everything', type: 'toggle' },
+      { id: 'lightKey', name: 'Key light', desc: 'the raked directional — this is the one that gives bodies and wall blocks their form', type: 'toggle' },
+      { id: 'lightLantern', name: "Player's lantern", desc: 'the spot and glow that follow you', type: 'toggle' },
+      { id: 'lightTorches', name: 'Wall torches', desc: 'the five nearest torch spots, flickering', type: 'toggle' },
+      { id: 'lightDecor', name: 'Fires in the rooms', desc: 'braziers, hearths, candles — the nearest four', type: 'toggle' },
+      { id: 'lightTemple', name: 'Temple light', type: 'toggle' },
+      { id: 'lightShadows', name: 'Shadows', desc: 'both casters: your lantern and the nearest torch', type: 'toggle' },
+      { id: 'lightGrade', name: 'Depth grade', desc: 'the band tint, split tone, saturation and vignette applied after lighting', type: 'toggle' },
       { group: 'Gameplay' },
       { id: 'autoPauseOnSight', name: 'Auto-pause on sight', desc: 'pause when a new monster comes into view', type: 'toggle' },
       { id: 'minimap', name: 'Minimap', desc: 'M toggles it any time', type: 'toggle' },
@@ -434,7 +461,7 @@ export class Menus {
     const name = esc(this.settings.playerName || 'Warrior');
     const total = Math.max(1, (this.ctx.getGame()?.state?.quest?.timerTotal) || 2000);
     const frac = Math.max(0, Math.min(1, stats.timerRemaining / total));
-    const html = `<div class="mhead"><div class="eyebrow">Gedwyn takes the Sword from your hands</div>${logoSvg('QUEST COMPLETE', { width: 1000, height: 200, size: 118, ember: '#e8c15a', cls: 'small' })}${ornament()}</div>
+    const html = `<div class="mhead"><h1 class="mc-only">Quest Complete</h1><div class="eyebrow">Gedwyn takes the Sword from your hands</div>${logoSvg('QUEST COMPLETE', { width: 1000, height: 200, size: 118, ember: '#e8c15a', cls: 'small' })}${ornament()}</div>
       <div class="epitaph"><b>${name}</b> carried the Sword of Fargoal out of the mountain.<br>The Great Forest is safe.</div>
       <div class="escape"><div class="big"><div class="l">Escaped in</div><div class="v">${formatTime(stats.elapsed)}</div></div><div class="big"><div class="l">Time to spare</div><div class="v magic">${formatTime(stats.timerRemaining)}</div></div></div>
       <div class="clock"><div class="bar"><i style="width:${(frac * 100).toFixed(1)}%"></i></div><div class="cl"><span>Umla's clock</span><span>${Math.round(frac * 100)}% remained of ${formatTime(total)}</span></div></div>

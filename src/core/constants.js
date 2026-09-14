@@ -55,6 +55,20 @@ export function monsterPhaseSeconds(depth) {
   return Math.max(0.2, (20 - depth) / 6);
 }
 
+/**
+ * How fast a monster moves when it means it, in tiles per second [designed, after the 2009 iOS port].
+ * The C64 moved monsters once every `20 - level` polls, which the old mapping turned into one tile per
+ * monsterPhaseSeconds — 3.2 s on level 1, seventeen times slower than the hero, so any monster could be
+ * walked round at leisure. The iOS port closes on you at close to walking pace (measured off its
+ * footage: an ogre covers two tiles in half a second). So monsters start a little under the player's
+ * 6 tiles/s and reach it by the sword levels; AI.pace still slows the ones only wandering or searching.
+ * The PHASE above is not retired: it is still the clock for cooldowns, breath charge-ups and staggers.
+ */
+export function monsterTilesPerSecond(depth) {
+  const k = Math.max(0, Math.min(1, (depth - 1) / 14));
+  return 6 * (0.62 + 0.33 * k);
+}
+
 const CLASSIC = {
   name: 'classic',
   rolledStats: true,          // 3*int(6*rnd+1) HP and skill
@@ -66,7 +80,8 @@ const CLASSIC = {
   permadeath: true,
   swordSafeBelowHpFraction: 0, // Story mode: sword cannot be stolen below this HP fraction
   playerStepTime: 1 / 6,      // seconds per tile at full pace
-  combatRoundTime: 0.25,      // seconds per exchange
+  combatTurnTime: 0.5,        // seconds between blows: the two sides alternate, one blow a turn [iOS port]
+  combatOpening: 0.8,         // seconds of standoff under the announcement before the first blow [iOS port]
   idleTickTime: 0.1,          // regeneration tick
   autohealRate: 50,
   goldCapacity: 100, sackCapacity: 100,

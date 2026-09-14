@@ -488,7 +488,12 @@ export class SpriteAnimator {
   }
   get clip() { const a = this.sheet.anims[this.name]; return a && (a[this.facing] || (this.facing === 'W' && a.E) || a.S); }
   /** West is the mirrored east when the sheet carries no dedicated west row. */
-  get flipped() { const a = this.sheet.anims[this.name]; return this.facing === 'W' && !!a && !a.W; }
+  get flipped() {
+    const a = this.sheet.anims[this.name];
+    // art drawn facing left (the imported cast sheet) mirrors for east; art drawn facing right mirrors for west
+    if (this.sheet.eastMirrored) return this.facing === 'E';
+    return this.facing === 'W' && !!a && !a.W;
+  }
   /** Switch clip (restarts unless it is already playing and `restart` is false). */
   play(name, facing = this.facing, { restart = false, onDone = null } = {}) {
     const same = name === this.name;

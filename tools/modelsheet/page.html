@@ -1,0 +1,125 @@
+<!doctype html><html><head><meta charset="utf-8"><title>model thumbs</title>
+<script type="importmap">{"imports":{"three":"/three/build/three.module.js","three/addons/":"/three/examples/jsm/"}}</script>
+<style>html,body{margin:0;background:#12121a}canvas{display:block}</style></head>
+<body><script type="module">
+import * as THREE from 'three';
+import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+import { TGALoader } from 'three/addons/loaders/TGALoader.js';
+
+const S = Number(new URLSearchParams(location.search).get('size') || 192);
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setSize(S, S); renderer.setPixelRatio(1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+// A neutral studio: a key, a fill and a rim, so an untextured grey model still reads as a SHAPE.
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x40384a, 1.6));
+const key = new THREE.DirectionalLight(0xfff2dd, 2.2); key.position.set(-3, 5, 4); scene.add(key);
+const rim = new THREE.DirectionalLight(0x9fc4ff, 1.0); rim.position.set(4, 2, -5); scene.add(rim);
+const camera = new THREE.PerspectiveCamera(35, 1, 0.01, 5000);
+
+const fbx = new FBXLoader(), tga = new TGALoader(), tex = new THREE.TextureLoader();
+const texCache = new Map();
+function loadTex(url) {
+  if (!url) return Promise.resolve(null);
+  if (texCache.has(url)) return texCache.get(url);
+  const L = /\.tga$/i.test(url) ? tga : tex;
+  const p = new Promise((res) => L.load(url, (t) => { t.colorSpace = THREE.SRGBColorSpace; res(t); }, undefined, () => res(null)));
+  texCache.set(url, p);
+  return p;
+}
+
+function disposeTree(root) {
+  root.traverse((o) => {
+    if (o.geometry) o.geometry.dispose();
+    const m = o.material; if (!m) return;
+    for (const mm of Array.isArray(m) ? m : [m]) { if (mm.map && !texCache.size) mm.map.dispose(); mm.dispose(); }
+  });
+}
+
+/** Render one model to a data URL, or null if it will not load. */
+window.shot = async (modelUrl, texUrl) => {
+  let obj;
+  try { obj = await fbx.loadAsync(modelUrl); } catch (e) { return { error: String(e && e.message || e).slice(0, 120) }; }
+  const map = await loadTex(texUrl);
+  let meshes = 0, tris = 0;
+  obj.traverse((o) => {
+    if (!o.isMesh && !o.isSkinnedMesh) return;
+    meshes++;
+    const g = o.geometry;
+    if (g && g.index) tris += g.index.count / 3; else if (g && g.attributes.position) tris += g.attributes.position.count / 3;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    o.material = mats.map((mm) => {
+      const nm = new THREE.MeshStandardMaterial({
+        map: map || (mm && mm.map) || null,
+        color: (map || (mm && mm.map)) ? 0xffffff : 0xb9b4ad,
+        roughness: 0.78, metalness: 0.0, side: THREE.DoubleSide,
+        transparent: !!(mm && mm.transparent), alphaTest: map ? 0.35 : 0,
+        skinning: !!o.isSkinnedMesh,
+      });
+      return nm;
+    });
+    if (o.material.length === 1) o.material = o.material[0];
+  });
+  if (!meshes) { disposeTree(obj); return { error: 'no mesh' }; }
+
+  scene.add(obj);
+  // frame it: bounding sphere -> a three-quarter view that fills the cell
+  const box = new THREE.Box3().setFromObject(obj);
+  if (!isFinite(box.min.x) || box.isEmpty()) { scene.remove(obj); disposeTree(obj); return { error: 'empty bounds' }; }
+  const sph = box.getBoundingSphere(new THREE.Sphere());
+  const c = sph.center, r = Math.max(sph.radius, 1e-4);
+  const dist = (r / Math.sin((camera.fov * Math.PI / 180) / 2)) * 1.06;
+  const dir = new THREE.Vector3(0.82, 0.58, 1).normalize();
+  camera.position.copy(c).addScaledVector(dir, dist);
+  camera.near = Math.max(dist - r * 3, 0.001); camera.far = dist + r * 4;
+  camera.lookAt(c); camera.updateProjectionMatrix();
+  renderer.render(scene, camera);
+  const url = renderer.domElement.toDataURL('image/png');
+  scene.remove(obj); disposeTree(obj);
+  return { url, meshes, tris: Math.round(tris), textured: !!map };
+};
+/**
+ * THE 6100 FALLBACK. three's FBXLoader refuses FileVersion 6100 outright, and 374 of this library's
+ * 998 models are exactly that — the 2012-era exports the repo already has a reader for
+ * (tools/props-import/fbx6100.mjs). Node parses them and hands the raw arrays in here, so the same
+ * framing, lighting and material path is used for both kinds of file and the sheet stays consistent.
+ * @param {Array<{name:string, positions:number[], normals:number[], uvs:number[]}>} meshes
+ */
+window.shotRaw = async (meshes, texUrl) => {
+  if (!meshes || !meshes.length) return { error: 'no mesh' };
+  const map = await loadTex(texUrl);
+  const root = new THREE.Group();
+  let tris = 0;
+  for (const m of meshes) {
+    if (!m.positions || m.positions.length < 9) continue;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(m.positions, 3));
+    if (m.normals && m.normals.length === m.positions.length) g.setAttribute('normal', new THREE.Float32BufferAttribute(m.normals, 3));
+    else g.computeVertexNormals();
+    if (m.uvs && m.uvs.length === (m.positions.length / 3) * 2) g.setAttribute('uv', new THREE.Float32BufferAttribute(m.uvs, 2));
+    tris += m.positions.length / 9;
+    root.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({
+      map: map || null, color: map ? 0xffffff : 0xb9b4ad, roughness: 0.78, metalness: 0,
+      side: THREE.DoubleSide, alphaTest: map ? 0.35 : 0,
+    })));
+  }
+  if (!root.children.length) return { error: 'no usable mesh' };
+  scene.add(root);
+  const box = new THREE.Box3().setFromObject(root);
+  if (box.isEmpty()) { scene.remove(root); disposeTree(root); return { error: 'empty bounds' }; }
+  const sph = box.getBoundingSphere(new THREE.Sphere());
+  const c = sph.center, r = Math.max(sph.radius, 1e-4);
+  const dist = (r / Math.sin((camera.fov * Math.PI / 180) / 2)) * 1.06;
+  camera.position.copy(c).addScaledVector(new THREE.Vector3(0.82, 0.58, 1).normalize(), dist);
+  camera.near = Math.max(dist - r * 3, 0.001); camera.far = dist + r * 4;
+  camera.lookAt(c); camera.updateProjectionMatrix();
+  renderer.render(scene, camera);
+  const url = renderer.domElement.toDataURL('image/png');
+  scene.remove(root); disposeTree(root);
+  return { url, meshes: root.children.length, tris: Math.round(tris), textured: !!map, via: '6100' };
+};
+
+window.__READY = true;
+</script></body></html>

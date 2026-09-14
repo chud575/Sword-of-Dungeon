@@ -9,6 +9,7 @@ import { createRng, seedFrom } from '../core/rng.js';
 import { Level, decorTiles } from './level.js';
 import { shapeWeights, pickShape, rollSize, buildMask, maskCentre, maskArea } from './rooms.js';
 import { digTunnel, digStub, thinCorridors, ensureConnectivity } from './tunnels.js';
+import { generateForest, finishForest } from './forest.js';
 import { rollMonster } from '../game/monsters.js';
 import { goldValue, rollTreasure, rollTrap } from '../game/items.js';
 import { swordDepthForSeed, placeSword } from '../game/quest.js';
@@ -68,7 +69,7 @@ function assignRoomStyles(level) {
  * Generate a level.
  * @param {number|string} seed game seed
  * @param {number} depth 0 = surface, 1.. = dungeon
- * @param {{width?:number, height?:number, swordDepth?:number, balance?:object, monsters?:boolean}} opts
+ * @param {{width?:number, height?:number, swordDepth?:number, balance?:object, monsters?:boolean, biome?:'forest'}} opts
  * @returns {Level}
  */
 export function generateLevel(seed, depth, opts = {}) {
@@ -79,6 +80,7 @@ export function generateLevel(seed, depth, opts = {}) {
   const rng = createRng(levelSeed);
   const level = new Level({ depth, width, height, seed: levelSeed });
   if (depth === 0) { generateSurface(level, rng); assignRoomStyles(level); placeDecor(level, false); return level; }
+  if (opts.biome === 'forest') return generateForestLevel(level, rng, balance, opts);
   const isSwordLevel = depth === swordDepth;
   const style = levelStyle(depth, rng, isSwordLevel);
   level.debug.style = style.name;
@@ -102,6 +104,23 @@ export function generateLevel(seed, depth, opts = {}) {
   placeTraps(level, rng);
   placeTreasure(level, rng);
   placeDecor(level, isSwordLevel);
+  if (opts.monsters !== false) spawnMonsters(level, rng, balance);
+  return level;
+}
+
+/**
+ * An outdoor level (world/forest.js): glades and trails instead of rooms and tunnels, then the same
+ * connectivity guarantee, traps, treasure and monsters as any other level. No furniture: the dressing
+ * catalogue is a dungeon's, and a bookcase in a glade is not a forest.
+ */
+function generateForestLevel(level, rng, balance, opts) {
+  level.biome = 'forest';
+  level.debug.style = 'forest';
+  generateForest(level, rng);
+  level.debug.connectivityFixes += ensureConnectivity(level, rng, level.stairsUp);
+  finishForest(level, rng);
+  placeTraps(level, rng);
+  placeTreasure(level, rng);
   if (opts.monsters !== false) spawnMonsters(level, rng, balance);
   return level;
 }

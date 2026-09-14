@@ -142,35 +142,6 @@ export function pushBox(b, x0, y0, z0, x1, y1, z1, col, { uvScale = 0.25, vScale
   b.face([[x0, y0, z1], [x1, y0, z1], [x1, y0, z0], [x0, y0, z0]], [0, -1, 0], [[x0 * uvScale, z1 * uvScale], [x1 * uvScale, z1 * uvScale], [x1 * uvScale, z0 * uvScale], [x0 * uvScale, z0 * uvScale]], c4);
 }
 
-/** Stone doorway: two jambs on plinths, a lintel with a keystone. Spans x (-0.5..0.5), passage along z. */
-export function archGeometry() {
-  const parts = [];
-  const add = (g, x, y, z, sx = 1, sy = 1, sz = 1) => { g.scale(sx, sy, sz); g.translate(x, y, z); parts.push(g); };
-  for (const s of [-1, 1]) {
-    add(new THREE.BoxGeometry(0.2, 0.1, 0.3), s * 0.42, 0.05, 0);       // plinth
-    add(new THREE.BoxGeometry(0.15, 0.78, 0.22), s * 0.42, 0.49, 0);     // jamb
-    add(new THREE.BoxGeometry(0.2, 0.08, 0.28), s * 0.42, 0.92, 0);      // capital
-  }
-  add(new THREE.BoxGeometry(1.02, 0.14, 0.26), 0, 1.03, 0);              // lintel
-  add(new THREE.BoxGeometry(0.18, 0.2, 0.3), 0, 1.06, 0);                // keystone
-  const g = mergeGeometries(parts, false);
-  for (const p of parts) p.dispose();
-  return g;
-}
-
-/** Marble column with base and capital (height 1.05). */
-export function pillarGeometry() {
-  const parts = [];
-  const add = (g, y) => { g.translate(0, y, 0); parts.push(g); };
-  add(new THREE.BoxGeometry(0.3, 0.08, 0.3), 0.04);
-  add(new THREE.CylinderGeometry(0.11, 0.13, 0.86, 10), 0.51);
-  add(new THREE.CylinderGeometry(0.16, 0.11, 0.06, 10), 0.97);
-  add(new THREE.BoxGeometry(0.3, 0.06, 0.3), 1.03);
-  const g = mergeGeometries(parts, false);
-  for (const p of parts) p.dispose();
-  return g;
-}
-
 /** Irregular rock (radius ~0.1): a dodecahedron with seeded vertex jitter, flat shaded. */
 export function rockGeometry(rng) {
   const g = new THREE.DodecahedronGeometry(0.1, 0).toNonIndexed();

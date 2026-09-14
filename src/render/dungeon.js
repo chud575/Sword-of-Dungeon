@@ -6,22 +6,66 @@
 import * as THREE from 'three';
 import { TILE, DIRS8, DIRS4 } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
-import { createWaterMaterial, syncWaterLights, createShaftMaterial, CELLS, cellUV, ATLAS, styleCells, stoneFamily, syncWorldGrid } from './materials.js';
+import { createWaterMaterial, syncWaterLights, createShaftMaterial, CELLS, cellUV, ATLAS, styleCells, stoneFamily, syncWorldGrid, atlasPixels, onTileSkin, getTileSkin } from './materials.js';
 import { styleTurns } from './tiles.js';
 import { TILE_STYLES } from './tiles.js';
-import { MeshBuilder, slabGeometry, archGeometry, pillarGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
+import { paintFloorField, fieldTextures, streamFords } from './floorField.js';
+import { LOOK } from './look.js';
+import { MeshBuilder, slabGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
 import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
 import { syncSpriteSnap } from './props.js';
 import { loadPropModels } from './props/models.js';
 import { buildModelProp, isModelled } from './props/furniture.js';
+import { buildForestProps, buildForestAltar } from './props/forest.js';
+import { buildKitArches, buildKitColumns, buildKitPitCap, kitPropMaterials } from './props/kitProps.js';
 import { FIRELESS_MOODS } from './lighting.js';
 
+/** A forest has no quarry: its ground carries its own colour, so the floor tint is neutral. */
+const FOREST_FAMILY = { name: 'forest floor', tint: [1, 1, 1], moss: 1.2 };
 const WALL_H = 0.82;      // body top; caps sit on top
 const WALL_BOT = -0.3;    // buried below the floor so gaps never show through
 const CAP_OVER = 0.045;   // capstone overhang on exposed sides
 const MASONRY_U = 0.25;   // masonry strip spans 4 tiles
 const MASONRY_V = 1;      // the masonry strip is exactly one world unit tall (materials.js)
 const HOLE_TILES = new Set([TILE.PIT, TILE.TRAP_PIT, TILE.STAIRS_DOWN]);
+
+/**
+ * THE EMBER HAZE IN A PIT, MASKED BY THE FOG RATHER THAN BLENDED INTO IT (reviewer round 3, P13: "an
+ * unidentified grey dome with a red fill"). The shared shaft material runs its additive colour through
+ * the fog of war's `applyFog`, which in a remembered, unlit area returns the fog's grey tint — and an
+ * additive surface that outputs grey paints a grey dome over the hole. This one scales its light by the
+ * fog MASK instead, the way the contact shadows do, so where the fog has the pit it simply has no haze,
+ * and the pit reads as a dark shaft with embers at the bottom. Same profile and clock as `ember`.
+ */
+function pitHazeMaterial(fog) {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(0xff4a14) }, uStrength: { value: 0.55 }, uTime: { value: 0 }, uProfile: { value: new THREE.Vector4(-1, -0.5, 0.05, 0.95) }, fogTex: fog.uniforms.fogTex, fogSize: fog.uniforms.fogSize, fogTint: fog.uniforms.fogTint },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+    vertexShader: `
+      varying vec2 vFogXZ; varying float vH; varying vec3 vN; varying vec3 vV;
+      void main() {
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vFogXZ = w.xz; vH = uv.y;
+        vN = normalize(mat3(modelMatrix) * normal);
+        vV = normalize(cameraPosition - w.xyz);
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: `
+      uniform vec3 uColor; uniform float uStrength; uniform float uTime; uniform vec4 uProfile;
+      varying vec2 vFogXZ; varying float vH; varying vec3 vN; varying vec3 vV;
+      ${fog.glsl()}
+      void main() {
+        float rim = abs(dot(normalize(vN), normalize(vV)));
+        float a = smoothstep(uProfile.x, uProfile.y, vH) * (1.0 - smoothstep(uProfile.z, uProfile.w, vH));
+        a *= pow(rim, 1.6);
+        a *= 0.85 + 0.15 * sin(uTime * 0.9 + vH * 6.0);
+        a *= smoothstep(0.0, 1.0, fogMask(vFogXZ).r);
+        gl_FragColor = vec4(uColor * uStrength * a, 1.0);
+      }`,
+  });
+  mat.toneMapped = false;
+  return mat;
+}
 /**
  * Which variant of a field a PLACE shows. A field's variants exist only so it does not read as one
  * cell stamped in a grid, so the choice has to be a property of the tile, not of the order the
@@ -31,6 +75,13 @@ function tileHash(x, y, s) {
   let h = Math.imul(x | 0, 374761393) ^ Math.imul(y | 0, 668265263) ^ Math.imul(s | 0, 2246822519);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return (h ^ (h >>> 16)) >>> 0;
+}
+/** Per-channel counter-tint for wall caps against the depth band's key-light hue (see buildWalls). */
+function capLean(depth) {
+  if (depth <= 5) return [1, 1, 1];
+  if (depth <= 12) return [1.05, 1.0, 0.88];
+  if (depth <= 18) return [1.08, 0.9, 1.0];
+  return [0.97, 1.04, 0.9];
 }
 /** The stone kerb around every pool: how far into the water tile it reaches, how proud of the
  *  flagstones it stands, and how far it laps over the bank so no sliver of abyss shows. */
@@ -142,10 +193,11 @@ export class DungeonView {
     this.time = 0;
     // shared geometry (lives for the renderer's lifetime)
     this.slabGeos = { full: slabGeometry(0.985, 0.985, 0.2, 0.045), half: slabGeometry(0.985, 0.478, 0.2, 0.04), quarter: slabGeometry(0.478, 0.478, 0.2, 0.035) };
-    this.archGeo = archGeometry();
-    this.pillarGeo = pillarGeometry();
+    // The forest's ground is laid FLAT and edge to edge: a chamfer on every slab is what lets a stone floor
+    // read as laid stones, and it drew every tile of a glade as a lit square.
+    this.groundGeo = slabGeometry(1, 1, 0.2, 0);
     this.rockGeo = rockGeometry(createRng('fargoal-rocks'));
-    this.shaftMats = { holy: createShaftMaterial(fog, 0xbfe6ff, 0.3, [0, 0.25, 0.5, 1]), ember: createShaftMaterial(fog, 0xff4a14, 0.55, [-1, -0.5, 0.05, 0.95]), stair: createShaftMaterial(fog, 0xdfe9ff, 0.14, [0, 0.2, 0.4, 1]) };
+    this.shaftMats = { holy: createShaftMaterial(fog, 0xbfe6ff, 0.3, [0, 0.25, 0.5, 1]), ember: createShaftMaterial(fog, 0xff4a14, 0.55, [-1, -0.5, 0.05, 0.95]), stair: createShaftMaterial(fog, 0xdfe9ff, 0.14, [0, 0.2, 0.4, 1]), pitHaze: pitHazeMaterial(fog) };
     this.markers = new THREE.Group();
     this.root.add(this.markers);
     this.beaconView = null; this.beaconKey = null;
@@ -160,6 +212,48 @@ export class DungeonView {
     this.instanced = [];
     this.gridProbe = makeGridProbe();
     scene.add(this.gridProbe);
+    // a tile skin repaints the atlas; the floor field is cast from it, so repaint the field too
+    onTileSkin(() => { if (this.level && this.fieldTex) this.bakeField(); });
+  }
+
+  /**
+   * Paint and bind the level's floor field (floorField.js). With a tile skin on, the skin's painted
+   * cells are cast over it tile by tile — the imported sheets are pictures of whole tiles, so under a
+   * skin the floor is a board of tiles again, by choice.
+   */
+  bakeField() {
+    const level = this.level, forest = level.biome === 'forest', fam = this.family;
+    const sword = level.depth === this.swordDepth;
+    const field = paintFloorField(level, { tint: fam.tint, moss: fam.moss, glass: sword });
+    if (!forest && getTileSkin()) this.castSkin(field, sword);
+    this.fieldTex = fieldTextures(field, this.fieldTex);
+    this.mats.bindField(this.fieldTex, level.width, level.height, { forest });
+  }
+
+  /** Copy each tile's skin cell (turned as far as its field allows) into the painted field. */
+  castSkin(field, sword) {
+    const A = atlasPixels();
+    if (!A) return;
+    const { S, TW, alb, hgt } = field, level = this.level, F = this.family.tint;
+    for (let y = 0; y < level.height; y++) for (let x = 0; x < level.width; x++) {
+      const t = level.get(x, y);
+      const style = t === TILE.WALL ? 'wallTop' : this.styleAt(x, y, t);
+      const cells = styleCells(style);
+      const cell = t === TILE.WALL ? cells[tileHash(x, y, this.styleSeed + 7) % cells.length] : this.cellFor(x, y, t);
+      const turns = styleTurns(style);
+      const q = ((4 / turns) * ((tileHash(x, y, this.styleSeed + 31) / 4294967296) * turns | 0)) & 3;
+      const AC = ATLAS.cell, cx0 = (cell % ATLAS.cols) * AC, cy0 = Math.floor(cell / ATLAS.cols) * AC;
+      for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
+        // the skin cell is AC texels; the field may be denser (64-texel clean stone): nearest-sample it
+        const ax = (px * AC / S) | 0, ay = (py * AC / S) | 0;
+        const sx = q === 0 ? ax : q === 1 ? ay : q === 2 ? AC - 1 - ax : AC - 1 - ay;
+        const sy = q === 0 ? ay : q === 1 ? AC - 1 - ax : q === 2 ? AC - 1 - ay : ax;
+        const i = (cy0 + sy) * A.W + cx0 + sx, j = (y * S + py) * TW + x * S + px;
+        let r = A.alb[i * 3] * F[0] * 0.94, g = A.alb[i * 3 + 1] * F[1] * 0.94, b = A.alb[i * 3 + 2] * F[2] * 0.94;
+        if (sword) { const l = Math.min(1, r * 0.3 + g * 0.59 + b * 0.11); r = 0.08 + l * 0.52; g = 0.065 + l * 0.44; b = 0.11 + l * 0.6; }
+        alb[j * 3] = r; alb[j * 3 + 1] = g; alb[j * 3 + 2] = b; hgt[j] = A.hgt[i];
+      }
+    }
   }
 
   /** Register a per-level geometry so clear() can dispose it. */
@@ -174,6 +268,12 @@ export class DungeonView {
    * @param {number} x @param {number} y @param {number} t tile kind
    */
   styleAt(x, y, t) {
+    if (this.level && this.level.biome === 'forest') {
+      // the forest's ground sheet: a trail for a trail, the glade's own ground for everything else
+      if (t === TILE.CORRIDOR) return 'trail';
+      const gi = this.roomOf ? this.roomOf[y * this.level.width + x] : -1;
+      return (gi >= 0 && this.level.rooms[gi].tileStyle) || 'meadow';
+    }
     if (t === TILE.CORRIDOR) return 'corridor';
     const ri = this.roomOf ? this.roomOf[y * this.level.width + x] : -1;
     const id = ri >= 0 ? this.level.rooms[ri].tileStyle : null;
@@ -200,10 +300,12 @@ export class DungeonView {
     // independent random hue each, so neighbours read olive / pink / tan / blue-grey — noise, not
     // stone. Everything below varies VALUE only and multiplies by this one family tint; the colour
     // interest in a room is the torchlight falling across it.
-    const fam = stoneFamily(level.depth);
+    const forest = level.biome === 'forest';
+    const fam = forest ? FOREST_FAMILY : stoneFamily(level.depth);
     this.family = fam;
     const sword = level.depth === this.swordDepth;
     const M = this.mats;
+    // the atlas floor now only lays the temple's mosaic slab; every other floor is the level's field
     const floorMat = sword ? M.obsidianFloor : M.floor;
     const capMat = sword ? M.obsidianCap : M.floorCap;
     const wallMat = sword ? M.obsidianWall : M.wall;
@@ -231,95 +333,48 @@ export class DungeonView {
     const pieces = { full: [], half: [], quarter: [] };
     const rocks = [], arches = [], pillars = [], posts = [];
     this.pieces = pieces; this.rocks = rocks; this.arches = arches; this.pillars = pillars; this.posts = posts;
-    const grout = new MeshBuilder();          // dirt bed under the slabs (shows in the gaps)
     const detail = new MeshBuilder({ color: true, tile: true }); // atlas-textured merged details (pit lips, steps)
     const shafts = new MeshBuilder({ color: true }); // masonry-lined holes: basins, pits, stairwells
     this.detail = detail; this.shafts = shafts;
 
     // ---------------------------------------------------------------- floors
+    // THE FLOOR IS ONE PICTURE OF THE LEVEL (floorField.js), not a slab per tile. A slab per tile —
+    // chamfered, turned, tilted, each its own value step over a dirt bed showing in the gaps — drew
+    // the 1m grid as the loudest thing on the screen. The field lays stones over whole rooms and
+    // corridors, so they cross tile lines, and bakes the contact shade at a wall's foot and the dark
+    // of a pool's bank into the picture itself: nothing per tile is left to draw a square.
+    this.bakeField();
+    const ground = new MeshBuilder({ tile: true });
+    const lay = (x, y) => {
+      const x0 = x - 0.5, z0 = y - 0.5;
+      ground.face([[x0, 0, z0], [x0 + 1, 0, z0], [x0 + 1, 0, z0 + 1], [x0, 0, z0 + 1]], [0, 1, 0],
+        [[x / W, y / H], [(x + 1) / W, y / H], [(x + 1) / W, (y + 1) / H], [x / W, (y + 1) / H]], null, [x, y]);
+    };
+    if (forest) {
+      // the wood's ground runs under the trees and the stream too: the stream cuts it with its alpha
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const t = level.get(x, y);
+        if (!HOLE_TILES.has(t) && t !== TILE.TEMPLE) lay(x, y);
+      }
+    }
     for (const f of floors) {
-      const room = roomOf[f.y * W + f.x];
-      const rt = room >= 0 ? level.rooms[room].type : null;
-      let ao = 0, nearWater = false, nearHole = false;
-      for (const d of DIRS8) {
-        const n = T(f.x + d.dx, f.y + d.dy);
-        if (n === TILE.WALL) ao += d.dx && d.dy ? 0.5 : 1;
-        else if (n === TILE.WATER) nearWater = true;
-        else if (HOLE_TILES.has(n)) nearHole = true;
-      }
       const corridor = f.t === TILE.CORRIDOR;
-      const templeRoom = rt === 'temple' || rt === 'shrine';
-      // A ROOM IS ONE FIELD, so its tiles are whole slabs: breaking them into halves and quarters
-      // samples a corner of the cell and turns it, which is exactly how you shred the pattern the
-      // room is recognised by. Corridors and rubble are the exception — their cobble lattice and
-      // their shards are symmetric under a half-cell offset and a quarter turn, so the small pieces
-      // there read as broken paving, which is what the board's corridors are.
-      let layout = 'full';
-      const lr = rng.next();
-      if (f.t === TILE.RUBBLE) layout = 'quarter';
-      else if (corridor) layout = lr < 0.3 ? 'quarter' : lr < 0.5 ? 'half' : 'full';
-      // VALUE only, in readable steps — a slab is lighter or darker than its neighbour, never a
-      // different colour. Room character is carried by brightness (a crypt is dim, a vault is
-      // bright) and the level's stone family, not by a per-tile hue.
-      let base = 0.94 + (rng.int(0, 4) - 2) * 0.024;
-      if (corridor) base *= 0.86;
-      if (rt === 'crypt') base *= 0.89; else if (rt === 'cistern') base *= 0.93; else if (rt === 'library') base *= 1.03; else if (rt === 'vault') base *= 1.07;
-      if (templeRoom) base *= 1.05;
-      if (nearWater) base *= 0.82;          // the bank of a pool sits in the water's shade
-      if (f.t === TILE.TEMPLE) base *= 1.08;
-      const shade = base * (1 - Math.min(0.38, ao * 0.075)) * (nearHole ? 0.92 : 1);
-      const color = [fam.tint[0] * shade, fam.tint[1] * shade, fam.tint[2] * shade];
-      // THE FIELD. A tile has no look of its own any more: it takes its ROOM's field (generator.js
-      // `tileStyle`), a corridor takes the pale cobble, a wall top the pale block. The only thing left
-      // to choose is WHICH of that field's variant cells this tile reads, and that is a hash of the
-      // tile's own position — so a room does not read as one cell stamped across a grid, and the
-      // same tile shows the same stone every time the level is built.
-      const cell = f.t === TILE.TEMPLE ? CELLS.mosaic : this.cellFor(f.x, f.y, f.t);
-      const yJ = () => rng.float(-0.006, 0.004);
-      const tilt = () => rng.float(-0.014, 0.014);
-      // `sub` picks WHICH quarter of the atlas cell a half/quarter cobble reads, so the small
-      // pieces are not all the same corner of the same slab (see buildSlabs).
-      const push = (kind, x, z, rot, c) => pieces[kind].push({ x, y: yJ(), z, rot, tx: tilt(), tz: tilt(), cell: c, sub: rng.int(0, 3), color });
-      // TURN EVERY FIELD AS FAR AS ITS PATTERN SURVIVES (tiles.js PATTERN_TURNS).
-      //
-      // This used to be a blanket "a field must not be turned; only corridor cobble and rubble keep
-      // their random turn", and the reason it gave — a brick course and a plank run have a
-      // DIRECTION, and a quarter turn shreds the room into confetti — is right for three of the
-      // twelve patterns and wrong for the other nine. A cracked-polygon field, a speckle, a grid, a
-      // checker and a diamond have no course to break, and holding them still is what makes a room
-      // read as one cell stamped across a grid. So each field now takes the LARGEST turn it can
-      // survive: four-fold patterns take any quarter turn, coursed ones take half turns (which
-      // keep the course running the same way), and anything unknown is still held still.
-      //
-      // The turn is a HASH OF THE TILE'S OWN POSITION, not an rng draw, for the same reason
-      // `cellFor` is: it is then stable whatever else changes upstream, and it costs the level's
-      // stream nothing.
-      const turns = styleTurns(this.styleAt(f.x, f.y, f.t));
-      const turn = () => (Math.PI / 2) * (4 / turns) * (tileHash(f.x, f.y, this.styleSeed + 31) * turns | 0);
-      if (layout === 'full') push('full', f.x, f.y, turn(), cell);
-      else if (layout === 'half') {
-        const along = rng.int(0, 1);
-        for (const s of [-1, 1]) {
-          const c2 = rng.chance(0.5) ? cell : this.cellFor(f.x, f.y, f.t, s + 2);
-          if (along) push('half', f.x + s * 0.25, f.y, Math.PI / 2 + (rng.chance(0.5) ? Math.PI : 0), c2);
-          else push('half', f.x, f.y + s * 0.25, rng.chance(0.5) ? Math.PI : 0, c2);
-        }
-      } else {
-        for (const sx of [-1, 1]) for (const sz of [-1, 1]) push('quarter', f.x + sx * 0.25, f.y + sz * 0.25, turn(), rng.chance(0.4) ? cell : this.cellFor(f.x, f.y, f.t, 2 + sx + sz * 2));
-      }
-      // dirt bed under the slab
-      const x0 = f.x - 0.5, z0 = f.y - 0.5;
-      grout.face([[x0, -0.05, z0], [x0 + 1, -0.05, z0], [x0 + 1, -0.05, z0 + 1], [x0, -0.05, z0 + 1]], [0, 1, 0], [[x0 * 0.5, z0 * 0.5], [x0 * 0.5 + 0.5, z0 * 0.5], [x0 * 0.5 + 0.5, z0 * 0.5 + 0.5], [x0 * 0.5, z0 * 0.5 + 0.5]]);
+      if (f.t === TILE.TEMPLE) {
+        const k = 1.02;
+        pieces.full.push({ x: f.x, y: 0, z: f.y, rot: 0, tx: 0, tz: 0, cell: CELLS.mosaic, sub: 0, color: [fam.tint[0] * k, fam.tint[1] * k, fam.tint[2] * k] });
+      } else if (!forest) lay(f.x, f.y);
       // rubble: a spill of rocks; corridors: occasional pebbles
       if (f.t === TILE.RUBBLE) for (let i = 0; i < rng.int(7, 11); i++) rocks.push({ x: f.x + rng.float(-0.4, 0.4), y: 0.02, z: f.y + rng.float(-0.4, 0.4), s: rng.float(0.5, 1.5), ry: rng.float(0, 6), tilt: rng.float(-0.5, 0.5), tint: rng.float(0.8, 1.1) });
       else if (corridor && rng.chance(0.09)) for (let i = 0; i < rng.int(1, 3); i++) { const side = rng.chance(0.5) ? -1 : 1; rocks.push({ x: f.x + rng.float(-0.42, 0.42), y: 0.0, z: f.y + side * rng.float(0.25, 0.42), s: rng.float(0.25, 0.5), ry: rng.float(0, 6), tilt: 0, tint: rng.float(0.75, 1.05) }); }
     }
+    const groundMesh = new THREE.Mesh(this.own(ground.build()), M.field);
+    groundMesh.receiveShadow = true; groundMesh.castShadow = false;
+    groundMesh.name = 'floor-field';
+    this.root.add(groundMesh);
+    this.groundMesh = groundMesh;
 
     // ---------------------------------------------------------------- walls (merged: body + caps)
-    this.buildWalls(walls, wallMat, capMat, rng);
-    const groutMesh = new THREE.Mesh(this.own(grout.build()), M.dirt);
-    groutMesh.receiveShadow = true;
-    this.root.add(groutMesh);
+    if (forest) this.buildForest(level); else this.buildWalls(walls, wallMat, M.fieldCap, rng);
 
     // A black floor far below so holes read as depth.
     const abyss = new THREE.Mesh(this.own(new THREE.PlaneGeometry(W + 4, H + 4)), M.dark);
@@ -354,18 +409,13 @@ export class DungeonView {
       _m4.compose(_p, _q, _s); mesh.setMatrixAt(i, _m4); _s.set(1, 1, 1);
       _c.setRGB(r.tint, r.tint * 0.97, r.tint * 0.93); mesh.setColorAt(i, _c);
     }, true);
-    this.buildInstances(arches, this.archGeo, M.cutStone, (a, i, mesh) => {
-      _p.set(a.x, a.y || 0, a.z); _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), a.ry); _s.set(a.s || 1, a.s || 1, a.s || 1);
-      _m4.compose(_p, _q, _s); mesh.setMatrixAt(i, _m4); _s.set(1, 1, 1);
-      _c.setRGB(a.tint, a.tint * 0.97, a.tint * 0.94); mesh.setColorAt(i, _c);
-    }, true);
-    const fillPillar = (p, i, mesh) => {
-      _p.set(p.x, 0, p.z); _q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), p.ry); _s.set(1, p.h || 1, 1);
-      _m4.compose(_p, _q, _s); mesh.setMatrixAt(i, _m4); _s.set(1, 1, 1);
-      _c.setRGB(p.tint, p.tint, p.tint); mesh.setColorAt(i, _c);
-    };
-    this.buildInstances(pillars, this.pillarGeo, M.marble, fillPillar, true);
-    this.buildInstances(posts, this.pillarGeo, M.cutStone, fillPillar, true);
+    // Doorway arches, temple pillars and hall posts: painted, bevelled stone from the prop kit
+    // (props/kitProps.js) instead of the smooth untextured instanced shapes they used to be.
+    for (const m of [buildKitArches(arches), buildKitColumns(pillars, true), buildKitColumns(posts, false)]) {
+      if (!m) continue;
+      this.own(m.geometry);
+      this.root.add(m);
+    }
 
     // Torches (visual part; lights are in Lighting).
     for (const sp of this.torchSpotsFor(level)) {
@@ -413,7 +463,10 @@ export class DungeonView {
       // architecture and the props that are actually 3D — which is the only way to judge the
       // architecture. Nothing is removed from `level.decor`: this is a view setting, so a piece
       // that vanishes here is still on the tile and still blocks it.
-      const o = this.modelFor(d) || (this.modelsOnly ? null : this.props.decor(d));
+      let o = this.modelFor(d) || this.props.decor(d);
+      // ...and the solid kit pieces ARE real geometry, so "models only" keeps them too: filtering on
+      // "came from the imported library" instead would empty every furnished room in the game.
+      if (o && this.modelsOnly && !(o.userData.decor && (o.userData.decor.model || o.userData.decor.kit))) o = null;
       if (!o) { dropped.set(d.type, (dropped.get(d.type) || 0) + 1); continue; }
       const cls = (o.userData.decor && o.userData.decor.cls) || 'prop';
       if (cls === 'wall') {
@@ -536,12 +589,31 @@ export class DungeonView {
     return mesh;
   }
 
+  /**
+   * THE WOODS, where a dungeon has walls (world/forest.js puts trees on WALL). Every wall cell of the
+   * level, plus a two-tile band past its edge, gets a tree: a pine of three stacked cones or a broadleaf
+   * crown of two or three blobs. Trunks only at the EDGE of the wood — the only trunks the camera can
+   * see between the crowns — and the deep wood a shade darker than its edge, so a glade is a pool of
+   * light ringed by trees. Kind, size, lean and colour are hashes of the tile's own position, so the wood
+   * is the same every time the level is built. Flat-shaded and untextured: nothing to put off the grid.
+   * @param {import('../world/level.js').Level} level
+   */
+  buildForest(level) {
+    // Everything that stands outdoors is cut from the solid prop kit now (render/props/forest.js):
+    // painted crowns with trunks and shadows, gathered into stands with grass between them, plus the
+    // bushes, boulders, ruins, flowers, bridges, stairheads and standing stones the wood was missing.
+    const props = buildForestProps(level, (x, y) => this.tileAt(x, y));
+    props.traverse((o) => { if (o.geometry) this.own(o.geometry); });
+    this.root.add(props);
+  }
+
   /** Floor slabs: one InstancedMesh per piece kind, atlas cell through an instanced `aTile`. */
   buildSlabs(mat) {
     for (const kind of ['full', 'half', 'quarter']) {
       const list = this.pieces[kind];
       if (!list.length) continue;
-      const geo = this.own(this.slabGeos[kind].clone());
+      const flat = this.level && this.level.biome === 'forest' && kind === 'full';
+      const geo = this.own((flat ? this.groundGeo : this.slabGeos[kind]).clone());
       // ONE TEXEL DENSITY ACROSS THE WHOLE FLOOR. A slab's uv spans 0..1 over its own size, so a
       // half or quarter cobble would pack a full 32-texel atlas cell into half a tile and come out
       // at twice the resolution of the slab beside it — the exact "one screen at two resolutions"
@@ -584,7 +656,8 @@ export class DungeonView {
     for (const w of walls) {
       // per-block variation is a VALUE step off the level's one stone family, never a hue
       const tint = 0.86 + rng.int(0, 4) * 0.05;
-      const col = (k) => [tint * k * F[0], tint * k * F[1], tint * k * F[2]];
+      const FACE = LOOK.base ? 0.6 : 1;   // the board look's darker faces (render/look.js)
+      const col = (k) => [tint * k * F[0] * FACE, tint * k * F[1] * FACE, tint * k * F[2] * FACE];
       w.tint = tint;
       for (const d of DIRS4) {
         if (T(w.x + d.dx, w.y + d.dy) === TILE.WALL) continue;
@@ -597,7 +670,7 @@ export class DungeonView {
         const aoA = endAO(-1), aoB = endAO(1);
         b.face([A, B, C, D], [d.dx, 0, d.dy],
           [[along(A), WALL_BOT * MASONRY_V], [along(B), WALL_BOT * MASONRY_V], [along(C), WALL_H * MASONRY_V], [along(D), WALL_H * MASONRY_V]],
-          [col(0.58 * aoA), col(0.58 * aoB), col(0.97 * aoB), col(0.97 * aoA)]);
+          [col(0.68 * aoA), col(0.68 * aoB), col(0.97 * aoB), col(0.97 * aoA)]);
       }
     }
     b.endGroup(0);
@@ -607,20 +680,29 @@ export class DungeonView {
       const x0 = w.x - 0.5 - (ex.w ? CAP_OVER : 0), x1 = w.x + 0.5 + (ex.e ? CAP_OVER : 0);
       const z0 = w.y - 0.5 - (ex.n ? CAP_OVER : 0), z1 = w.y + 0.5 + (ex.s ? CAP_OVER : 0);
       const capT = 0.06 + rng.float(0, 0.06), top = WALL_H + capT, bot = WALL_H - 0.02;
-      // EVERY wall top is the board's pale block, its variant hashed off the wall's own position.
-      const capCells = styleCells('wallTop');
-      const cell = cellUV(capCells[tileHash(w.x, w.y, this.styleSeed + 7) % capCells.length]);
-      const t = w.tint * 0.82;
-      const col = (k) => [t * k * F[0], t * k * F[1], t * k * F[2]];
-      const rot = rng.int(0, 3);
-      const uvs = [[0, 0], [1, 0], [1, 1], [0, 1]];
-      const ruv = uvs.map((_, i) => uvs[(i + rot) % 4]);
-      b.face([[x0, top, z0], [x1, top, z0], [x1, top, z1], [x0, top, z1]], [0, 1, 0], ruv, [col(1), col(1), col(1), col(1)], cell);
-      const e0 = 0.02, e1 = 0.06, sc = col(0.78), sb = col(0.62);
-      b.face([[x0, top, z0], [x0, bot, z0], [x1, bot, z0], [x1, top, z0]], [0, 0, -1], [[0, e1], [0, e0], [1, e0], [1, e1]], [sc, sb, sb, sc], cell);
-      b.face([[x1, top, z1], [x1, bot, z1], [x0, bot, z1], [x0, top, z1]], [0, 0, 1], [[0, e1], [0, e0], [1, e0], [1, e1]], [sc, sb, sb, sc], cell);
-      b.face([[x0, top, z1], [x0, bot, z1], [x0, bot, z0], [x0, top, z0]], [-1, 0, 0], [[0, e1], [0, e0], [1, e0], [1, e1]], [sc, sb, sb, sc], cell);
-      b.face([[x1, top, z0], [x1, bot, z0], [x1, bot, z1], [x1, top, z1]], [1, 0, 0], [[0, e1], [0, e0], [1, e0], [1, e1]], [sc, sb, sb, sc], cell);
+      // THE CAP IS CUT FROM THE LEVEL'S FIELD: the wall mass is painted there as courses of small
+      // pale blocks that run on from one wall tile to the next, so a wall top reads as masonry and not
+      // as one pale slab per tile. uv is world space; `aTile` keeps the overhang reading its own lip.
+      // Its value is flat — the field carries the per-block variation, and a per-tile step here would
+      // redraw the very grid the field removes.
+      const LW = this.level.width, LH = this.level.height;
+      const U = (x) => (x + 0.5) / LW, V = (z) => (z + 0.5) / LH;
+      const tile = [w.x, w.y];
+      // THE CAP IS LIGHTER THAN THE FLOOR, NOT A LAMP (review-01 F1). Its painted blocks are a pale grey, and
+      // a pale grey is exactly the surface a cold band's key light turns blue-white: so the cap sits at 0.62
+      // of the field's value and leans against the band's hue — warm in the cold bands, magenta-neutral in
+      // the green one, green-neutral in the violet one — the job bandLean does for the floor's own light.
+      // the board look: pale neutral cap (render/look.js), about twice the floor's brightness as in the top-down map
+      // benchmark (wall band ~0.53 against floor ~0.21-0.29; at 1.0 the painted caps measured 0.27-0.38 on 0.22)
+      const t = LOOK.base ? 1.45 : 0.62, lean = LOOK.base ? [1, 1, 1] : capLean(this.level.depth);
+      const col = (k) => [t * k * lean[0], t * k * lean[1], t * k * lean[2]];
+      b.face([[x0, top, z0], [x1, top, z0], [x1, top, z1], [x0, top, z1]], [0, 1, 0],
+        [[U(x0), V(z0)], [U(x1), V(z0)], [U(x1), V(z1)], [U(x0), V(z1)]], [col(1), col(1), col(1), col(1)], tile);
+      const sc = col(0.8), sb = col(0.55);
+      b.face([[x0, top, z0], [x0, bot, z0], [x1, bot, z0], [x1, top, z0]], [0, 0, -1], [[U(x0), V(z0)], [U(x0), V(z0)], [U(x1), V(z0)], [U(x1), V(z0)]], [sc, sb, sb, sc], tile);
+      b.face([[x1, top, z1], [x1, bot, z1], [x0, bot, z1], [x0, top, z1]], [0, 0, 1], [[U(x1), V(z1)], [U(x1), V(z1)], [U(x0), V(z1)], [U(x0), V(z1)]], [sc, sb, sb, sc], tile);
+      b.face([[x0, top, z1], [x0, bot, z1], [x0, bot, z0], [x0, top, z0]], [-1, 0, 0], [[U(x0), V(z1)], [U(x0), V(z1)], [U(x0), V(z0)], [U(x0), V(z0)]], [sc, sb, sb, sc], tile);
+      b.face([[x1, top, z0], [x1, bot, z0], [x1, bot, z1], [x1, top, z1]], [1, 0, 0], [[U(x1), V(z0)], [U(x1), V(z0)], [U(x1), V(z1)], [U(x1), V(z1)]], [sc, sb, sb, sc], tile);
     }
     b.endGroup(1);
     const geo = this.own(b.build());
@@ -651,6 +733,7 @@ export class DungeonView {
    * @param {ReturnType<import('../core/rng.js').createRng>} rng the level's build rng
    */
   buildWater(waterTiles, shafts, detail, rng) {
+    if (this.level.biome === 'forest') { this.buildStream(waterTiles); return; }
     const T = (x, y) => this.tileAt(x, y);
     const wb = new MeshBuilder({ shore: true });
     const isWater = (x, y) => T(x, y) === TILE.WATER;
@@ -672,6 +755,30 @@ export class DungeonView {
         shafts.face([A, B, C, D], [-d.dx, 0, -d.dy], [[along(A), 0.02 * MASONRY_V], [along(B), 0.02 * MASONRY_V], [along(C), -0.6 * MASONRY_V], [along(D), -0.6 * MASONRY_V]], [top, top, bot, bot]);
       }
       this.buildKerb(w, isWater, detail, Y, rng);
+    }
+    this.waterMat = this.waterMat || createWaterMaterial(this.fog);
+    this.water = new THREE.Mesh(this.own(wb.build()), this.waterMat);
+    this.water.receiveShadow = false;
+    this.root.add(this.water);
+  }
+
+  /**
+   * THE STREAM: no kerb and no basin, because a stream is not built. The water is a flat sheet laid
+   * a little under the ground over every wet tile and its neighbours; the ground above it is cut
+   * away along the painted bank (floorField.js, the field's alpha), so the water's edge follows the
+   * bank and not the tile grid, and the ford's stepping stones stand in it.
+   * @param {{x:number,y:number}[]} waterTiles
+   */
+  buildStream(waterTiles) {
+    const wb = new MeshBuilder({ shore: true });
+    const seen = new Set();
+    const Y = -0.035;
+    for (const w of [...waterTiles, ...streamFords(this.level)]) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const x = w.x + dx, y = w.y + dy;
+      if (!this.level.inBounds(x, y) || seen.has(y * this.level.width + x)) continue;
+      seen.add(y * this.level.width + x);
+      const x0 = x - 0.5, z0 = y - 0.5;
+      wb.face([[x0, Y, z0], [x0 + 1, Y, z0], [x0 + 1, Y, z0 + 1], [x0, Y, z0 + 1]], [0, 1, 0], [[0, 0], [1, 0], [1, 1], [0, 1]], null, [0, 0], [1, 1, 1, 1]);
     }
     this.waterMat = this.waterMat || createWaterMaterial(this.fog);
     this.water = new THREE.Mesh(this.own(wb.build()), this.waterMat);
@@ -905,7 +1012,10 @@ export class DungeonView {
     // camera). They used to be instances of the shared `cutStone` pillar tinted up to 1.05 — a
     // smooth, near-white grey block sticking out of a hand-painted floor, the same raw-3D fault as
     // the arch. Cut from the flagstone instead, like the rest of the flight.
-    for (const sx of [-0.44, 0.44]) this.pushStairBlock(frame, sx, 0, 0.44, 0.2, 0.42, 0.2, cellUV(rng.pick(CELLS.plain)), 0.95);
+    // (outdoors the stairhead is a broken stone kerb from props/forest.js instead; the cell is still
+    // drawn so the level's shared rng advances exactly as it always did)
+    const forestStair = this.level && this.level.biome === 'forest';
+    for (const sx of [-0.44, 0.44]) { const cell = cellUV(rng.pick(CELLS.plain)); if (!forestStair) this.pushStairBlock(frame, sx, 0, 0.44, 0.2, 0.42, 0.2, cell, 0.95); }
     const ry = Math.atan2(d.dx, d.dy) + Math.PI;
     // the passage continues under the wall: a dark tunnel mouth in the far shaft wall
     const mouth = new THREE.Mesh(this.own(new THREE.PlaneGeometry(0.7, 0.75)), this.mats.dark);
@@ -971,8 +1081,10 @@ export class DungeonView {
     // than instanced from the smooth `cutStone` arch, which was tinted 1.25 on top of everything
     // else: a quarter above the material's white point, so the lintel standing right behind the
     // hero in the opening frame went through the bloom pass and came out a white bar.
-    for (const sx of [-0.4, 0.4]) this.pushStairBlock(frame, sx, 0, 0.06, 0.18, 0.9, 0.26, cellUV(rng.pick(CELLS.plain)), 0.95);
-    this.pushStairBlock(frame, 0, 0.9, 0.06, 1.0, 0.15, 0.3, cellUV(rng.pick(CELLS.cracked)), 1);
+    // (outdoors the doorway is two ruined gateposts from props/forest.js; cells still drawn, see above)
+    const forestGate = this.level && this.level.biome === 'forest';
+    for (const sx of [-0.4, 0.4]) { const cell = cellUV(rng.pick(CELLS.plain)); if (!forestGate) this.pushStairBlock(frame, sx, 0, 0.06, 0.18, 0.9, 0.26, cell, 0.95); }
+    { const cell = cellUV(rng.pick(CELLS.cracked)); if (!forestGate) this.pushStairBlock(frame, 0, 0.9, 0.06, 1.0, 0.15, 0.3, cell, 1); }
   }
 
   /** Pit: crumbling flagstone lip, masonry shaft, rocks on the rim and a red glow from far below. */
@@ -991,11 +1103,13 @@ export class DungeonView {
       const P = (r, a, yy) => [x + Math.cos(a) * r, yy, y + Math.sin(a) * r];
       const uv = (p) => [p[0] - x + 0.5, p[2] - y + 0.5];
       const q = [P(rIn0, a0, -0.035), P(rOut(a0), a0, 0), P(rOut(a1), a1, 0), P(rIn1, a1, -0.035)];
-      const cin = [0.5, 0.47, 0.45], cout = [0.92, 0.9, 0.88];
+      const cin = [0.3, 0.28, 0.27], cout = [0.92, 0.9, 0.88];   // a darker inner lip: the edge of a hole
       this.detail.face(q, [0, 1, 0], q.map(uv), [cin, cout, cout, cin], cell);
     }
     // shaft: three rings, darkening then warming to ember red at the bottom
-    const rings = [[0.0, 1.0, [0.55, 0.5, 0.48]], [-0.55, 1.03, [0.2, 0.17, 0.16]], [-1.1, 0.98, [0.12, 0.06, 0.05]], [-1.6, 0.9, [0.55, 0.12, 0.04]]];
+    // (reviewer round 3, P13: "an unidentified grey dome with a red fill") the camera looks down the shaft
+    // at its far wall, and a pale top ring read as the dome; the walls now fall dark fast, so it reads as a hole
+    const rings = [[0.0, 1.0, [0.26, 0.24, 0.23]], [-0.45, 1.0, [0.09, 0.08, 0.08]], [-1.1, 0.96, [0.06, 0.035, 0.03]], [-1.6, 0.9, [0.5, 0.1, 0.03]]];
     for (let k = 0; k < rings.length - 1; k++) {
       const [y0, s0, c0] = rings[k], [y1, s1, c1] = rings[k + 1];
       for (let i = 0; i < N; i++) {
@@ -1016,19 +1130,23 @@ export class DungeonView {
     const disc = new THREE.Mesh(this.own(new THREE.CircleGeometry(0.34, 20)), this.mats.emberFloor);
     disc.rotation.x = -Math.PI / 2; disc.position.set(x, -1.62, y);
     this.root.add(disc);
-    const haze = new THREE.Mesh(this.own(new THREE.CylinderGeometry(0.3, 0.34, 1.35, 14, 1, true)), this.shaftMats.ember);
+    const haze = new THREE.Mesh(this.own(new THREE.CylinderGeometry(0.3, 0.34, 1.35, 14, 1, true)), this.shaftMats.pitHaze);
     haze.position.set(x, -0.95, y);
     this.root.add(haze);
+    // the mouth of the pit as the play camera sees it: black core, embers, lit north lip (props/kitProps.js)
+    const cap = new THREE.Mesh(buildKitPitCap(), kitPropMaterials());
+    cap.position.set(x, 0, y);
+    this.root.add(cap);
   }
 
-  /** The temple tile: the prop altar plus a mosaic medallion, candle clusters and a light shaft. */
+  /** The temple tile: the prop altar (outdoors, a dolmen), candle clusters and a light shaft. */
   addTemple(x, y, rng) {
-    const altar = this.props.altar();
+    const altar = this.level && this.level.biome === 'forest' ? buildForestAltar(this.mats.holyGlow) : this.props.altar();
     this.addAt(altar, x, y);
     altar.traverse((o) => { if (o.userData.glow) this.animated.push(o); });
-    const med = new THREE.Mesh(this.own(new THREE.RingGeometry(0.5, 1.42, 40)), this.mats.medallion);
-    med.rotation.x = -Math.PI / 2; med.position.set(x, 0.012, y); med.receiveShadow = true;
-    this.root.add(med);
+    // No mosaic medallion ring any more: at the play camera it read as a stained-glass UI reticle laid
+    // over three tiles. The altar itself (props.js, a stepped marble dais with a gold cross and its own
+    // holy glow) is what marks the temple now.
     const shaft = new THREE.Mesh(this.own(new THREE.CylinderGeometry(0.3, 0.55, 3.4, 16, 1, true)), this.shaftMats.holy);
     shaft.position.set(x, 1.75, y);
     this.root.add(shaft);

@@ -1170,6 +1170,7 @@ const DRESSING = {
 
 /** Every dressing id this module can build. */
 export const DRESSING_TYPES = Object.keys(DRESSING);
+import { buildKitProp, buildKitWall, UNDRAWN_DECAL_TYPES } from './kitProps.js';
 /** Is `type` a piece of dressing this module paints? */
 export function isDressing(type) { return Object.prototype.hasOwnProperty.call(DRESSING, type); }
 /** 'prop' | 'decal' | 'wall' for a dressing type, or null. */
@@ -1314,6 +1315,23 @@ function ratIdle(g, sprite, phase) {
 export function buildDressing(type, o = {}) {
   const d = DRESSING[type];
   if (!d) return null;
+  // THE SOLID PIECE FIRST (props/kitProps.js). A wall entry always gets the kit's answer — a leaning
+  // banner, a bracket, or an empty group for the plates that only ever read as rugs on the wall top.
+  // A scatter prop or a decal gets its solid version where one is cut; a directionless decal is turned
+  // by its tile's hash so no two bone scatters in a room lie the same way.
+  if (d.cls === 'wall') return buildKitWall(type, o, d);
+  if (UNDRAWN_DECAL_TYPES.includes(type)) {
+    const g = new THREE.Group();
+    g.userData.decor = { type, variant: Math.max(0, Math.min(d.v - 1, o.variant | 0)), facing: o.facing || 's', cls: d.cls, kit: true, drawn: false };
+    g.userData.blocking = false;
+    return g;
+  }
+  // A standing scatter piece has no side it should hide from the camera — a skull turned to face a wall
+  // shows the side of its head — so it always faces south, like the billboard it replaces.
+  const turn = d.cls === 'decal' && d.turn ? ['s', 'e', 'n', 'w'][(((o.x | 0) * 73856093) ^ ((o.y | 0) * 19349663)) & 3]
+    : d.cls === 'prop' ? 's' : o.facing;
+  const solid = buildKitProp(type, { ...o, facing: turn }, d);
+  if (solid) { solid.userData.decor.cls = d.cls; return solid; }
   const v = Math.max(0, Math.min(d.v - 1, o.variant | 0));
   const facing = o.facing || 's';
   const key = `dress:${type}:${v}`;

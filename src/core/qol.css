@@ -111,3 +111,31 @@
 .qol-stats .seedline { text-align: center; margin-top: .5rem; font-family: var(--font-mono); font-size: .7rem; letter-spacing: .1em; color: var(--parchment-faint); }
 .qol-stats .seedline b { color: var(--gold); font-weight: 600; }
 @media (max-width: 900px) { .qol-stats .tiles { grid-template-columns: repeat(2, 1fr); } .qol-stats .cols, .qol-controls .cols { grid-template-columns: 1fr; } }
+
+/* ---------- lantern colour picker (ui/torchColor.js) ---------- */
+/* Anchored to the click that opened it: the element is a zero-size point and the box is centred
+   above it, so `left`/`top` can be set straight from clientX/clientY without measuring first. */
+.torch-pick { position: fixed; width: 0; height: 0; z-index: 60; pointer-events: none; }
+.torch-pick .tp-box {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  pointer-events: auto; padding: .5rem .55rem .55rem; min-width: 12.5rem;
+  animation: tpIn .13s var(--ease, ease-out) both;
+}
+@keyframes tpIn { from { opacity: 0; transform: translateX(-50%) translateY(4px) scale(.97); } to { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); } }
+.torch-pick .tp-title { font-family: var(--font-display, serif); font-size: .78rem; letter-spacing: .16em; text-transform: uppercase; text-align: center; color: var(--gold, #e8b84a); opacity: .85; margin: 0 0 .45rem; }
+.torch-pick .tp-swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: .3rem; }
+.torch-pick .tp-sw {
+  display: flex; flex-direction: column; align-items: center; gap: .22rem;
+  background: none; border: 1px solid transparent; border-radius: .3rem; padding: .3rem .15rem .25rem;
+  cursor: pointer; color: var(--parchment, #d8d2c4); font: inherit; font-size: .62rem; letter-spacing: .04em;
+}
+.torch-pick .tp-sw:hover { border-color: rgba(232, 184, 74, .45); background: rgba(255, 255, 255, .04); }
+.torch-pick .tp-sw.on { border-color: var(--gold, #e8b84a); background: rgba(232, 184, 74, .1); }
+.torch-pick .tp-dot {
+  width: 1.15rem; height: 1.15rem; border-radius: 50%; background: var(--c);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), 0 0 8px var(--c), inset 0 -2px 4px rgba(0, 0, 0, .35);
+}
+.torch-pick .tp-sw.on .tp-dot { box-shadow: 0 0 0 1px rgba(0, 0, 0, .55), 0 0 12px var(--c), inset 0 -2px 4px rgba(0, 0, 0, .35); }
+.torch-pick .tp-name { opacity: .8; }
+.torch-pick .tp-sw.on .tp-name { opacity: 1; color: var(--gold, #e8b84a); }
+@media (prefers-reduced-motion: reduce) { .torch-pick .tp-box { animation: none; } }

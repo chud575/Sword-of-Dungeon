@@ -40,9 +40,11 @@ import { frameTexelSize, texelGrid, PX_PER_TILE } from './sprites/spriteBillboar
 // The board's floor vocabulary. NOTE this import is circular (tiles.js reads TEXELS_PER_TILE from
 // here): nothing in this module's TOP LEVEL may touch a tiles.js binding, so the atlas layout below
 // is a fixed number of rows and the style->cell lookup is built lazily on first use.
-import { TILE_STYLES, VARIANTS, paintTile } from './tiles.js';
+import { TILE_STYLES, VARIANTS } from './tiles.js';
+import { paintSwatch } from './floorField.js';
 import { blitCell, sheetReady, loadTileSheet } from './tileSheet.js';
 import { skinCells, TILE_SKINS } from './tileSkins.js';
+import { LOOK } from './look.js';
 
 /** Palette used by the renderer (linear-space friendly hex values). */
 export const PALETTE = {
@@ -380,7 +382,14 @@ function paintAtlasArrays() {
       const fam = activeSkin && sheetReady() ? skinCells(activeSkin, o.id) : null;
       const cell = fam && fam[o.v % fam.length];
       if (!cell || !blitCell(cell, { alb, hgt, W, x0: cx0, y0: cy0, S })) {
-        paintTile({ alb, hgt, W, x0: cx0, y0: cy0, S, style: TILE_STYLES[o.id], seed: o.s * 101 + o.v * 7 + 1 });
+        // THE SAME STONES THE LEVEL'S FLOOR IS LAID WITH (floorField.js). The floor itself no longer
+        // reads this atlas; what does is cut from it — stair treads, pool kerbs, pit lips — and a tread
+        // painted in the old per-tile vocabulary stood out as a different art set on the new floor.
+        const sw = paintSwatch(o.id, o.s * 101 + o.v * 7 + 1);
+        for (let k = 0; k < S * S; k++) {
+          const gi = (cy0 + ((k / S) | 0)) * W + cx0 + (k % S);
+          hgt[gi] = sw.hgt[k]; alb[gi * 3] = sw.alb[k * 3]; alb[gi * 3 + 1] = sw.alb[k * 3 + 1]; alb[gi * 3 + 2] = sw.alb[k * 3 + 2];
+        }
       }
       for (let py = 0; py < S; py++) for (let px = 0; px < S; px++) {
         const gi = (cy0 + py) * W + cx0 + px;
@@ -430,9 +439,18 @@ function paintAtlasArrays() {
   return { alb, hgt, rgh, obs, W, H };
 }
 
+/** The last atlas paint, kept so the floor field can cast a skin's cells onto the level (dungeon.js). */
+let lastAtlas = null;
+/** @returns {{alb:Float32Array, hgt:Float32Array, W:number, H:number, S:number}|null} */
+export function atlasPixels() { return lastAtlas; }
+const skinListeners = new Set();
+/** Call `fn` after every skin change has repainted the atlas. Returns an unsubscribe. */
+export function onTileSkin(fn) { skinListeners.add(fn); return () => skinListeners.delete(fn); }
+
 /** Build the atlas textures from a fresh paint. */
 function flagstoneAtlas() {
   const { alb, hgt, rgh, obs, W, H } = paintAtlasArrays();
+  lastAtlas = { alb, hgt, W, H, S: ATLAS.cell };
   const albedo = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [alb[i], alb[i + 1], alb[i + 2]]; }, { pixel: true });
   const obsidian = rgbTexture(W, H, (x, y) => { const i = (y * W + x) * 3; return [obs[i], obs[i + 1], obs[i + 2]]; }, { pixel: true });
   const rough = rgbTexture(W, H, (x, y) => { const v = rgh[y * W + x]; return [v, v, v]; }, { srgb: false, pixel: true });
@@ -473,6 +491,7 @@ export async function setTileSkin(id) {
   activeSkin = id || null;
   if (!textures) return true;                 // nothing painted yet; first paint will use it
   const { alb, hgt, rgh, obs, W, H } = paintAtlasArrays();
+  lastAtlas = { alb, hgt, W, H, S: ATLAS.cell };
   const a = textures.atlas;
   repaintRgb(a.albedo, W, H, (x, y) => { const i = (y * W + x) * 3; return [alb[i], alb[i + 1], alb[i + 2]]; });
   repaintRgb(a.obsidian, W, H, (x, y) => { const i = (y * W + x) * 3; return [obs[i], obs[i + 1], obs[i + 2]]; });
@@ -484,6 +503,7 @@ export async function setTileSkin(id) {
   const nd = n.image.getContext('2d').getImageData(0, 0, W, H).data;
   repaintRgb(a.normal, W, H, (x, y) => { const i = (y * W + x) * 4; return [nd[i] / 255, nd[i + 1] / 255, nd[i + 2] / 255]; });
   n.dispose();
+  for (const fn of skinListeners) { try { fn(activeSkin); } catch (e) { console.warn('setTileSkin listener failed', e); } }
   return true;
 }
 
@@ -616,7 +636,9 @@ export function stoneFamily(depth) {
   // the deep bands used to average 0.92-0.95 and stacked that loss on top of a grade that was
   // already crushing them, which is how depth 18 arrived at a black-green wash.
   if (depth <= 0) return { name: 'weathered court flags', tint: [1.06, 1.04, 0.98], moss: 1.15 };
-  if (depth <= 5) return { name: 'warm limestone', tint: [1.04, 1.0, 0.93], moss: 1 };
+  // grey limestone, a touch cool: the shallow band's key light and every brazier are already warm, and a
+  // warm quarry under them turned a pale guardroom into gold leaf (review-01 F4, chroma 0.36)
+  if (depth <= 5) return { name: 'grey limestone', tint: [0.98, 1.0, 1.03], moss: 1 };
   if (depth <= 12) return { name: 'cold granite', tint: [0.95, 0.99, 1.06], moss: 0.75 };
   if (depth <= 18) return { name: 'green serpentine', tint: [0.94, 1.04, 0.96], moss: 1.25 };
   return { name: 'violet basalt', tint: [1.01, 0.94, 1.07], moss: 0.45 };
@@ -701,8 +723,62 @@ function medallionTexture() {
   }, { pixel: true });
 }
 
+/**
+ * THE ROCK BETWEEN THE ROOMS (dungeon.js abyss plane). Flat, unlit, and marked as pixel art in the frame's alpha
+ * (WORLD_MASK_ALPHA) so the grading pass holds its film grain off it: a flat dark field under full grain sprinkles
+ * true-black pixels (review-04: a shade darker put 1.7% of room-crypt under 0.06), and a quiet one can sit a shade
+ * lower, which is what gives a lamp-lit room at depth 8-9 its figure against the rock (review-03 F12).
+ */
+function rockMaterial(hex) {
+  const m = new THREE.MeshBasicMaterial({ color: hex });
+  m.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>\n gl_FragColor.a = ${WORLD_MASK_ALPHA.toFixed(2)};`);
+  };
+  m.customProgramCacheKey = () => 'rock-masked';
+  return m;
+}
+
 /** Lazily created texture set. */
 let textures = null;
+
+/** The live floor field's size in tiles — one uniform object, shared by every field material. */
+const FIELD_SIZE = { value: new THREE.Vector2(48, 32) };
+/** Field texels a tile over TEXELS_PER_TILE: 2 for the 64-texel clean stone, 1 for the old field and the forest. */
+const FIELD_SCALE = { value: 1 };
+/**
+ * THE FIELD'S HIGHLIGHT SHOULDER (review-03 F12 / review-01 F1). Scene-linear luminance above the knee rolls off
+ * toward knee + shoulder: a pale room under a cold key and the light spell stops glaring, while dim lit stone
+ * (depth 8-9, the default room) sits below the knee and keeps every bit of its light. Off in the forest.
+ */
+const FIELD_KNEE = { value: 0.3 }, FIELD_SHOULDER = { value: 0.13 };
+/** The shoulder's uniforms and per-mode knees (the renderer picks one a frame): tools and audits tune it live. */
+export const FIELD_TONE = {
+  knee: FIELD_KNEE, shoulder: FIELD_SHOULDER, kneeLit: 0.3, kneeRevealed: 0.09,
+  // the dark-only lift (floor / caps), its scale, and what an out-of-sight cap is multiplied by first
+  floorLift: { value: 1.2 }, capLift: { value: 2.4 }, liftT: { value: 0.015 }, capMemScale: { value: 1.0 }, one: { value: 1.0 },
+  // THE BEVEL LIP UNDER A TORCH (review-04). The relief is a normal map off the painted height, and a close point
+  // light catches every north lip it faces: a torch pool broke into bright orange lip-lines. The painted bevel
+  // carries the stone's form; the normal is kept to a whisper so light lands as a pool, not as edges.
+  normal: { value: 0.5 },
+  // ...and inside a pool, where the light reaching the stone is warm (a torch, not the cool key), the albedo is
+  // blended toward a short vertical average so the lips a torch catches smooth into a pool. 0 = off.
+  poolSoft: { value: 0.85 },
+};
+/** The field bound right now (the water shader samples the bed through it). */
+const FIELD = { albedo: null, aux: null, forest: false };
+/** Stand-ins until the first level binds its field, so the materials compile with their maps on. */
+const FIELD_DUMMY = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);
+FIELD_DUMMY.needsUpdate = true;
+const FIELD_DUMMY_N = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
+FIELD_DUMMY_N.needsUpdate = true;
+/**
+ * Pick the shoulder's knee for this frame: a revealed map (fog override 'all') is lit several times over by the
+ * reveal boost, so its highlights roll off earlier than a map lit only by its own torches and lantern.
+ * @param {boolean} revealed
+ */
+export function syncFieldTone(revealed) { FIELD_KNEE.value = FIELD.forestKnee ? 100 : revealed ? FIELD_TONE.kneeRevealed : FIELD_TONE.kneeLit; }
+/** The field-size uniform, for shaders outside this file. */
+export function fieldSizeUniform() { return FIELD_SIZE; }
 export function getTextures() {
   if (!textures) {
     const atlas = flagstoneAtlas();
@@ -735,11 +811,11 @@ export function patchSurface(m, fog, opts = {}) {
   const prev = m.onBeforeCompile;
   const grungeTex = opts.grungeTex || getTextures().grunge;
   const q = opts.quant || null;
-  const key = `surface:${opts.atlas ? 'atlas' : 'uv'}:${opts.grunge ? 'g' : 'n'}:${q ? q.join(',') : 'x'}`;
+  const key = `surface:${opts.atlas ? 'atlas' : 'uv'}:${opts.grunge ? 'g' : 'n'}:${q ? q.join(',') : 'x'}:${opts.field ? 'field' + (opts.memLift || 0) : ''}`;
   m.onBeforeCompile = (shader) => {
     prev(shader);
     m.userData.surfaceUniforms = shader.uniforms;   // audits and probes reach the live grid from here
-    if (opts.grunge || q) {
+    if (opts.grunge || q || opts.field) {
       // the live world texel grid: one uniform object shared by every surface material
       shader.uniforms.uWorldTexels = GRID.uWorldTexels;
       shader.fragmentShader = shader.fragmentShader
@@ -823,6 +899,60 @@ export function patchSurface(m, fog, opts = {}) {
         // the film grain off it (renderer.js character mask; sprites write 0.35, the void 1.0)
         .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n gl_FragColor.a = uWorldMask;');
     }
+    if (opts.field) {
+      // ---- THE LEVEL'S FLOOR FIELD (floorField.js): one picture of the whole level, world uvs ----
+      // uv is (world + 0.5) / level size, so the snap below is on the WORLD texel grid, anchored at the
+      // level's corner — one phase for the whole floor, where a slab per tile restarted it at every
+      // tile edge. `aTile` is the tile a vertex belongs to: the lookup is clamped inside it, so a wall
+      // cap's overhang reads its own stone's lip instead of the floor texels beyond the wall.
+      shader.uniforms.uWorldMask = GRID.uWorldMask;
+      shader.uniforms.uFieldSize = opts.field;
+      shader.uniforms.uFieldScale = FIELD_SCALE;
+      // UNLIT STONE IS NOT BLACK (review-02 F10). A cap is laid dark so that a LIT one does not glare, and on
+      // a revealed map the joints and front bands of the unlit wall mass sank under 0.06. A DARK-ONLY lift:
+      // y = x + A*t^2*x/(x+t)^2 roughly doubles the darkest light and is ~0 by the time stone is lit
+      // (monotonic for A < 27), so it cannot move the glare gates. A = uFieldMemLift.
+      const capTone = opts.memLift === 'cap';
+      shader.uniforms.uFieldMemLift = capTone ? FIELD_TONE.capLift : FIELD_TONE.floorLift;
+      shader.uniforms.uFieldMemScale = capTone ? FIELD_TONE.capMemScale : FIELD_TONE.one;
+      shader.uniforms.uFieldLiftT = FIELD_TONE.liftT;
+      shader.uniforms.uFieldKnee = FIELD_KNEE; shader.uniforms.uFieldShoulder = FIELD_SHOULDER; shader.uniforms.uFieldPoolSoft = FIELD_TONE.poolSoft;
+      shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>',
+        '{ vec3 fIrr = outgoingLight / max(fieldAlb, vec3(0.02)); float fIl = dot(fIrr, vec3(0.2126, 0.7152, 0.0722)); float fWk = smoothstep(0.15, 0.6, (fIrr.r - fIrr.b) / max(fIl, 1e-3)) * uFieldPoolSoft; outgoingLight *= mix(vec3(1.0), clamp(fieldAlbAvg / max(fieldAlb, vec3(0.02)), 0.6, 1.6), fWk); }\n{ outgoingLight *= mix(uFieldMemScale, 1.0, smoothstep(0.0, 1.0, fogMask(vFogXZ).g)); float fl = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722)); float ft = uFieldLiftT;\n  outgoingLight *= 1.0 + uFieldMemLift * ft * ft / ((fl + ft) * (fl + ft)); }\n{ float sl = dot(outgoingLight, vec3(0.2126, 0.7152, 0.0722)); if (sl > uFieldKnee) outgoingLight *= (uFieldKnee + (sl - uFieldKnee) / (1.0 + (sl - uFieldKnee) / uFieldShoulder)) / sl; }\n#include <opaque_fragment>');
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute vec2 aTile; varying vec2 vFieldTile;')
+        .replace('#include <uv_vertex>', '#include <uv_vertex>\n vFieldTile = aTile;');
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\nuniform float uWorldMask; uniform vec2 uFieldSize; uniform float uFieldMemLift; uniform float uFieldMemScale; uniform float uFieldLiftT; uniform float uFieldKnee; uniform float uFieldShoulder; uniform float uFieldPoolSoft; vec3 fieldAlb = vec3(1.0); vec3 fieldAlbAvg = vec3(1.0); varying vec2 vFieldTile;\nvec2 qUv; vec2 qDx; vec2 qDy;\nuniform float uFieldScale;
+const float FIELD_CELL = ${TEXELS_PER_TILE.toFixed(1)};`)
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+        { vec2 qStep = 1.0 / (uFieldSize * uWorldTexels * uFieldScale);
+          qUv = ${LOOK.clean && LOOK.fieldLinear ? 'vMapUv' : '(floor(vMapUv / qStep) + 0.5) * qStep'};
+          vec2 hx = 0.5 / (uFieldSize * FIELD_CELL * uFieldScale);
+          qUv = clamp(qUv, vFieldTile / uFieldSize + hx, (vFieldTile + 1.0) / uFieldSize - hx);
+          qDx = dFdx(vMapUv); qDy = dFdy(vMapUv); }`)
+        .replace('#include <map_fragment>', `
+        #ifdef USE_MAP
+          { vec4 fAlb = texture2DGradEXT( map, qUv, qDx, qDy );
+            vec2 fv = vec2(0.0, 1.0 / (uFieldSize.y * FIELD_CELL));
+            fieldAlb = fAlb.rgb;
+            fieldAlbAvg = (fAlb.rgb * 2.0 + texture2DGradEXT( map, qUv - fv, qDx, qDy ).rgb + texture2DGradEXT( map, qUv + fv, qDx, qDy ).rgb
+              + texture2DGradEXT( map, qUv - 2.0 * fv, qDx, qDy ).rgb + texture2DGradEXT( map, qUv + 2.0 * fv, qDx, qDy ).rgb + texture2DGradEXT( map, qUv + 3.0 * fv, qDx, qDy ).rgb) / 7.0;
+            diffuseColor *= fAlb; }
+        #endif`)
+        .replace('#include <roughnessmap_fragment>', `
+        float roughnessFactor = roughness;
+        #ifdef USE_ROUGHNESSMAP
+          roughnessFactor *= texture2DGradEXT( roughnessMap, qUv, qDx, qDy ).g;
+        #endif`)
+        .replace('#include <normal_fragment_maps>', `
+        #ifdef USE_NORMALMAP_TANGENTSPACE
+          vec3 mapN = texture2DGradEXT( normalMap, qUv, qDx, qDy ).xyz * 2.0 - 1.0;
+          mapN.xy *= normalScale;
+          normal = normalize( tbn * mapN );
+        #endif`)
+        .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n gl_FragColor.a = uWorldMask;');
+    }
   };
   m.customProgramCacheKey = () => 'fogofwar-v1|' + key;
   return m;
@@ -870,11 +1000,22 @@ export function createMaterials(fog) {
     // brighter than its own corridors. It is deep rock at a fixed value in every scenario, a
     // shade under the apron so the level still reads as the subject. A pit shaft is still a black
     // hole: that is its own walled geometry, not this plane.
-    dark: new THREE.MeshBasicMaterial({ color: 0x272224 }),
+    dark: rockMaterial(0x242022),
     pitWall: surf({ map: M.albedo, normalMap: M.normal, roughnessMap: M.rough, roughness: 1, color: 0xd8d0c8, vertexColors: true }, { grunge: 0.5, quant: MASONRY_Q }),
     rim: std({ color: 0x6a6058, roughness: 0.9 }),
     cutStone: surf({ map: T.cutStone, roughness: 0.88, metalness: 0.02, color: 0xcfc6bc }, { grunge: 0.5 }),
     rock: std({ color: 0x7a7068, roughness: 0.95, flatShading: true }),
+    // THE FOREST (dungeon.js buildForest): flat-shaded and untextured, so a tree has no texels to put off the
+    // grid; lit and fogged like any other surface. Colour arrives per instance, so one material serves
+    // every trunk and one every crown.
+    bark: std({ color: 0xffffff, roughness: 1, flatShading: true }),
+    foliage: std({ color: 0xffffff, roughness: 0.92, flatShading: true }),
+    /**
+     * THE LEVEL'S FLOOR (floorField.js): one painted picture of the whole level on one flat mesh, and
+     * the wall caps cut from the same picture. The textures are bound per level by `bindField`.
+     */
+    field: surf({ map: FIELD_DUMMY, normalMap: FIELD_DUMMY_N, normalScale: new THREE.Vector2(1, 1), roughnessMap: FIELD_DUMMY_N, roughness: 1, metalness: 0.02 }, { grunge: 0.3, field: FIELD_SIZE, memLift: 'floor' }),
+    fieldCap: surf({ map: FIELD_DUMMY, normalMap: FIELD_DUMMY_N, normalScale: new THREE.Vector2(1, 1), roughnessMap: FIELD_DUMMY_N, roughness: 1, metalness: 0.02, vertexColors: true }, { grunge: 0.3, field: FIELD_SIZE, memLift: 'cap' }),
     gold: std({ color: PALETTE.gold, roughness: 0.28, metalness: 0.95, emissive: 0x3a2a05, emissiveIntensity: 0.4 }),
     brass: std({ color: PALETTE.brass, roughness: 0.4, metalness: 0.8 }),
     wood: std({ color: PALETTE.wood, roughness: 0.85 }),
@@ -896,6 +1037,26 @@ export function createMaterials(fog) {
     sackCloth: std({ color: 0x8a6a45, roughness: 0.95 }),
     magicSack: std({ color: 0x5b3a8a, roughness: 0.9, emissive: 0x2a1050, emissiveIntensity: 0.3 }),
     rope: std({ color: 0x9c7c4c, roughness: 1 }),
+  };
+  /**
+   * Point the floor materials (and the water, which reads the bed through itself) at a level's field.
+   * @param {{albedo:THREE.Texture, normal:THREE.Texture, rough:THREE.Texture}} tex from floorField.js `fieldTextures`
+   * @param {number} W @param {number} H level size in tiles @param {{forest?:boolean}} [o]
+   */
+  mats.bindField = (tex, W, H, o = {}) => {
+    FIELD_SIZE.value.set(W, H);
+    FIELD_SCALE.value = tex.albedo.image.width / (W * TEXELS_PER_TILE);   // the snap follows the field's own density
+    for (const m of [mats.field, mats.fieldCap]) {
+      if (m.map !== tex.albedo || m.normalMap !== tex.normal) { m.map = tex.albedo; m.normalMap = tex.normal; m.roughnessMap = tex.rough; m.needsUpdate = true; }
+    }
+    // the forest's ground is cut away over the stream (its alpha); a dungeon floor never is
+    const cut = o.forest ? 0.5 : 0;
+    if (mats.field.alphaTest !== cut) { mats.field.alphaTest = cut; mats.field.needsUpdate = true; }
+    // the stream's ground is flat daylight earth, not bevelled stone
+    const ns = o.forest ? 0.45 : FIELD_TONE.normal.value;
+    mats.field.normalScale.setScalar(ns); mats.fieldCap.normalScale.setScalar(ns);
+    FIELD.albedo = tex.albedo; FIELD.aux = tex.rough; FIELD.forest = !!o.forest;
+    FIELD.forestKnee = !!o.forest;
   };
   mats.flame.toneMapped = false;
   mats.holyGlow.toneMapped = false;
@@ -999,6 +1160,7 @@ export function createWaterMaterial(fog) {
     uTime: { value: 0 }, uLightPos: { value: new THREE.Vector3() }, uLightColor: { value: new THREE.Color(0xffc080) },
     uFloor: { value: T.atlas.albedo }, uCaustic: { value: T.caustic }, uCell: { value: new THREE.Vector2(cu, cv) }, uCellScale: { value: new THREE.Vector2(1 / ATLAS.cols, 1 / ATLAS.rows) },
     uWorldTexels: GRID.uWorldTexels, uWorldMask: GRID.uWorldMask,
+    uField: { value: FIELD.albedo || FIELD_DUMMY }, uAux: { value: FIELD.aux || FIELD_DUMMY_N }, uFieldSize: FIELD_SIZE, uForest: { value: 0 },
     uBandTint: { value: new THREE.Vector3(...band.tint) },
     uBandDeep: { value: new THREE.Vector3(...band.deep) },
     uBandGain: { value: band.gain },
@@ -1020,6 +1182,7 @@ export function createWaterMaterial(fog) {
       uniform float uTime; uniform vec3 uLightPos; uniform vec3 uLightColor;
       uniform sampler2D uFloor; uniform sampler2D uCaustic; uniform vec2 uCell; uniform vec2 uCellScale;
       uniform float uWorldTexels; uniform float uWorldMask;
+      uniform sampler2D uField; uniform sampler2D uAux; uniform vec2 uFieldSize; uniform float uForest;
       uniform vec3 uBandTint; uniform vec3 uBandDeep; uniform float uBandGain;
       uniform vec4 uWLight[${WATER_LIGHTS}]; uniform vec3 uWCol[${WATER_LIGHTS}];
       varying vec2 vFogXZ; varying vec3 vWorld; varying float vShore;
@@ -1041,14 +1204,11 @@ export function createWaterMaterial(fog) {
         vec3 wv = waves(pq, uTime);
         vec3 n = normalize(vec3(-wv.y * 0.02, 1.0, -wv.z * 0.02));
         vec3 V = normalize(cameraPosition - vWorld);
-        // ---- the floor through the water, joints and all ----
+        // ---- the floor through the water: the level's own field (floorField.js), joints and all ----
         // a couple of texels of refraction (the old 1.6 was half a tile and scrambled the courses)
-        vec2 tile = fract(pq + n.xz * 0.05 + 0.5);
-        vec2 cuv = (tile * (CELL - 1.0) + 0.5) / CELL * uCellScale + uCell;
-        vec3 floorCol = texture2D(uFloor, cuv).rgb;
-        float edge = max(abs(tile.x - 0.5), abs(tile.y - 0.5));
-        float joint = step(0.5 - 1.5 / K, edge);          // the grout, one texel wide, under water
-        floorCol *= mix(1.0, 0.30, joint);
+        vec2 fuv = (pq + n.xz * 0.05 + 0.5) / uFieldSize;
+        vec3 floorCol = texture2D(uField, fuv).rgb;
+        float joint = 0.0;                                // the field paints its own joints
         // ---- absorption: deepest in the middle of the pool, shallow at the kerb ----
         float depthK = 0.44 + 0.34 * vShore;
         vec3 water = mix(floorCol * uBandTint, uBandDeep, depthK);
@@ -1085,6 +1245,32 @@ export function createWaterMaterial(fog) {
         float glint = 1.5 / (1.0 + d * d * 0.3);
         vec3 H = normalize(normalize(toL) + V);
         col += uLightColor * pow(max(0.0, dot(n, H)), 140.0) * glint * 0.22;
+        if (uForest > 0.5) {
+          // ---- A STREAM IN DAYLIGHT: bright blue over a pebbled bed, streaks of light running with it ----
+          float dep = texture2D(uAux, (pq + 0.5) / uFieldSize).b;
+          vec3 shallow = vec3(0.1, 0.4, 0.86), deepC = vec3(0.025, 0.13, 0.56);
+          vec3 bedC = texture2D(uField, fuv).rgb;
+          vec3 w = mix(bedC * vec3(0.5, 0.85, 1.3), shallow, 0.74);
+          w = mix(w, deepC, smoothstep(0.0, 1.0, dep) * 0.7);
+          // ripples: long strokes along the flow (north-south), bent by a slow wobble, on the texel grid
+          float ph = pq.y * 3.1 - uTime * 1.2 + sin(pq.x * 2.7 + pq.y * 0.9) * 1.1 + sin(pq.x * 7.3 - uTime * 0.4) * 0.35;
+          float str = sin(pq.x * 13.0 + sin(pq.y * 1.7 + uTime * 0.3) * 2.0);
+          float rip = smoothstep(0.82, 0.97, sin(ph)) * smoothstep(0.1, 0.8, str);
+          float glint = step(0.985, sin(ph * 1.7 + pq.x * 5.0)) * step(0.4, str);
+          w += vec3(0.2, 0.36, 0.42) * rip * (0.4 + 0.6 * dep) + vec3(0.45, 0.55, 0.6) * glint * 0.5;
+          w = mix(vec3(dot(w, vec3(0.2126, 0.7152, 0.0722))), w, 0.85);
+          // the edge: a dark lip where the bank drops in, then a 1-texel light line of foam
+          float shoreK = 1.0 - smoothstep(0.0, 0.25, dep);
+          w = mix(w, w * 0.62, shoreK * 0.7);
+          col = w;
+        } else {
+          // ---- STANDING WATER IN THE DUNGEON: the bed under it (floorField.js paints a pebbled bed, not the
+          // room's pattern) and slow ripple strokes, only as bright as the light that falls on them ----
+          float ph = pq.y * 3.1 - uTime * 0.45 + sin(pq.x * 2.7 + pq.y * 0.9) * 1.1;
+          float str = sin(pq.x * 11.0 + sin(pq.y * 1.7 + uTime * 0.2) * 2.0);
+          float rip = smoothstep(0.85, 0.98, sin(ph)) * smoothstep(0.2, 0.8, str);
+          col += (uBandTint * 0.5 + litN * 0.45) * rip * (0.25 + L) * 0.55;
+        }
         col = applyFog(col, vFogXZ);
         // stone is pixel art and so is this: the grading pass holds its grain off both
         gl_FragColor = vec4(col, uWorldMask);
@@ -1102,6 +1288,8 @@ export function createWaterMaterial(fog) {
 export function syncWaterLights(mat, depth, lights) {
   const u = mat.uniforms;
   const b = waterBand(depth);
+  if (FIELD.albedo) { u.uField.value = FIELD.albedo; u.uAux.value = FIELD.aux; }
+  u.uForest.value = FIELD.forest ? 1 : 0;
   u.uBandTint.value.set(b.tint[0], b.tint[1], b.tint[2]);
   u.uBandDeep.value.set(b.deep[0], b.deep[1], b.deep[2]);
   u.uBandGain.value = b.gain;

@@ -111,6 +111,8 @@ export class Level {
     this.lastStairsDown = null;   // staircase used when the player last descended from here
     this.nextId = 1;
     this.debug = { connectivityFixes: 0 };
+    /** null for a dungeon level; 'forest' for the outdoor level (world/forest.js), which the renderer draws as woods. */
+    this.biome = null;
   }
 
   idx(x, y) { return y * this.width + x; }
@@ -339,7 +341,7 @@ export class Level {
       visited: this.visited, lit: this.lit, killsOnLevel: this.killsOnLevel,
       wanderTimer: this.wanderTimer, wanderCount: this.wanderCount,
       lastStairsDown: this.lastStairsDown ? { ...this.lastStairsDown } : null,
-      nextId: this.nextId, debug: { ...this.debug },
+      nextId: this.nextId, debug: { ...this.debug }, biome: this.biome,
     };
   }
 
@@ -365,6 +367,7 @@ export class Level {
     lv.wanderTimer = d.wanderTimer || 0; lv.wanderCount = d.wanderCount || 0;
     lv.lastStairsDown = d.lastStairsDown ? { ...d.lastStairsDown } : null;
     lv.nextId = d.nextId || 1;
+    lv.biome = d.biome || null;
     lv.debug = { connectivityFixes: 0, ...(d.debug || {}) };
     return lv;
   }

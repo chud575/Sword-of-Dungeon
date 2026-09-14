@@ -80,6 +80,10 @@ export function castBuilder(type) {
     // lands under the feet rather than under the middle of the figure.
     return {
       anims, palette: NO_PALETTE, w: frame.w, h: frame.h,
+      // THE SHEET IS DRAWN FACING LEFT (the warrior holds his sword in his right hand, so the unmirrored art leads
+      // with it on the viewer's left; the bear's head is on the left). Mirroring for west turned every one of them
+      // round: walking right, the hero faced left. These sprites are mirrored for EAST instead.
+      eastMirrored: true,
       pivot: { x: (frame.w / 2) | 0, y: frame.h }, emissive: '',
       // The sheet draws every character at roughly one cell, so the size relationships the game
       // already balances (MONSTER_TABLE `size`, 0.8 for a wolf to 1.6 for a drake) have to come

@@ -15,6 +15,10 @@ const BANDS = [[5, 'The Upper Halls'], [12, 'The Cold Deep'], [18, 'The Black Ro
 function el(tag, cls, html) { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
 const corners = () => '<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div>';
 const fmtNum = (n) => Math.round(n).toLocaleString('en-US');
+/** The "module cover" theme (body.ui-module, the default; ?ui=classic turns it off) uses its own card and depth layouts. */
+const moduleTheme = () => typeof document !== 'undefined' && document.body.classList.contains('ui-module');
+/** Title band of a module-cover panel: bold caps on the orange strip, an optional boxed code at the right. Hidden in classic. */
+export const band = (title, code = '', cls = '') => `<div class="mc-band ${cls}"><span class="mc-title">${title}</span>${code ? `<span class="mc-code">${code}</span>` : ''}</div>`;
 
 export class Hud {
   /**
@@ -34,8 +38,22 @@ export class Hud {
 
   build() {
     const root = this.ctx.root;
+    const mod = moduleTheme();
     // --- character card
-    this.card = el('div', 'panel hud ornate', corners() + `<div class="flash"></div>
+    // Module cover: name and level on one line, then HIT POINTS and EXPERIENCE as labelled segmented
+    // meters, then skill / slain / gold in a row. Every hook update() and bind() reach for is kept.
+    if (mod) this.card = el('div', 'panel hud ornate', corners() + `<div class="flash"></div>${band('Adventurer', 'F1')}
+      <div class="mc-body">
+        <div class="mc-row mc-head"><div class="name">Warrior</div><div class="medal"><span class="lvl">Level</span><span class="lv num">1</span><span class="ring"></span></div></div>
+        <div class="gauge hp"><div class="mc-row lab"><span class="mc-lab">Hit points</span><span class="mc-val num"><span class="hp-t">12</span> / <span class="hp-m">12</span></span></div>
+          <div class="frame"><div class="track"><div class="trail"></div><div class="fill"></div><div class="segs"></div></div></div></div>
+        <div class="gauge xp"><div class="mc-row lab"><span class="mc-lab">Experience</span><span class="mc-val num"><span class="xp-v">0</span> / <span class="xp-next">200</span></span></div>
+          <div class="frame"><div class="track"><div class="fill"></div><div class="segs"></div></div></div></div>
+        <div class="mc-row mc-stats"><span class="mc-lab" title="Battle skill">Skill <b class="skill-v">8</b></span><span class="mc-lab" title="Monsters slain">Slain <b class="kills">0</b></span>
+          <span class="mc-lab gold" title="Gold carried — sacrifice it at a temple for experience">Gold <b class="gold-v">0</b></span></div>
+        <span class="next" hidden><b class="xp-togo">200</b><b class="xp-nextlv">2</b></span>
+      </div>`);
+    else this.card = el('div', 'panel hud ornate', corners() + `<div class="flash"></div>
       <div class="head">
         <div class="medal"><span class="lv num">1</span><span class="lvl">Level</span><span class="ring"></span></div>
         <div class="who"><div class="name">Warrior</div>
@@ -53,14 +71,15 @@ export class Hud {
     // --- status chips
     this.status = el('div', 'hud'); this.status.id = 'hud-status'; root.appendChild(this.status);
     // --- depth + Sword timer
-    this.depth = el('div', 'panel hud ornate', corners() + `
-      <div class="depth">${icon('stairs')}<span>Dungeon level</span><span class="n num">1</span></div>
+    this.depth = el('div', 'panel hud ornate', corners() + (mod ? `${band('Dungeon Module')}
+      <div class="depth"><span>Level</span><span class="n num">1</span></div>` : `
+      <div class="depth">${icon('stairs')}<span>Dungeon level</span><span class="n num">1</span></div>`) + `
       <div class="band">The Upper Halls</div><div class="seed"></div>
       <div class="timer"><div class="cap">Umla's clock</div><div class="clock">${icon('hourglass')}<div class="t num">33:20</div></div><div class="fuse"><div class="f"></div></div></div>`);
     this.depth.id = 'hud-depth'; root.appendChild(this.depth);
     this.dq = { n: this.depth.querySelector('.n'), band: this.depth.querySelector('.band'), seed: this.depth.querySelector('.seed'), t: this.depth.querySelector('.timer .t'), cap: this.depth.querySelector('.timer .cap'), fuse: this.depth.querySelector('.fuse .f') };
     // --- hotbar
-    this.hotbar = el('div', 'panel hud ornate'); this.hotbar.id = 'hud-hotbar'; root.appendChild(this.hotbar);
+    this.hotbar = el('div', 'panel hud ornate', band('Spells &amp; Items')); this.hotbar.id = 'hud-hotbar'; root.appendChild(this.hotbar);
     this.slots = {};
     const mk = (id, name, key, color, action, ico) => {
       const s = el('button', 'slot', `<span class="key">${key}</span><span class="glyph">${icon(ico)}</span><span class="nm">${name}</span><span class="cnt"></span>`);
@@ -79,7 +98,7 @@ export class Hud {
     mk('bury', 'Bury', '⇧B', 'var(--loot)', { action: 'bury' }, 'bury').title = 'Bury gold here — safe from thieves, dig it up later';
     mk('wait', 'Rest', 'Z', 'var(--info)', { action: 'wait' }, 'wait').title = 'Rest a moment (heals slowly outside a fight)';
     // --- quick buttons
-    this.quick = el('div', 'panel hud ornate'); this.quick.id = 'hud-quick'; root.appendChild(this.quick);
+    this.quick = el('div', 'panel hud ornate', band('Commands')); this.quick.id = 'hud-quick'; root.appendChild(this.quick);
     const qb = (id, name, key, action) => { const b = el('button', 'qb', `<span>${name}</span><kbd>${key}</kbd>`); b.dataset.id = id; b.addEventListener('click', () => { this.bus.emit('sfx:ui', { kind: 'click' }); this.bus.emit('input:action', action); }); this.quick.appendChild(b); return b; };
     this.exploreBtn = qb('explore', 'Explore', 'X', { action: 'explore' });
     qb('minimap', 'Map', 'M', { action: 'minimap' });
@@ -87,7 +106,7 @@ export class Hud {
     qb('help', 'Help', '?', { action: 'help' });
     qb('pause', 'Menu', 'Esc', { action: 'pause' });
     // --- centre banner
-    this.banner = el('div', 'panel hud ornate', corners() + '<div class="mark">!</div><div class="why"></div><div class="hint"></div>');
+    this.banner = el('div', 'panel hud ornate', corners() + band('Halt') + '<div class="mark">!</div><div class="why"></div><div class="hint"></div>');
     this.banner.id = 'hud-banner'; root.appendChild(this.banner);
     // the log squeezes against the hotbar on narrow windows: publish the hotbar's width
     this.measure();
@@ -125,13 +144,17 @@ export class Hud {
     if (entity && entity.state !== 'hunt' && Math.max(Math.abs(entity.x - g.player.x), Math.abs(entity.y - g.player.y)) > 7) return;
     this.autoPaused = true;
     g.setPaused(true);
-    this.showBanner(`${cap(description || 'a monster')} comes into view`, 'Paused — any key to continue', 'danger', 0);
+    this.showBanner(`${cap(description || 'a monster')} comes into view`, 'Paused — any key to continue', 'danger', 0, 'Wandering monster');
   }
 
-  /** Show the centre banner. dur 0 = stays until hideBanner(). */
-  showBanner(why, hint = '', kind = 'danger', dur = 2.4) {
+  /**
+   * Show the centre banner. dur 0 = stays until hideBanner().
+   * @param {string} [title] the module-cover title band; defaults to "Halt" for danger, "Notice" otherwise
+   */
+  showBanner(why, hint = '', kind = 'danger', dur = 2.4, title = '') {
     const b = this.banner;
     b.querySelector('.why').textContent = why; b.querySelector('.hint').textContent = hint;
+    b.querySelector('.mc-title').textContent = title || (kind === 'danger' ? 'Halt' : 'Notice');
     b.querySelector('.mark').textContent = kind === 'danger' ? '!' : '✦';
     b.classList.toggle('info', kind !== 'danger');
     b.classList.remove('show', 'timed'); void b.offsetWidth;
@@ -161,6 +184,9 @@ export class Hud {
     this.q('.gauge.hp .fill').style.transform = `scaleX(${Math.min(1, D.hp / max)})`;
     this.q('.gauge.hp .trail').style.transform = `scaleX(${Math.min(1, D.trail / max)})`;
     this.card.classList.toggle('low', p.hp / max < 0.3);
+    // module cover: one block per hit point up to 20, so a 3-hit warrior reads as three blocks
+    const seg = String(Math.max(1, Math.min(20, p.maxHp)));
+    if (this.hpSeg !== seg) { this.hpSeg = seg; this.q('.gauge.hp').style.setProperty('--seg', seg); }
     setText(this.q('.hp-t'), String(p.hp)); setText(this.q('.hp-m'), String(p.maxHp));
     // --- XP
     const lo = xpForLevel(p.level), hi = xpForLevel(p.level + 1);
@@ -230,8 +256,8 @@ export class Hud {
     if (p.enchant > 0) chips.push(['enchant', `Weapon +${p.enchant}`, 'var(--combat)', '+1 damage per enchantment', false, 'enchant']);
     if (p.maps.length) chips.push(['maps', `Maps ${p.maps.join(', ')}`, 'var(--magic)', 'Those levels will be lit on entry', false, 'maps']);
     if (g.playerOnTemple()) chips.push(['temple', 'Sanctuary', 'var(--loot)', 'Monsters ignore you; healing doubled', false, 'temple']);
-    // One turn is one exchange: your blow and the monster's answer together. Rounds land every
-    // 250ms, far too fast for floating text, so the count lives here where it stays readable.
+    // One turn is one exchange: your blow and the monster's answer, each on its own beat
+    // (combatTurnTime). The count lives here, where it stays readable.
     const cb = g.state && g.state.combat;
     if (cb && cb.rounds > 0) chips.push(['turn', `Turn ${cb.rounds}`, 'var(--combat)', 'One turn is your blow and the monster\'s answer together', false, 'skill']);
     const key = chips.map((c) => c[0] + c[1] + (c[4] ? 'o' : '')).join('|');

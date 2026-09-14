@@ -11,18 +11,26 @@ import { saveGame, loadSave, deleteSave, loadSettings, saveSettings } from './co
 import { Hud } from './ui/hud.js';
 import { PanelCollapse } from './ui/collapse.js';
 import { Surround } from './render/surround.js';
+import { loadPaintedTiles } from './render/paintedTiles.js';
 import { TILE_SKINS, SKIN_IDS } from './render/tileSkins.js';
+import { TorchColorPicker, torchColorFor } from './ui/torchColor.js';
 import { MessageLog } from './ui/log.js';
 import { InventoryPanel } from './ui/inventory.js';
 import { Minimap } from './ui/minimap.js';
 import { Menus } from './ui/menus.js';
 import { Tooltip } from './ui/tooltip.js';
+import './ui/module.css'; // last, so the module-cover theme wins the cascade over every panel sheet
 
 const params = new URLSearchParams(location.search);
+// UI theme: the late-70s "module cover" look is the default; ?ui=classic restores the parchment-and-brass
+// HUD for side-by-side comparison. Set before any panel is built: templates and the minimap's palette
+// read it at construction.
+document.body.classList.toggle('ui-module', params.get('ui') !== 'classic');
 const debugMode = params.get('debug') === '1';
 const seedParam = params.get('seed');
 let currentSeed = seedParam !== null && seedParam !== '' ? (Number.isFinite(Number(seedParam)) ? Number(seedParam) : seedParam) : 42;
 const difficultyParam = params.get('difficulty') || 'standard';
+const biomeParam = params.get('biome'); // ?biome=forest: the first level is the outdoor forest (prototype)
 
 const canvas = document.getElementById('game-canvas');
 const renderer = new Renderer({ canvas, bus, quality: params.get('quality') || 'high' }); // ?quality=low: cheaper fill for bots / weak GPUs
@@ -39,7 +47,7 @@ let saveRequested = false;
 
 function newGame(seed = currentSeed, opts = {}) {
   currentSeed = seed;
-  game = new Game({ seed, difficulty: opts.difficulty || difficultyParam, bus });
+  game = new Game({ seed, difficulty: opts.difficulty || difficultyParam, biome: opts.biome ?? biomeParam, bus });
   renderer.fog.override = null;
   renderer.cameraRig.yaw = DEFAULT_YAW;
   renderer.setGame(game);
@@ -122,6 +130,12 @@ const app = {
     renderer.setCameraProjection(s.perspectiveCamera ? 'perspective' : 'orthographic');
     renderer.dungeon.setModelsOnly(s.flatDecor === false);
     renderer.setTileSkin(s.tileSkin || null);
+    renderer.setLanternColor(torchColorFor(s.torchColor).hex);
+    renderer.setLightGroups({
+      ambient: s.lightAmbient !== false, key: s.lightKey !== false, lantern: s.lightLantern !== false,
+      torches: s.lightTorches !== false, decor: s.lightDecor !== false, temple: s.lightTemple !== false,
+      shadows: s.lightShadows !== false, grade: s.lightGrade !== false,
+    });
     audio.setVolumes({ master: s.masterVolume, music: s.musicVolume, sfx: s.sfxVolume });
     if (s.minimapSize && s.minimapSize !== minimap.size) minimap.setSize(s.minimapSize);
     else if (minimap.visible !== (s.minimap !== false)) minimap.toggle(s.minimap !== false);
@@ -137,6 +151,22 @@ const ui = {
   panels: { hud, log, inventory, minimap, menus, tooltip },
   update(dt) { hud.update(dt); log.update(dt); inventory.update(dt); minimap.update(dt); tooltip.update(dt); menus.update(dt); },
 };
+/**
+ * The lantern picker, opened by clicking the hero on ordinary floor (see ui/torchColor.js for why
+ * that gesture is free). Picking writes the setting and applies it immediately.
+ */
+const torchPicker = new TorchColorPicker({
+  bus,
+  settings,
+  onPick: (id) => { saveSettings(settings); renderer.setLanternColor(torchColorFor(id).hex); },
+});
+
+// A context the browser keeps taking away ends in a notice, not a black screen (Renderer.onContextLost).
+bus.on('render:context', ({ state }) => {
+  if (state !== 'dead') return;
+  menus.showGraphicsLost(() => { if (!debugMode) app.save(); location.reload(); });
+});
+
 app.applySettings(settings);
 
 /**
@@ -171,6 +201,13 @@ function takeStairs(kind) {
 }
 const inTransition = () => !!renderer.cameraRig.transition;
 
+/** Is the hero standing on something a click should ACT on, rather than open the lantern picker? */
+function canInteractHere() {
+  if (!game || game.over) return false;
+  const lv = game.level, p = game.player, t = lv.get(p.x, p.y);
+  return t === TILE.STAIRS_DOWN || t === TILE.STAIRS_UP || t === TILE.TEMPLE || !!lv.climbableAt(p.x, p.y);
+}
+
 function interact() {
   if (!game || game.over) return;
   const lv = game.level, p = game.player, t = lv.get(p.x, p.y);
@@ -194,7 +231,16 @@ bus.on('input:click', ({ x, y, button }) => {
 bus.on('input:action', (a) => {
   if (!game || frozen) return;
   switch (a.action) {
-    case 'interact': stopAuto(); interact(); break;
+    case 'interact': {
+      stopAuto();
+      // A click on your own tile used to call interact() and, on ordinary floor, do nothing at all
+      // (Game.interact falls through every branch). That dead click is what opens the picker; a
+      // click while standing on stairs, an altar or a climb still acts, exactly as before.
+      if (a.source === 'click' && !canInteractHere()) { torchPicker.toggle(a.cx, a.cy); break; }
+      torchPicker.close();
+      interact();
+      break;
+    }
     case 'potion': game.useItem('potion'); break;
     case 'cast': game.castSpell(a.spell); break;
     case 'toggleLight': game.toggleLight(); break;
@@ -312,6 +358,9 @@ const debug = {
   setTime(hour) { renderer.setTimeOfDay(hour); },
   /** Floor tile skin: an id from render/tileSkins.js, or null for the procedural fields. */
   setTileSkin(id) { return renderer.setTileSkin(id); },
+  /** The lantern picker, so a scenario can show it (a scenario is frozen, so input never reaches it). */
+  torchPicker,
+  setLanternColor(id) { settings.torchColor = id; saveSettings(settings); renderer.setLanternColor(torchColorFor(id).hex); return id; },
   stats() { return renderer.stats(); },
   showTitle() { showTitlePreview(); menus.showTitle(); },
   newGame, input, ui, app, audio,
@@ -321,7 +370,14 @@ registerScenarios(debug);
 window.__game = { get game() { return game; }, renderer, ui, debug, bus };
 
 // ------------------------------------------------------------------ start
+// the hand-painted tiles are decoded before the first level is built; on any failure the floor falls back
+// to procedural stone (render/paintedTiles.js)
+await loadPaintedTiles(64);
 newGame(currentSeed);
+// THE BOOT GAME IS NOBODY'S QUEST. It stands behind the title screen so the renderer has a level; the title menu
+// pauses it, and a pause autosaves — so every page load used to write this empty level-1 hero over the player's
+// real save, and Continue brought back a fresh start. Nothing saves a placeholder (core/save.js saveGame).
+game.placeholder = true;
 if (!debugMode) app.toTitle();
 renderer.render(0);
 window.__GAME_READY = true;

@@ -40,12 +40,18 @@ float bnoise(vec2 p) {
  * because it is a flat noise fill with no tiles in it: concealment is the fog mask's job (a game
  * rule), never the exposure's.
  */
+// THE WOOD HAS NO BEDROCK. Only the forest's fog tint has more red than blue in it (every depth band's
+// leans blue or violet), so that is what says an unexplored tile is undergrowth, not quarried stone.
+float woodFog() { return smoothstep(0.0, 0.03, fogTint.r - fogTint.b); }
 vec3 bedrock(vec2 xz) {
   float n = bnoise(xz * 1.7) * 0.6 + bnoise(xz * 5.3) * 0.4;
   // Faintly warm-neutral: the post grade splits shadows toward blue, so a neutral base here
   // would come out navy. Nudging red up keeps it reading as stone rather than night sky.
   vec3 base = vec3(0.0290, 0.0254, 0.0259);
-  return base * (0.62 + 0.95 * n);
+  base = mix(base, vec3(0.036, 0.043, 0.031), woodFog());
+  // the board look (render/look.js): unexplored rock sinks toward the top-down map benchmark's black surround, so
+  // the pale wall band is what frames the map; the woods keep their undergrowth
+  return base * (0.62 + 0.95 * n) * mix(${LOOK.base ? '0.45' : '1.0'}, 1.0, woodFog());
 }
 vec3 applyFog(vec3 c, vec2 xz) {
   vec2 f = fogMask(xz);
@@ -55,7 +61,8 @@ vec3 applyFog(vec3 c, vec2 xz) {
   // that is the whole point of giving each room a field — so remembered stone holds three quarters
   // of its saturation and a little over half its light, and reads as "the lamp is elsewhere"
   // rather than as a hole. (Was 0.30 of saturation against a 0.3 tint: a dark grey rectangle.)
-  vec3 memory = mix(vec3(lum), c, 0.76) * fogTint;
+  // (in daylight woods the memory is a paler, greyer haze, not a green veil)
+  vec3 memory = mix(vec3(lum), c, mix(0.76, 0.5, woodFog())) * fogTint;
   // Unexplored space is not a void: it reads as the unlit bedrock the dungeon is cut from, so the
   // screen shows solid rock rather than black nothing. It stays featureless enough to hide layout —
   // the fog of war still conceals rooms and corridors, which is the point of exploring.
@@ -163,6 +170,10 @@ export function patchFog(material, fog) {
   return material;
 }
 
+/** Scratch constants for the lantern tint (no per-frame allocation). */
+const WHITE = new THREE.Color(0xffffff);
+const SWORD_VIOLET = new THREE.Color(0xc9b0ff);
+
 const TORCH_POOL = 5;
 const TEMPLE_POOL = 2;
 const MOOD_POOL = 4;
@@ -193,7 +204,10 @@ export const LIGHT_MOODS = {
   forge: { torches: 1, ambient: 1.08, fill: 0.75, color: 0xff6a20, dust: 1.6 },
   candle: { torches: 0, ambient: 0.92, fill: 0.55, color: 0xffe0a8, dust: 0.8 },
   ember: { torches: 0, ambient: 0.88, fill: 0.90, color: 0xc0442a, dust: 1.2 },
-  cold: { torches: 0, ambient: 0.94, fill: 1.05, color: 0x86aad4, dust: 0.7 },
+  // three torches (a small room gets one — torchBudget): the target's warmth is pools of firelight
+  // against cold stone, and a crypt with one pool or none read as uniform blue murk (review-01/02 F6).
+  // Its candles stay out (FIRELESS_MOODS).
+  cold: { torches: 3, ambient: 0.94, fill: 1.05, color: 0x86aad4, dust: 0.7 },
   dark: { torches: 0, ambient: 0.86, fill: 0.00, color: 0x000000, dust: 0.6 },
   water: { torches: 1, ambient: 0.96, fill: 1.00, color: 0x9fd0e8, dust: 0.5 },
   fungal: { torches: 0, ambient: 0.90, fill: 1.00, color: 0x7fe3a8, dust: 0.9 },
@@ -213,7 +227,7 @@ export const FIRELESS_MOODS = new Set(['dark', 'cold', 'sword']);
  * cold brazier is not a lamp.
  */
 const DECOR_LIGHTS = {
-  hearth: { color: 0xff8a3a, intensity: 5.5, radius: 6.0, y: 0.65, kind: 'fire', maxV: 1 },
+  hearth: { color: 0xff6e28, intensity: 5.5, radius: 6.0, y: 0.65, kind: 'fire', maxV: 1 },
   // THE FORGE STANDS IN A HOT SPOT AND IS PARTLY ERASED BY IT. Judged in a rendered frame at the
   // play camera (seed 5, depth 1, the `forge` room): the tile came back as a featureless
   // white-orange block with no hood, no lip, no legs — the signature piece of the archetype
@@ -224,7 +238,7 @@ const DECOR_LIGHTS = {
   // Both are trimmed. It reads better and it is still hot — the room's grade and the bloom are
   // doing the rest, and that belongs to whoever owns the exposure, not to three magic numbers here.
   forge: { color: 0xff6a20, intensity: 4.6, radius: 5.8, y: 0.80, kind: 'forge', maxV: 0 },
-  brazier: { color: 0xff7a2a, intensity: 4.2, radius: 5.2, y: 0.80, kind: 'fire', maxV: 1 },
+  brazier: { color: 0xff6424, intensity: 4.2, radius: 5.2, y: 0.80, kind: 'fire', maxV: 1 },
   candelabra: { color: 0xffe6b0, intensity: 2.4, radius: 3.4, y: 0.85, kind: 'candle', maxV: 1 },
   candlestick: { color: 0xffe6b0, intensity: 1.6, radius: 2.6, y: 0.55, kind: 'candle', maxV: 1 },
   alchemyBench: { color: 0x9fe07a, intensity: 1.5, radius: 2.8, y: 0.55, kind: 'sickly', maxV: 1 },
@@ -358,6 +372,20 @@ export function splitToneLean(shadows, highlights, keep = BAND_CHROMA) {
   return { shadows: rebuild(shadows, ns), highlights: rebuild(highlights, nh) };
 }
 
+/**
+ * The outdoor forest's look (world/forest.js). Daylight through leaves: a green-gold key and sky, a
+ * mossy ground bounce, a haze with a little green in it, and the shafts turned up — no band, since a
+ * forest is not a depth. Same shape as depthTint's return, so every consumer takes it unchanged.
+ */
+export function forestTint() {
+  const c = (h) => new THREE.Color(h);
+  return {
+    ambient: c(0xa7c48c), sky: c(0xbcd6a2), ground: c(0x4f5a3a), fogTint: new THREE.Color(0.66, 0.7, 0.6), ambientScale: 2.2,
+    grade: { tint: new THREE.Color(1.0, 1.03, 0.95), sat: 1.22, contrast: 1.0, vignette: 0.3, lift: 0.012, shadows: c(0x7f9a86), highlights: c(0xfff2cc) },
+    atmo: { shaft: c(0xf2e6b0), shaftStrength: 0.6, dust: c(0xe8f0c0), dustDensity: 0.9 },
+  };
+}
+
 export function depthTint(depth) {
   const c = (h) => new THREE.Color(h);
   if (depth <= 0) return {
@@ -385,6 +413,21 @@ export function depthTint(depth) {
     grade: { tint: new THREE.Color(1.05, 0.96, 1.07), sat: 1.26, contrast: 1.03, vignette: 0.36, lift: 0.013, shadows: c(0x9a82b2), highlights: c(0xffe6f0) },
     atmo: { shaft: c(0xb08ad0), shaftStrength: 0.08, dust: c(0xe6c8ff), dustDensity: 0.7 },
   };
+}
+
+/**
+ * The warm/cool split (review-03 F13), as numbers tools can tune live: torch colour (red 1, green g+gF*flicker,
+ * blue b+bF*flicker), wall-torch intensity and reach, and how far a warm band's key, sky and ground lean cool.
+ */
+export const TORCH_TUNE = { g: 0.31, gF: 0.08, b: 0.10, bF: 0.05, i: 20, dist: 10, spot: 12, revealBoost: 2.0, revealDist: 0.75, boostG: 0.04 };
+export const COOL_TUNE = { key: 0.56, sky: 0.3, ground: 0.2, hex: 0x88aad8 };
+import { LOOK } from './look.js';
+const COOL_KEY = new THREE.Color(COOL_TUNE.hex);
+/** Lean a light colour toward cool blue by k, keeping its luminance (so exposure does not move). */
+function coolLean(c, k) {
+  const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b, lq = 0.2126 * COOL_KEY.r + 0.7152 * COOL_KEY.g + 0.0722 * COOL_KEY.b;
+  c.r += (COOL_KEY.r * l / lq - c.r) * k; c.g += (COOL_KEY.g * l / lq - c.g) * k; c.b += (COOL_KEY.b * l / lq - c.b) * k;
+  return c;
 }
 
 /** Scratch colour for the mood crossfade (no per-frame allocation). */
@@ -433,12 +476,12 @@ export class Lighting {
     scene.add(this.point);
     this.torches = [];
     for (let i = 0; i < TORCH_POOL; i++) {
-      const l = new THREE.PointLight(0xff9a3c, 0, 8, 2);
+      const l = new THREE.PointLight(0xff6a20, 0, 8, 2);
       l.userData.phase = this.rng.float(0, 100);
       scene.add(l); this.torches.push(l);
     }
     // The nearest torch also throws soft shadows into its room (second and last shadow caster).
-    this.torchSpot = new THREE.SpotLight(0xffa04a, 0, 11, 1.15, 0.8, 1.6);
+    this.torchSpot = new THREE.SpotLight(0xff7a2e, 0, 11, 1.15, 0.8, 1.6);
     this.torchSpot.castShadow = quality !== 'low';
     this.torchSpot.shadow.mapSize.set(512, 512);
     this.torchSpot.shadow.camera.near = 0.3; this.torchSpot.shadow.camera.far = 12;
@@ -472,9 +515,57 @@ export class Lighting {
     this.baseHemi = 0.3; this.baseMoon = 0.3;
     this.flickerPhase = this.rng.float(0, 100);
     this.depth = 1;
+    /**
+     * WHICH LAYERS OF THE LIGHTING RIG ARE ALIGHT (Settings -> Lighting).
+     *
+     * Every one of these is a plain 0/1 multiplier applied where the intensity is ASSIGNED in
+     * `update()`, which is the only place any of these lights get their value. That matters for two
+     * reasons: nothing has to be rebuilt to flip one, and `activeLights` — the list the atmosphere
+     * shaders read for dust and shafts — is filled from the same assignments, so a torch that is
+     * switched off here stops lighting the dust as well as the floor. A gate that only dimmed the
+     * light and left the haze glowing would be worse than no gate.
+     *
+     * This exists to be able to ANSWER the question "which layer is doing that?" instead of arguing
+     * about it. The band-wash hunt earlier needed exactly this and had to be done by hand.
+     */
+    this.groups = { ambient: 1, key: 1, lantern: 1, torches: 1, decor: 1, temple: 1, shadows: 1 };
+    /**
+     * THE CARRIED LANTERN'S COLOUR (clicking the hero picks it; ui/torchColor.js).
+     *
+     * One decision, two lights: the point glow takes this colour directly and the shadow-casting
+     * spot takes it lifted toward white, because a spot that saturated would paint the whole floor
+     * pool one hue and the pool is supposed to read as LIGHT, not as a gel. `_lanternSpot` is that
+     * derived colour, kept as its own object so `update()` allocates nothing per frame.
+     */
+    this.lanternColor = new THREE.Color(0xbfd8ff);
+    this._lanternSpot = new THREE.Color(0xd2e2ff);
     this._near = []; // scratch for the per-frame nearest-spot sort
     /** live light list for the atmosphere shaders: [{x,y,z,r,g,b,i}] (fixed length, in place) */
     this.activeLights = Array.from({ length: 2 + TORCH_POOL + TEMPLE_POOL + MOOD_POOL }, () => ({ x: 0, y: 0, z: 0, r: 0, g: 0, b: 0, i: 0 }));
+  }
+
+  /**
+   * Set the carried lantern's colour. Takes effect on the next frame; nothing is rebuilt.
+   * @param {number|string} hex
+   */
+  setLanternColor(hex) {
+    this.lanternColor.set(hex);
+    this._lanternSpot.copy(this.lanternColor).lerp(WHITE, 0.45);
+    return this.lanternColor;
+  }
+
+  /**
+   * Turn lighting layers on and off. Unknown keys are ignored; a missing key keeps its value.
+   * @param {{ambient?:boolean, key?:boolean, lantern?:boolean, torches?:boolean, decor?:boolean, temple?:boolean, shadows?:boolean}} g
+   */
+  setGroups(g) {
+    if (!g) return this.groups;
+    for (const k of Object.keys(this.groups)) if (k in g) this.groups[k] = g[k] ? 1 : 0;
+    // The two shadow casters are switched at the source: an intensity multiplier would still pay
+    // for the shadow map every frame, and the point of the toggle is to SEE the cost come off.
+    this.spot.castShadow = !!this.groups.shadows && !!this.groups.lantern;
+    this.torchSpot.castShadow = !!this.groups.shadows && !!this.groups.torches && this.quality !== 'low';
+    return this.groups;
   }
 
   /** Nearest `n` spots to (x,z), reusing the scratch array (spots carry a transient `d`). */
@@ -489,7 +580,7 @@ export class Lighting {
   setLevel(level) {
     const rng = createRng(level.seed * 31 + 7);
     const spots = [];
-    const tint = depthTint(level.depth);
+    const tint = level.biome === 'forest' ? forestTint() : depthTint(level.depth);
     this.depth = level.depth;
     // THE BAND ARRIVES AS A LEAN, NOT A WASH (see bandLean): same brightness, most of the cast
     // gone, so a room's floor still states its own colour and the depth still has a hue.
@@ -497,7 +588,19 @@ export class Lighting {
     this.moon.color.copy(bandLean(tint.ambient));
     // the band's own key colour, kept so a room's mood can tint it without losing it
     this.moonBase = bandLean(tint.ambient);
+    this.forest = level.biome === 'forest';
+    // WARM BANDS STILL NEED A COOL SIDE (review-03 F13). The shallow band's key and sky are warm, so the stone
+    // outside a torch pool read warm grey and the pool had nothing to be warm AGAINST. The key and sky lean
+    // blue at the same luminance; the torches are what is orange.
+    if (!this.forest && level.depth <= 5 && !LOOK.base) {   // the board look: no cool lean (render/look.js)
+      COOL_KEY.setHex(COOL_TUNE.hex);
+      coolLean(this.moonBase, COOL_TUNE.key);
+      coolLean(this.hemi.color, COOL_TUNE.sky); coolLean(this.hemi.groundColor, COOL_TUNE.ground);
+    }
     this.fog.uniforms.fogTint.value.copy(tint.fogTint);
+    // the board look: a remembered room is the same map with the lamp elsewhere, as in the top-down map benchmark —
+    // neutral, and nearer 0.8 of its light than the band tables' 0.54-0.66
+    if (LOOK.base && !this.forest) { const fl = Math.min(0.85, (tint.fogTint.r + tint.fogTint.g + tint.fogTint.b) / 3 * 1.3); this.fogTintLook = true; this.fog.uniforms.fogTint.value.setRGB(fl, fl, fl); }
     // The room's own light, before any torch is lit. Board-bright: this is the "room light" the
     // printed reference sits under, so it has to be enough on its own — the torches are relief on
     // top of it, not the exposure. (Was 0.55/0.45 against ambientScale ~1; the two together are
@@ -512,10 +615,12 @@ export class Lighting {
     // direction in it, and the wolf, the hobgoblin and the spider all came back under the ceiling.
     this.baseHemi = 0.26 * tint.ambientScale; this.baseMoon = 1.20 * tint.ambientScale;
     if (level.depth === 0) { this.baseHemi = 1.4; this.baseMoon = 1.6; }
+    // the wood in daylight: a notch over the surface court, or the grass under it reads as dusk
+    if (level.biome === 'forest') { this.baseHemi = 1.75; this.baseMoon = 2.0; }
     this.hemi.intensity = this.baseHemi; this.moon.intensity = this.baseMoon;
     const candidates = [];
     for (const r of level.rooms) {
-      if (r.type === 'surface') continue;
+      if (r.type === 'surface' || r.type === 'glade') continue;   // open air: nothing to hang a torch on
       // walls along the room perimeter facing inward
       for (let x = r.x; x < r.x + r.w; x++) {
         if (level.get(x, r.y - 1) === TILE.WALL && level.get(x, r.y) !== TILE.WALL) candidates.push({ x, y: r.y - 1, nx: 0, nz: 1, room: r });
@@ -626,7 +731,9 @@ export class Lighting {
   update(dt, player, state) {
     this.time += dt;
     const t = this.time;
-    const lit = state.allLit ? 1 : 0;
+    // a revealed WOOD is daylight already: the reveal boost that lifts a dungeon overview turned the forest overview
+    // into one lime sheet (review-03 G1c, 57% of the frame above 0.6)
+    const lit = state.allLit ? (this.forest ? 0.3 : 1) : 0;
     // Crossfade into the mood of the room the player is standing in. Half a second: long enough
     // that walking a doorway is a change of light rather than a cut, short enough to feel like one.
     const want = this.moodAt(player.x, player.z);
@@ -657,8 +764,9 @@ export class Lighting {
     // room is a room whose key light has gone blue, which is what cold light actually is. The
     // hemisphere keeps the depth band's own colour and the modelling on the cast survives it.
     const amb = Math.max(1, this.mood.ambient);
-    this.hemi.intensity = this.baseHemi * (1 + lit * 2.4) * (state.lightOn ? 1.25 : 1) * amb * (1 + this.mood.fill * 0.12);
-    this.moon.intensity = this.baseMoon * (1 + lit * 3.0) * amb * (1 + this.mood.fill * 1.25);
+    const G = this.groups;
+    this.hemi.intensity = G.ambient * this.baseHemi * (1 + lit * 2.4) * (state.lightOn ? 1.25 : 1) * amb * (1 + this.mood.fill * 0.12);
+    this.moon.intensity = G.key * this.baseMoon * (1 + lit * 3.0) * amb * (1 + this.mood.fill * 1.25);
     if (this.moonBase) this.moon.color.copy(this.moonBase).lerp(this.moodColor, Math.min(0.55, this.mood.fill * 0.5));
     // The carried lantern breathes slowly (a lantern, not a torch: no fast flicker).
     const breathe = 0.94 + 0.04 * Math.sin(t * 1.7 + this.flickerPhase) + 0.02 * Math.sin(t * 5.3);
@@ -676,15 +784,19 @@ export class Lighting {
     // for every sprite under it; at 26 it was carrying the frame, so the frame was pillow-lit and
     // the room's own colour field only existed inside its pool. With the ambient tripled it can
     // come down to a third and still be the thing that says where the player is standing.
-    this.spot.intensity = (state.allLit ? 6 : 10) * breathe * (0.75 + 0.25 * s);
+    this.spot.intensity = G.lantern * (state.allLit ? 6 : 10) * breathe * (0.75 + 0.25 * s);
     this.spot.distance = 26;
     this.spot.angle = Math.min(1.0, 0.66 * (0.6 + 0.4 * s));
     this.spot.penumbra = 0.55;
-    this.spot.color.set(state.lightOn ? 0xdde9ff : 0xd2e2ff);
+    // The Light spell brightens the lantern; it does not change what colour it is.
+    this.spot.color.copy(this._lanternSpot).lerp(WHITE, state.lightOn ? 0.18 : 0);
     this.point.position.set(player.x, 2.6, player.z);
-    this.point.intensity = (state.lightOn ? 3.6 : 1.3) * breathe * (1 + sword * 0.6);   // ditto: a glow at the player's own centre
+    this.point.intensity = G.lantern * (state.lightOn ? 3.6 : 1.3) * breathe * (1 + sword * 0.6);   // ditto: a glow at the player's own centre
     this.point.distance = 6 * s;
-    this.point.color.set(state.sword ? 0xc9b0ff : state.lightOn ? 0xcfe4ff : 0xbfd8ff);
+    // Carrying the Sword still shifts the light toward its violet — that tell is worth keeping —
+    // but only HALF way, so a lantern colour the player chose is never simply overwritten.
+    this.point.color.copy(this.lanternColor).lerp(WHITE, state.lightOn ? 0.12 : 0);
+    if (state.sword) this.point.color.lerp(SWORD_VIOLET, 0.5);
     const al = this.activeLights;
     let n = 0;
     const put = (x, y, z, col, i) => { const a = al[n++]; a.x = x; a.y = y; a.z = z; a.r = col.r; a.g = col.g; a.b = col.b; a.i = i; };
@@ -694,28 +806,39 @@ export class Lighting {
     for (let i = 0; i < TORCH_POOL; i++) {
       const l = this.torches[i];
       const sp = sorted[i];
-      if (!sp || (sp.d > 17 && !state.allLit)) { l.intensity = 0; continue; }
+      if (!sp || !G.torches || (sp.d > 17 && !state.allLit)) { l.intensity = 0; continue; }
       const f = torchFlicker(t, sp.phase);
       l.position.set(sp.x + sp.nx * 0.32, 0.95, sp.z + sp.nz * 0.32);
-      l.intensity = 11 * f;
-      l.distance = 8.5;
-      l.color.setRGB(1.0, 0.55 + 0.1 * f, 0.2 + 0.08 * f);
+      // THE BOARD LOOK (render/look.js): the torch's point light sat 0.95 up with a 10-unit reach, so it flooded the whole floor in
+      // front of the wall evenly (a flat orange rectangle bounded by the unlit caps). Hung low and out, with a
+      // short reach, it throws a pool on the floor at the wall's foot instead, and cannot reach up to a cap.
+      if (LOOK.base) l.position.set(sp.x + sp.nx * 0.6, 0.45, sp.z + sp.nz * 0.6);
+      // a revealed map multiplies the room light several times over; in the warm bands the torches keep pace, or
+      // their pools vanish (in the cold bands a stronger fire only turned the pale rooms warm, review-03 F1d)
+      l.intensity = TORCH_TUNE.i * f * (1 + lit * TORCH_TUNE.revealBoost * (this.depth <= 5 ? 1 : 0));
+      // a boosted fire on a revealed map throws a tighter pool, or its orange spills over the cool side
+      l.distance = TORCH_TUNE.dist * (lit && this.depth <= 5 ? TORCH_TUNE.revealDist : 1);
+      if (LOOK.base) { l.distance = 3.6; l.intensity *= 0.45; }
+      // TORCH ORANGE, not lemon (review-03 F13): the target's pools sit at hue ~19 deg; 0.55 green read 43 deg on screen
+      // a boosted fire (revealed warm band) is pushed further into the tone curve's red; it is drawn a touch yellower to land at the same hue
+      const boosted = lit && this.depth <= 5 ? TORCH_TUNE.boostG : 0;
+      l.color.setRGB(1.0, TORCH_TUNE.g + boosted + TORCH_TUNE.gF * f, TORCH_TUNE.b + TORCH_TUNE.bF * f);
       put(l.position.x, l.position.y, l.position.z, l.color, l.intensity);
     }
     // Torch shadow spot follows the nearest torch, throwing into its room.
     const nearestTorch = sorted[0];
-    if (nearestTorch && nearestTorch.d < 12) {
+    if (nearestTorch && nearestTorch.d < 12 && G.torches) {
       const f = torchFlicker(t, nearestTorch.phase);
       const ts = this.torchSpot;
       ts.position.set(nearestTorch.x + nearestTorch.nx * 0.28, 1.05, nearestTorch.z + nearestTorch.nz * 0.28);
       ts.target.position.set(nearestTorch.x + nearestTorch.nx * 3.2, -0.6, nearestTorch.z + nearestTorch.nz * 3.2);
-      ts.intensity = 7 * f;
+      ts.intensity = TORCH_TUNE.spot * f;
     } else this.torchSpot.intensity = 0;
     // The fires standing in the rooms: nearest four get the pool, each on its own beat.
     const near = this.nearest(this.moodSources, player.x, player.z);
     for (let i = 0; i < MOOD_POOL; i++) {
       const l = this.moodLights[i], sp = near[i];
-      if (!sp || (sp.d > 15 && !state.allLit)) { l.intensity = 0; continue; }
+      if (!sp || !G.decor || (sp.d > 15 && !state.allLit)) { l.intensity = 0; continue; }
       const f = moodFlicker(sp.kind, t, sp.phase);
       l.position.set(sp.x, sp.y, sp.z);
       l.color.setHex(sp.color);
@@ -727,7 +850,7 @@ export class Lighting {
     for (let i = 0; i < TEMPLE_POOL; i++) {
       const l = this.temples[i];
       const sp = temples[i];
-      if (!sp) { l.intensity = 0; continue; }
+      if (!sp || !G.temple) { l.intensity = 0; continue; }
       l.position.set(sp.x, 2.1, sp.z);
       l.intensity = 5 + 0.9 * Math.sin(t * 1.7);
       put(l.position.x, l.position.y, l.position.z, l.color, l.intensity);

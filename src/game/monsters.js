@@ -1,6 +1,6 @@
 // Bestiary and monster generation formulas (DESIGN.md §2.6, §4). The AI lives in monsterAi.js and is
 // re-exported here so game.js keeps a single import.
-import { monsterPhaseSeconds } from '../core/constants.js';
+import { monsterTilesPerSecond } from '../core/constants.js';
 // A real import, not just the re-export below: `export { AI } from ...` forwards the name to this
 // module's CONSUMERS without binding it in this module's own scope, and rollMonster needs it here.
 import { AI } from './monsterAi.js';
@@ -129,7 +129,7 @@ export function rollMonster(rng, depth, opts = {}) {
   }
   const x = def.typeIndex < 0 ? 5 : def.typeIndex;
   const { strength, hp } = rollStats(rng, def.family, depth, x);
-  const speed = (1 / monsterPhaseSeconds(depth)) * def.speedMul;
+  const speed = monsterTilesPerSecond(depth) * def.speedMul;
   return {
     id: opts.id || `m${depth}-${Math.floor(rng.next() * 1e9)}`,
     kind: 'monster', type: def.rig || def.type, variant: def.rig ? def.type : null, name: def.name, family: def.family, typeIndex: def.typeIndex, glyph: def.glyph,

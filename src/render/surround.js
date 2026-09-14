@@ -67,6 +67,45 @@ function rockTexture() {
   return t;
 }
 
+/**
+ * THE WOODS BEYOND THE MAP, from above: the forest has no mountain to be carved out of. Packed crowns
+ * of trees — each a round clump lit on its north-west side with a dark rim toward the south-east —
+ * over a dark leafy floor that shows in the gaps. Painted at the ground plane's value, like the rock.
+ */
+function woodsTexture() {
+  const S = 256;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d');
+  g.fillStyle = '#1d3319';
+  g.fillRect(0, 0, S, S);
+  let seed = 0x7f4a7c15;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const blob = (x, y, r, fill) => {
+    // draw wrapped so the texture tiles without a seam
+    for (const ox of [-S, 0, S]) for (const oy of [-S, 0, S]) {
+      if (x + ox < -r || x + ox > S + r || y + oy < -r || y + oy > S + r) continue;
+      g.fillStyle = fill; g.beginPath(); g.arc(x + ox, y + oy, r, 0, Math.PI * 2); g.fill();
+    }
+  };
+  const greens = [[46, 88, 38], [58, 104, 44], [40, 78, 36], [70, 112, 46]];
+  for (let i = 0; i < 150; i++) {
+    const x = rnd() * S, y = rnd() * S, r = 9 + rnd() * 13;
+    const [cr, cg, cb] = greens[Math.floor(rnd() * greens.length)];
+    blob(x + r * 0.18, y + r * 0.22, r * 1.02, 'rgba(12,22,11,0.75)');        // the rim / shade to the SE
+    blob(x, y, r, `rgb(${cr},${cg},${cb})`);
+    for (let k = 0; k < 4; k++) {                                              // clumps inside the crown
+      const a = rnd() * Math.PI * 2, d = rnd() * r * 0.55, rr = r * (0.3 + rnd() * 0.25);
+      blob(x + Math.cos(a) * d, y + Math.sin(a) * d, rr, `rgba(${cr + 14},${cg + 22},${cb + 8},0.55)`);
+    }
+    blob(x - r * 0.32, y - r * 0.34, r * 0.34, `rgba(${cr + 45},${cg + 55},${cb + 18},0.5)`);   // the lit NW shoulder
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 export class Surround {
   /**
    * @param {{scene:THREE.Scene, bus:{on:Function}}} o
@@ -96,7 +135,11 @@ export class Surround {
     for (const m of this.group.children) m.geometry !== this.geo && m.geometry?.dispose?.();
     this.group.clear();
     const W = level.width, H = level.height, M = MARGIN;
-    const y = 0.92; // just under the wall caps, so walls still occlude it at the boundary
+    const forest = level.biome === 'forest';
+    // a dungeon's rock sits just under the wall caps, so walls still occlude it at the boundary; the
+    // woods lie on the ground, so the trees past the map's edge stand in them
+    const y = forest ? -0.02 : 0.92;
+    const tex = forest ? (this.woods || (this.woods = woodsTexture())) : this.texture;
 
     // [x0, z0, x1, z1] bands: north, south, west, east — together an unbroken ring.
     const bands = [
@@ -109,9 +152,11 @@ export class Surround {
       const w = x1 - x0, d = z1 - z0;
       if (w <= 0 || d <= 0) continue;
       const mat = this.material.clone();
-      mat.map = this.texture.clone();
+      mat.map = tex.clone();
       mat.map.needsUpdate = true;
-      mat.map.repeat.set(w / 6, d / 6);
+      mat.map.repeat.set(w / (forest ? 11 : 6), d / (forest ? 11 : 6));
+      // unlit, so it must sit at the value the fog of war leaves an unexplored wood at, not at daylight
+      if (forest) mat.color.setScalar(0.24);
       const mesh = new THREE.Mesh(this.geo, mat);
       mesh.scale.set(w, 1, d);
       mesh.position.set(x0 + w / 2 - 0.5, y, z0 + d / 2 - 0.5);
@@ -125,6 +170,7 @@ export class Surround {
     this.group.clear();
     this.geo.dispose();
     this.texture.dispose();
+    this.woods?.dispose?.();
     this.scene.remove(this.group);
   }
 }

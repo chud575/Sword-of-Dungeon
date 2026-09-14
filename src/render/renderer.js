@@ -7,14 +7,15 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { TILE } from '../core/constants.js';
-import { FogOfWar, Lighting, depthTint, splitToneLean } from './lighting.js';
+import { FogOfWar, Lighting, depthTint, forestTint, splitToneLean } from './lighting.js';
 import { Atmosphere } from './atmosphere.js';
-import { createMaterials, setTileSkin, getTileSkin } from './materials.js';
+import { createMaterials, setTileSkin, getTileSkin, syncFieldTone } from './materials.js';
 import { PropFactory } from './props.js';
 import { DungeonView } from './dungeon.js';
 import { CharacterFactory } from './characters.js';
 import { Effects } from './effects.js';
 import { CameraRig } from './camera.js';
+import { LOOK } from './look.js';
 
 // Grading runs on the linear HDR frame (after bloom, before the ACES output pass): per-depth tint,
 // split toning (cool shadows / warm highlights), contrast about mid grey, saturation, vignette,
@@ -24,6 +25,10 @@ import { CameraRig } from './camera.js';
 // (see sprites/spriteBillboard.js); every other opaque thing writes 1. Film grain crawling over
 // flat pixel-art colour is the single loudest way to break the HD-2D illusion, so the grain is
 // almost entirely muted there while the room around the character keeps its full texture.
+/** Context losses let through to three.js for recovery before the renderer stops asking (onContextLost). */
+const CONTEXT_LOSS_MAX = 3;
+const CONTEXT_LOSS_WINDOW_MS = 60000;
+
 const GradingShader = {
   uniforms: {
     tDiffuse: { value: null }, uTint: { value: new THREE.Color(1, 1, 1) }, uVignette: { value: 0.5 },
@@ -83,6 +88,12 @@ const GradingShader = {
     }`,
 };
 
+/** The identity grade: what the post pass looks like when it is asked to do nothing. */
+const NEUTRAL_GRADE = {
+  tint: new THREE.Color(1, 1, 1), sat: 1, contrast: 1, vignette: 0, lift: 0,
+  shadows: new THREE.Color(1, 1, 1), highlights: new THREE.Color(1, 1, 1),
+};
+
 export class Renderer {
   /**
    * @param {{canvas:HTMLCanvasElement, bus:import('../core/events.js').EventBus}} opts
@@ -92,6 +103,18 @@ export class Renderer {
     this.game = null;
     /** 'high': 4x MSAA half-float target, soft 1024 shadows. 'low' (QA bots, weak GPUs): no MSAA, 512 hard shadows — ~2x cheaper fill. */
     this.quality = quality === 'low' ? 'low' : 'high';
+    // A LOST CONTEXT MUST NOT BECOME A STORM. three.js answers every `webglcontextlost` by asking the
+    // browser to restore the context, and on restore rebuilds and re-uploads the whole scene. If what
+    // killed the context is still true — Safari's GPU process after a reset, memory pressure — the
+    // re-upload kills it again at once, and forever: measured in Safari 26 at ~1,000 losses a second,
+    // with no error anywhere, a black frame under a working HUD, and WebGL broken for EVERY other page
+    // in that browser until Safari was restarted. These listeners go on the canvas BEFORE three's, so
+    // they run first: an occasional loss is let through and recovers; a burst stops three from asking
+    // again, stops drawing, and hands the player a reload (see onContextLost).
+    this.contextState = 'ok';
+    this._contextLosses = [];
+    canvas.addEventListener('webglcontextlost', (e) => this.onContextLost(e));
+    canvas.addEventListener('webglcontextrestored', () => this.onContextRestored());
     this.gl = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', alpha: false, stencil: false, preserveDrawingBuffer: true });
     this.gl.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.quality === 'low' ? 1 : 1.5));
     this.gl.shadowMap.enabled = true;
@@ -129,6 +152,7 @@ export class Renderer {
     this.mats = createMaterials(this.fog);
     this.props = new PropFactory(this.mats);
     this.lighting = new Lighting(this.scene, this.fog, { quality: this.quality });
+    this.gradeOn = true;
     this.atmosphere = new Atmosphere(this.scene, this.fog);
     this.dungeon = new DungeonView(this.scene, this.mats, this.props, this.fog);
     this.characters = new CharacterFactory(this.fog);
@@ -233,6 +257,9 @@ export class Renderer {
     on('fx:magic-map', () => { if (this.game) this.fog.startSweep(this.game.player.x, this.game.player.y); });
     on('monster:wander', (p) => { const v = this.ensureView(p.entity); if (v) this.characters.spawn(v); });
     on('fx:lost-map', () => { this.effects.flash.color.set(0.2, 0.1, 0.4); this.effects.flash.amount = 0.6; });
+    // A fight starts: the camera eases a step closer until it ends (camera.js setCombatFocus).
+    on('combat:start', () => this.cameraRig.setCombatFocus(true));
+    on('combat:end', () => this.cameraRig.setCombatFocus(false));
   }
 
   /** Attach (or replace) the game instance and build its current level. */
@@ -248,6 +275,7 @@ export class Renderer {
 
   onLevelEnter({ level, via, direction }) {
     if (!this.game) return;
+    this.cameraRig.setCombatFocus(false);
     this.rebuildLevel();
     this.fog.override = this.fog.override; // keep debug override
     this.cameraRig.follow(this.playerView.pos, null);
@@ -278,9 +306,27 @@ export class Renderer {
     this.syncViews(0);
   }
 
+  /**
+   * Turn lighting layers on and off (Settings -> Lighting). `grade` is the post-processing depth
+   * band, which is not a light but decides as much of the frame's colour as one — it is in the same
+   * panel because "is that the torches or the grade?" is the question the panel exists to answer.
+   * @param {object} g
+   */
+  setLightGroups(g) {
+    this.lighting.setGroups(g);
+    if (g && 'grade' in g) { this.gradeOn = !!g.grade; if (this.game && this.game.level) this.applyGrade(this.game.level.depth); }
+    return this.lighting.groups;
+  }
+
+  /** The carried lantern's colour (Settings / clicking the hero). @param {number|string} hex */
+  setLanternColor(hex) { return this.lighting.setLanternColor(hex); }
+
   /** Depth-dependent colour grading: deeper = colder, less saturated, more contrast, heavier vignette. */
   applyGrade(depth) {
-    const g = depthTint(depth).grade;
+    // Grade off = the frame as the lights actually left it: no band tint, no split tone, no
+    // saturation push, no vignette. Not a "neutral look" to ship — a measuring position.
+    const outdoors = this.game && this.game.level && this.game.level.biome === 'forest';
+    const g = this.gradeOn === false ? NEUTRAL_GRADE : (outdoors ? forestTint() : depthTint(depth)).grade;
     const u = this.grading.uniforms;
     u.uTint.value.copy(g.tint); u.uSat.value = g.sat; u.uContrast.value = g.contrast; u.uVignette.value = g.vignette; u.uLift.value = g.lift;
     // THE SPLIT TONE IS A CHROMA MULTIPLY (`col *= st / luma(st)`), so it washes the fields the same
@@ -290,6 +336,14 @@ export class Renderer {
     // note on it for why leaning each end separately measured worse in the shallow bands.
     const st = splitToneLean(g.shadows, g.highlights);
     u.uShadows.value.copy(st.shadows); u.uHighlights.value.copy(st.highlights);
+    // THE BOARD LOOK (render/look.js): neutral shadows (no cool split tone) and no film grain
+    // Grain is set on EVERY grade, both ways: set once underground it stuck for the rest of the session and
+    // took the grain off the forest too, which keeps it.
+    if (LOOK.base) {
+      if (this._grainDefault === undefined) this._grainDefault = u.uGrain.value;
+      if (!outdoors) u.uShadows.value.setRGB(1, 1, 1);
+      this.setPost({ grain: outdoors ? this._grainDefault : 0 });
+    }
   }
 
   /** Post-processing knobs (settings menu / debug): chromatic aberration is off by default. */
@@ -387,6 +441,7 @@ export class Renderer {
     this.effects.update(dt, { player: g.player, playerPos: ppos, statuses, hasSword: !!g.player.hasSword, goldViews });
     this.effects.numbers.syncSleep(this._sleepers || []);
     this.lighting.update(dt, { x: ppos.x, z: ppos.z }, { lightOn: g.lightOn(), sword: !!g.player.hasSword, allLit: this.fog.override === 'all' });
+    syncFieldTone(this.fog.override === 'all');
     this.atmosphere.update(dt, { x: ppos.x, z: ppos.z }, this.lighting.activeLights);
     this.dungeon.syncWater(ppos, this.lighting.activeLights);
     this.fog.update(dt);
@@ -410,7 +465,42 @@ export class Renderer {
     while (rem > 1e-6) { const d = Math.min(rem, 1 / 40); this.update(d); rem -= d; }
   }
 
+  /**
+   * The context was taken away. Up to CONTEXT_LOSS_MAX losses inside CONTEXT_LOSS_WINDOW_MS pass straight
+   * through to three.js, which asks for a restore and rebuilds. One more and this stops the event before
+   * three sees it — so nothing calls preventDefault and the browser will not restore — marks the renderer
+   * dead (draw() becomes a no-op) and emits 'render:context' {state:'dead'} for the UI to act on.
+   * @param {Event} e
+   */
+  onContextLost(e) {
+    const now = performance.now();
+    this._contextLosses = this._contextLosses.filter((t) => now - t < CONTEXT_LOSS_WINDOW_MS);
+    this._contextLosses.push(now);
+    if (this.contextState === 'dead' || this._contextLosses.length > CONTEXT_LOSS_MAX) {
+      e.stopImmediatePropagation();
+      if (this.contextState !== 'dead') {
+        this.contextState = 'dead';
+        this.bus?.emit('render:context', { state: 'dead', losses: this._contextLosses.length });
+      }
+      return;
+    }
+    this.contextState = 'lost';
+    this.bus?.emit('render:context', { state: 'lost', losses: this._contextLosses.length });
+  }
+
+  /** three.js has rebuilt its GPU state; the next draw re-uploads what it needs. */
+  onContextRestored() {
+    if (this.contextState === 'dead') return;
+    this.contextState = 'ok';
+    this.bus?.emit('render:context', { state: 'restored', losses: this._contextLosses.length });
+  }
+
   draw() {
+    // Nothing to draw into: the renderer gave up on the context, OR the context is already lost and the
+    // `webglcontextlost` event has not been delivered yet. In that gap three.js still believes the
+    // context is fine, and a frame drawn there asks it for a shader it cannot create — createShader
+    // returns null and shaderSource throws. isContextLost() is a plain getter, so asking every frame is free.
+    if (this.contextState === 'dead' || this.gl.getContext().isContextLost()) return;
     this.frame++;
     // layout can change without a resize event (or after it fired): keep the buffers matched to the canvas
     if (this.canvas.clientWidth !== this.sizeW || this.canvas.clientHeight !== this.sizeH) this.resize();

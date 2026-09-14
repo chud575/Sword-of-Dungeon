@@ -18,7 +18,7 @@
 //   fx:projectile {entity, from, to, kind, color, hit}     fx:stagger {entity}
 //   spell:lost {spell, by}                                 sfx:howl {family, type}  sfx:breath {kind}  sfx:cast {kind}  sfx:arrow {hit}
 //   entity:attacked {..., ranged:true, kind}               (same shape as melee, so hit VFX/damage numbers work)
-import { TILE, DIRS8 } from '../core/constants.js';
+import { TILE, DIRS8, monsterPhaseSeconds } from '../core/constants.js';
 import { aStar } from '../world/pathfinding.js';
 import { lineOfSight } from '../world/fov.js';
 import { hasStatus, damagePlayer } from './player.js';
@@ -38,7 +38,7 @@ export function wake(game, m, reason = 'noticed') {
   return true;
 }
 
-/** AI tuning [designed]. Paces multiply the per-depth monster phase rate by state. */
+/** AI tuning [designed]. Paces multiply a monster's movement rate (monsterTilesPerSecond) by state. */
 export const AI = {
   // `asleep` is NOT 0: the pace gate in updateMonsters decides whether monsterAct runs at all, and
   // a sleeper still has to be asked whether anything has woken it. It simply never moves.
@@ -378,7 +378,8 @@ export function onMonsterSlain(game, dead) {
 /** A crit interrupts and delays a monster (breath charges are lost). */
 export function stagger(game, m) {
   if (!m || m.state === 'dead') return;
-  m.moveTimer = Math.min(m.moveTimer || 0, -0.6);
+  // held for most of an old monster phase — in seconds, since it now acts several times a second
+  m.stunUntil = game.state.time + 0.6 * monsterPhaseSeconds(Math.max(1, game.level ? game.level.depth : 1));
   if (m.charging) { m.charging = null; say(game, m, `The ${lower(m)}'s breath is knocked out of it!`, 'combat', 'interrupt', { cooldown: 1 }); }
   game.emit('fx:stagger', { entity: m });
 }
@@ -485,7 +486,8 @@ function alignStep(game, m) {
  */
 function rangedAct(game, m, per) {
   const p = game.player, level = game.level, r = m.ranged, dist = per.dist;
-  if (m.charging) return fireBreath(game, m);
+  // The breath is held until its moment, so the warning lasts as long as it always did (one old phase).
+  if (m.charging) return game.state.time >= (m.charging.fireAt ?? 0) ? fireBreath(game, m) : true;
   const los = lineOfSight(level, m.x, m.y, p.x, p.y);
   const inRange = dist >= r.min && dist <= r.max;
   if (r.kite && dist < r.min) {
@@ -496,8 +498,8 @@ function rangedAct(game, m, per) {
   if (inRange && los && ready(m, 'ranged')) {
     if (r.telegraph) {
       if (!isAligned(m.x, m.y, p.x, p.y)) return alignStep(game, m);
-      m.charging = { dx: sgn(p.x - m.x), dy: sgn(p.y - m.y) };
-      m.facing = { ...m.charging };
+      m.charging = { dx: sgn(p.x - m.x), dy: sgn(p.y - m.y), fireAt: game.state.time + monsterPhaseSeconds(Math.max(1, level.depth)) };
+      m.facing = { dx: m.charging.dx, dy: m.charging.dy };
       say(game, m, r.chargeText.replace('%s', lower(m)), 'danger', 'charge', { force: level.isVisible(m.x, m.y), cooldown: 1 });
       game.emit('monster:telegraph', { entity: m, kind: r.kind, dx: m.charging.dx, dy: m.charging.dy, length: r.length, color: r.color });
       return true;
@@ -685,9 +687,22 @@ export function updateMonsters(game, dt) {
   const level = game.level;
   if (!level) return;
   pruneNoises(level, game.state.time);
+  const phase = monsterPhaseSeconds(Math.max(1, level.depth));
   for (const m of [...level.entities]) {
     if (m.kind !== 'monster' || m.state === 'dead' || game.state.over) continue;
     if (!m.cooldowns) initAiFields(m);
+    // ABILITIES KEEP THE OLD CLOCK. Monsters now move at close to walking pace (monsterTilesPerSecond)
+    // and so act several times a second, but cooldowns are still counted in the C64's monster PHASES:
+    // counted per act, a breath or a blink would come round every few tenths of a second.
+    m.phaseClock = (m.phaseClock || 0) + dt / phase;
+    while (m.phaseClock >= 1) { m.phaseClock -= 1; tickCooldowns(m); }
+    if (m.stunUntil && game.state.time < m.stunUntil) continue;
+    // HELD BY THE FIGHT. The monster you are trading blows with stands and trades them: fights have a
+    // standoff and turns now, and a monster this quick would otherwise wander out of one between blows
+    // (an invisible hero stops being hunted, so its AI would simply walk off). Only a monster that has
+    // turned to flee breaks away — and that ends the fight, as it always did.
+    const fight = game.state.combat;
+    if (fight && fight.monsterId === m.id && m.state !== 'flee') { m.moveTimer = Math.min(m.moveTimer, 0); continue; }
     const pace = (AI.pace[m.state] ?? 1) * (m.pace || 1);
     m.moveTimer += dt * m.speed * pace;
     let acts = 0;
@@ -704,7 +719,6 @@ export function monsterAct(game, m) {
   if (m.state === 'dead' || game.state.over) return;
   if (!m.cooldowns) initAiFields(m);
   const p = game.player, ext = extendedRules(game);
-  tickCooldowns(m);
   const per = perceive(game, m);
 
   // A sleeper does nothing at all until something wakes it, and then acts on the NEXT turn — the

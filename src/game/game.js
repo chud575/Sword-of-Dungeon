@@ -6,7 +6,7 @@ import { createGameState, SAVE_VERSION } from './state.js';
 import { createPlayer, gainXp, addGold, healPlayer, damagePlayer, regenTick, hasStatus, removeStatus, addStatus, resetLevelEffects } from './player.js';
 import { rollMonster, updateMonsters, describeMonster, monsterVisibleToPlayer, MONSTERS_BY_TYPE } from './monsters.js';
 import { useItem as useItemFn, castSpell as castSpellFn, toggleLight as toggleLightFn, sightRadius, lightOn, pickupGold, grantTreasure, ITEM_TABLE, SPELL_TABLE } from './items.js';
-import { playerAttack, monsterAttack, killMonster, resolveRound } from './combat.js';
+import { playerAttack, monsterAttack, killMonster, resolveRound, resolveBlow } from './combat.js';
 import { createQuestState, pickupSword, tickQuest, checkVictory, SWORD_TYPE, placeSword } from './quest.js';
 import { generateLevel } from '../world/generator.js';
 import { Level } from '../world/level.js';
@@ -48,7 +48,7 @@ export class Game {
     this.pendingMove = null;
     this.seenMonsterIds = [];
     /** Quality-of-life options (Input pushes the player's settings here). */
-    this.options = { holdRepeatDelay: 0.12, holdAccel: true, guardPits: false }; // Input enables guardPits from the player's settings
+    this.options = { holdRepeatDelay: 0.12, holdAccel: true, guardPits: false, biome: opts.biome || null }; // Input enables guardPits from the player's settings
     /** One-shot confirmation token for guarded moves ({kind, x, y}). */
     this.confirmed = null;
     this.player = createPlayer(this.rngs.main, this.balance);
@@ -107,7 +107,8 @@ export class Game {
   getLevel(depth) {
     let lv = this.levels.get(depth);
     if (!lv) {
-      lv = generateLevel(this.seed, depth, { swordDepth: this.state.quest.swordDepth, balance: this.balance });
+      // PROTOTYPE PLACEMENT: `?biome=forest` makes the first level the outdoor forest (world/forest.js).
+      lv = generateLevel(this.seed, depth, { swordDepth: this.state.quest.swordDepth, balance: this.balance, biome: depth === 1 && this.options.biome ? this.options.biome : undefined });
       if (depth === this.state.quest.swordDepth && !this.state.quest.swordPos) {
         const sw = lv.items.find((it) => it.type === SWORD_TYPE);
         if (sw) this.state.quest.swordPos = { x: sw.x, y: sw.y };
@@ -240,17 +241,14 @@ export class Game {
       if (!m || m.state === 'dead') this.endCombat('gone');
       else if (Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) > 1) this.endCombat('separated');
       else {
+        // TURNS [after the 2009 iOS port]: once the opening standoff runs out, one blow, then the other
+        // side's, combatTurnTime apart, until one of them falls or the fight breaks.
         c.timer -= dt;
         if (c.timer <= 0) {
-          if (!c.playerInitiated) {
-            c.timer = B.combatRoundTime; c.rounds++;
-            resolveRound(this, m, { playerFirst: false });
-          } else if (this.heldDir && p.x + this.heldDir.dx === m.x && p.y + this.heldDir.dy === m.y) {
-            playerAttack(this, m);
-          } else {
-            c.idle = (c.idle || 0) + dt;
-            if (c.idle > 0.6) this.endCombat('disengaged');
-          }
+          c.timer += B.combatTurnTime;
+          const side = c.next || (c.playerInitiated ? 'p' : 'm');
+          c.next = side === 'p' ? 'm' : 'p';
+          resolveBlow(this, m, side);
         }
       }
     }
@@ -304,12 +302,12 @@ export class Game {
     return false;
   }
 
-  /** Hold a direction (real-time auto-repeat); pass (0,0) or null to release. Releasing disengages a fight you started. */
+  /** Hold a direction (real-time auto-repeat); pass (0,0) or null to release. */
   setHeld(dx, dy) {
     if (dx === null || dx === undefined || (!dx && !dy)) {
+      // Letting go no longer ends a fight: the blows are traded on their own turns, so a tap starts a
+      // fight and the fight carries on. Step away to leave one you started (performMove).
       this.heldDir = null; this.heldTime = 0;
-      const c = this.state.combat;
-      if (c && c.playerInitiated) this.endCombat('fled');
       return;
     }
     const nd = { dx: Math.sign(dx), dy: Math.sign(dy) };
@@ -341,18 +339,14 @@ export class Game {
     const c = s.combat;
     if (c && !c.playerInitiated) {
       const m = level.entities.find((e) => e.id === c.monsterId);
-      if (m && m.state !== 'dead') { playerAttack(this, m); p.moveTimer = this.balance.playerStepTime; return true; }
+      // An ambush holds you: no step goes anywhere, and the blows keep their own turns.
+      if (m && m.state !== 'dead') { p.moveTimer = this.balance.playerStepTime; return false; }
     }
     const nx = p.x + dx, ny = p.y + dy;
     const m = level.monsterAt(nx, ny);
     if (m) {
       if (!level.canStep(p.x, p.y, dx, dy)) return false;
-      if (c && c.monsterId === m.id && c.timer > 0) {
-        // next round is not ready yet: keep the blow queued so it lands the moment it is
-        this.pendingMove = { dx, dy };
-        p.moveTimer = c.timer;
-        return false;
-      }
+      if (c && c.monsterId === m.id) { p.moveTimer = this.balance.playerStepTime; return false; } // already trading blows with it
       if (m.invisible && !this.lightOn()) this.log('You strike at something unseen!', 'combat');
       playerAttack(this, m);
       p.moveTimer = this.balance.playerStepTime;
