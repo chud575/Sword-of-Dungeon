@@ -2,6 +2,7 @@
 // gold wash, older lines dim after a while; hover (or click to pin) expands the scrollable history.
 // Replays the game's stored log on start/load. Styles live in ./hud.css (imported by hud.js).
 import { icon } from './icons.js';
+import { isVellum, roman } from './theme.js';
 
 const MAX_LINES = 120;
 const FADE_AFTER = 9; // seconds before a line dims
@@ -12,8 +13,10 @@ export class MessageLog {
     this.ctx = ctx; this.bus = ctx.bus;
     this.el = document.createElement('div');
     this.el.className = 'panel hud ornate'; this.el.id = 'log';
-    this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div><div class="mc-band"><span class="mc-title">Chronicle</span></div><div class="lines"></div>
+    // The vellum theme carries the entry count in the heading, in roman numerals ("xxvi entries").
+    this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div><div class="mc-band"><span class="mc-title">Chronicle</span>${isVellum() ? '<span class="mc-code vl-count"></span>' : ''}</div><div class="lines"></div>
       <div class="foot"><span class="pin">${icon('pin')}<span class="pin-t">Hover to expand · click to pin</span></span><span class="cnt"></span></div>`;
+    this.bandCount = this.el.querySelector('.vl-count');
     this.lines = this.el.querySelector('.lines');
     this.pinText = this.el.querySelector('.pin-t');
     this.count = this.el.querySelector('.foot .cnt');
@@ -51,6 +54,7 @@ export class MessageLog {
     while (this.entries.length > MAX_LINES) { const e = this.entries.shift(); e.el.remove(); }
     this.total++;
     this.count.textContent = `${this.total} ${this.total === 1 ? 'entry' : 'entries'}`;
+    if (this.bandCount) this.bandCount.textContent = `${roman(this.total)} ${this.total === 1 ? 'entry' : 'entries'}`;
     this.lines.scrollTop = this.lines.scrollHeight;
   }
 

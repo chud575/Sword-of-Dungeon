@@ -1,0 +1,908 @@
+/* ==========================================================================================
+   "4a WORN VELLUM" — the default UI theme. Foxed, scorched scraps of vellum, slightly askew, with
+   torn edges; Pirata One headings in rust, IM Fell English (roman + italic) in bleeding brown ink.
+   Source: the 4a board of "Fargoal UI Explorations" (HANDOFF.md holds the recipe).
+
+   Everything is scoped under body.ui-vellum (set by main.js unless ?ui=module or ?ui=classic), so the
+   classic and module sheets underneath still apply untouched when it is off. Imported last.
+
+   THE PANEL RECIPE, AND WHAT IT COSTS. The design draws each scrap as a clipped box inside a wrapper
+   carrying `filter: drop-shadow()`. A filter renders its whole subtree to an offscreen surface and
+   re-runs the blur on every repaint of anything inside it (the HP bar, the log, the map), and Safari
+   already reloads this page for memory. So a host panel paints NOTHING itself and carries two
+   pseudo-elements instead:
+     ::before  the vellum: colour, burn vignette (stretched), wear texture (offset per panel), stains,
+               grain lines, the inset scorch shadow, and the torn-edge clip-path;
+     ::after   the drop shadow: a plain box-shadow on a box inset a few px from the host, spread back
+               out, so it reaches under the torn edges and needs no filter at all.
+   The host is `isolation: isolate`, so both pseudo-elements sit behind its content (z -1 / -2).
+   The two textures are decoded once and shared by every panel.
+
+   UNITS. The board is drawn at 1400×745, where the root font size is 14.7px; every design px here is
+   px / 14.7 in rem, so the HUD scales with the viewport and --ui-scale exactly as the other themes.
+   ========================================================================================== */
+
+@font-face { font-family: 'Pirata One'; src: url('../assets/fonts/PirataOne-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IM Fell English'; src: url('../assets/fonts/IMFellEnglish-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'IM Fell English'; src: url('../assets/fonts/IMFellEnglish-Italic.woff2') format('woff2'); font-weight: 400; font-style: italic; font-display: swap; }
+
+/* markup that only the vellum theme shows */
+.vl-cover, .vl-only { display: none; }
+
+body.ui-vellum {
+  --font-display: 'Pirata One', 'Luminari', 'Palatino', 'Book Antiqua', serif;
+  --font-body: 'IM Fell English', 'Palatino', 'Book Antiqua', Georgia, serif;
+  --font-mono: 'IM Fell English', 'Palatino', 'Book Antiqua', Georgia, serif;
+
+  --vl-paper: #c9ad76; --vl-ink: #2e2112; --vl-ink-2: #3a2a16; --vl-rust: #8a2f1c; --vl-rust-dk: #6e2414;
+  --vl-faint: rgba(46, 33, 18, .66); --vl-rule-soft: rgba(46, 33, 18, .3); --vl-wash: rgba(255, 245, 220, .22);
+  --vl-bleed: 0 0 1px rgba(46, 33, 18, .45); --vl-hp: #8a2f1c; --vl-on-rust: #f1e2bf;
+
+  /* re-point the shared tokens so anything not restyled below still lands in the ink palette */
+  --gold: #8a2f1c; --gold-bright: #8a2f1c; --gold-dim: #3a2a16; --brass: #3a2a16; --gold-glow: transparent;
+  --parchment: #2e2112; --parchment-dim: #3a2a16; --parchment-faint: rgba(46, 33, 18, .66);
+  --hp: #8a2f1c; --xp: #3a2a16; --xp-glow: transparent; --loot: #8a2f1c; --danger: #8a2f1c; --info: #2e2112;
+  --combat: #2e2112; --magic: #2e2112; --quest: #8a2f1c;
+
+  /* minimap: ink on vellum (read by ui/minimap.js) */
+  --mm-floor: #e4d3a8; --mm-corridor: #d8c393; --mm-edge: #2e2112; --mm-wall: #3a2a16; --mm-bg: rgba(0, 0, 0, 0);
+  --mm-dither: rgba(0, 0, 0, 0); --mm-vignette: 0; --mm-ink: #2e2112; --mm-glow: 0; --mm-memory: rgba(201, 173, 118, .3); --mm-memory-alpha: .55;
+  --mm-stairs-down: #6f4f27; --mm-stairs-up: #efe2c2; --mm-temple: #8f6a2a; --mm-pit: #2e2112; --mm-water: #7c8c80;
+  --mm-player: #8a2f1c; --mm-monster: #2e2112; --mm-gold: #7a5510; --mm-trap: #8a2f1c; --mm-beacon: #4d6334;
+}
+body.ui-vellum.cb {
+  --vl-hp: #b0480a; --hp: #b0480a;
+  --mm-monster: #b0480a; --mm-stairs-down: #3a78a8; --mm-temple: #a8931c; --mm-trap: #a8527e; --mm-gold: #c07f00; --mm-beacon: #00795a;
+}
+
+/* old-style figures and no faux bold or oblique: IM Fell ships real roman and italic, Pirata one weight */
+body.ui-vellum #ui-root, body.ui-vellum #ui-root input, body.ui-vellum #ui-root button {
+  font-variant-numeric: normal; font-feature-settings: normal; font-synthesis: none;
+}
+body.ui-vellum #ui-root .num { font-family: inherit; font-weight: inherit; font-variant-numeric: normal; }
+body.ui-vellum #ui-root .corners, body.ui-vellum #ui-root .filet, body.ui-vellum #ui-root .sword-rule { display: none; }
+body.ui-vellum #ui-root .ico { filter: none; }
+
+/* ==========================================================================================
+   THE VELLUM — shared by every surface
+   ========================================================================================== */
+body.ui-vellum #ui-root :is(#hud-card, #hud-depth, #hud-hotbar, #hud-quick, #hud-banner, #log, #minimap, #tooltip, .status, .collapsed-chip,
+  .modal.mx, #inventory, #title .menu, #title .vl-cover, #title .tagline, .qol-prompt .box, .qol-sheet .box, .qol-chip),
+body.ui-vellum .torch-pick .tp-box {
+  --vl-tear: polygon(0 7px, 9px 0, 30% 3px, 55% 0, 80% 4px, calc(100% - 10px) 0, 100% 8px, calc(100% - 3px) 50%, 100% calc(100% - 9px), calc(100% - 12px) 100%, 70% calc(100% - 4px), 45% 100%, 20% calc(100% - 3px), 8px 100%, 0 calc(100% - 8px), 3px 50%);
+  --vl-shadow: 0 .816rem 1.088rem .408rem rgba(0, 0, 0, .65);
+  isolation: isolate; background: transparent; border: 0; border-radius: 0; outline: 0; box-shadow: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  color: var(--vl-ink); text-shadow: var(--vl-bleed); font-family: var(--font-body); font-weight: 400;
+}
+body.ui-vellum #ui-root :is(#hud-card, #hud-depth, #hud-hotbar, #hud-quick, #hud-banner, #log, #minimap, #tooltip, .status, .collapsed-chip,
+  .modal.mx, #inventory, #title .menu, #title .vl-cover, #title .tagline, .qol-prompt .box, .qol-sheet .box, .qol-chip)::before,
+body.ui-vellum .torch-pick .tp-box::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 1; mix-blend-mode: normal; border: 0; border-radius: 0;
+  background-color: var(--vl-paper);
+  background-image:
+    url('../assets/ui/vellum-burn.png'),
+    url('../assets/ui/vellum-wear.png'),
+    radial-gradient(ellipse at var(--vl-s1, 14% 18%), rgba(122, 86, 36, .38) 0, transparent 36%),
+    radial-gradient(ellipse at var(--vl-s2, 88% 82%), rgba(122, 86, 36, .34) 0, transparent 40%),
+    radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(90, 60, 20, .42) 100%),
+    repeating-linear-gradient(0deg, rgba(60, 40, 10, .05) 0 1px, transparent 1px 3px);
+  background-size: 100% 100%, 69.66rem 52.24rem, auto, auto, auto, auto;
+  background-position: 0 0, var(--vl-wear-at, -8.16rem -5.44rem), 0 0, 0 0, 0 0, 0 0;
+  background-repeat: no-repeat, repeat, no-repeat, no-repeat, no-repeat, repeat;
+  box-shadow: inset 0 0 2.313rem rgba(70, 42, 12, .7);
+  clip-path: var(--vl-tear);
+}
+body.ui-vellum #ui-root :is(#hud-card, #hud-depth, #hud-hotbar, #hud-quick, #hud-banner, #log, #minimap, #tooltip, .status, .collapsed-chip,
+  .modal.mx, #inventory, #title .menu, #title .vl-cover, #title .tagline, .qol-prompt .box, .qol-sheet .box, .qol-chip)::after,
+body.ui-vellum .torch-pick .tp-box::after {
+  content: ''; position: absolute; inset: .408rem; z-index: -2; pointer-events: none; opacity: 1;
+  border: 0; border-radius: 0; background: none; box-shadow: var(--vl-shadow);
+}
+
+/* headings: Pirata in rust over a 1.5px ink rule, an italic note on the right */
+body.ui-vellum #ui-root .mc-band {
+  display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; flex: none;
+  padding: 0 0 .204rem; background: none; border-bottom: 1.5px solid var(--vl-ink-2); color: var(--vl-ink);
+  font: 400 .816rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; white-space: nowrap;
+}
+body.ui-vellum #ui-root .mc-band .mc-title { overflow: visible; font: 400 1.633rem/1 var(--font-display); color: var(--vl-rust); letter-spacing: 0; }
+body.ui-vellum #ui-root .mc-band .mc-code { border: 0; padding: 0; font: italic 400 .816rem/1.2 var(--font-body); letter-spacing: 0; color: var(--vl-ink); }
+body.ui-vellum #ui-root .mc-only { display: block; }
+
+@keyframes vlInk { 0%, 100% { color: inherit; } 30%, 60% { color: var(--vl-rust); } }
+@keyframes vlWash { 0% { background: rgba(138, 47, 28, .16); } 100% { background: transparent; } }
+@keyframes vlIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vlBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: .45; } }
+
+/* ==========================================================================================
+   ADVENTURER — top left, 310px
+   ========================================================================================== */
+body.ui-vellum #ui-root #hud-card {
+  --vl-rot: -1.1deg; --vl-wear-at: -8.16rem -5.44rem; --vl-s1: 14% 18%; --vl-s2: 88% 82%;
+  --vl-tear: polygon(0 3%, 4% 0, 24% 1.5%, 42% 0, 60% 2%, 78% 0, 96% 1%, 100% 5%, 98.5% 30%, 100% 56%, 98% 82%, 100% 97%, 96% 100%, 78% 98.5%, 58% 100%, 40% 98%, 20% 100%, 3% 98.5%, 0 95%, 1.5% 68%, 0 38%);
+  top: .816rem; left: .952rem; width: 21.09rem; padding: 1.088rem 1.497rem 1.224rem;
+  display: flex; flex-direction: column; gap: .34rem; transform: rotate(var(--vl-rot));
+}
+body.ui-vellum #ui-root #hud-card .mc-band { margin-bottom: .272rem; padding-bottom: .34rem; }
+body.ui-vellum #ui-root #hud-card .vl-who { display: flex; justify-content: space-between; align-items: baseline; gap: .6rem; }
+body.ui-vellum #ui-root #hud-card .name {
+  flex: 1; min-width: 0; font: 400 2.041rem/1 var(--font-display); letter-spacing: 0; text-transform: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--vl-ink); filter: none;
+}
+body.ui-vellum #ui-root #hud-card .medal {
+  position: static; flex: none; display: block; width: auto; height: auto; border: 0; border-radius: 0; background: none; box-shadow: none;
+  font: italic 400 1.088rem/1.2 var(--font-body); color: var(--vl-ink);
+}
+body.ui-vellum #ui-root #hud-card .medal::before, body.ui-vellum #ui-root #hud-card .medal .ring,
+body.ui-vellum #ui-root #hud-card .medal .lv, body.ui-vellum #ui-root #hud-card .medal .lvl { display: none; }
+body.ui-vellum #ui-root #hud-card .medal.levelup { animation: vlInk 1.1s ease-out; }
+
+body.ui-vellum #ui-root #hud-card .gauge { display: flex; flex-direction: column; gap: .34rem; margin: 0; }
+body.ui-vellum #ui-root #hud-card .gauge.hp { margin-top: .272rem; }
+body.ui-vellum #ui-root #hud-card .vl-lab { display: flex; justify-content: space-between; align-items: baseline; }
+body.ui-vellum #ui-root #hud-card .vl-lab > span { font: italic 400 1.02rem/1.15 var(--font-body); }
+body.ui-vellum #ui-root #hud-card .vl-lab > b { font: 400 1.224rem/1.1 var(--font-body); }
+/* the design's 9px is content-box: with its 1px padding and 1.5px border the bar is 14px overall */
+body.ui-vellum #ui-root #hud-card .gauge .frame {
+  height: .952rem; padding: 1px; border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: rgba(255, 245, 220, .25); box-shadow: none; overflow: hidden;
+}
+body.ui-vellum #ui-root #hud-card .gauge .track { position: relative; width: 100%; height: 100%; overflow: hidden; }
+body.ui-vellum #ui-root #hud-card .gauge .fill { background: var(--vl-hp); box-shadow: none; }
+body.ui-vellum #ui-root #hud-card .gauge.xp .fill { background: var(--vl-ink-2); }
+body.ui-vellum #ui-root #hud-card .gauge .fill::after { content: none; }
+body.ui-vellum #ui-root #hud-card .gauge .trail { background: var(--vl-hp); opacity: .32; }
+/* 2px vellum ticks every 30px, laid over the track so the fill's scaleX never stretches them */
+body.ui-vellum #ui-root #hud-card .gauge .segs { position: absolute; inset: 0; pointer-events: none; background: repeating-linear-gradient(90deg, transparent 0 1.905rem, var(--vl-paper) 1.905rem 2.041rem); }
+body.ui-vellum #ui-root #hud-card .gauge .end { display: none; }
+body.ui-vellum #ui-root #hud-card .vl-stats {
+  display: flex; justify-content: space-between; margin-top: .272rem; padding-top: .408rem; border-top: 1.5px solid var(--vl-ink-2);
+  font: italic 400 1.02rem/1.2 var(--font-body);
+}
+body.ui-vellum #ui-root #hud-card .vl-stats b { font-style: normal; font-weight: 400; }
+body.ui-vellum #ui-root #hud-card .gold { display: inline; font-size: inherit; color: inherit; text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root #hud-card .gold b { color: var(--vl-rust); }
+body.ui-vellum #ui-root #hud-card .gold.bump { animation: none; }
+body.ui-vellum #ui-root #hud-card .gold.bump b { animation: vlInk .6s ease-out; }
+body.ui-vellum #ui-root #hud-card .flash { border-radius: 0; background: rgba(138, 47, 28, .38); clip-path: var(--vl-tear); }
+@keyframes vlShake { 0%, 100% { transform: rotate(var(--vl-rot)); } 25% { transform: translateX(-4px) rotate(var(--vl-rot)); } 75% { transform: translateX(4px) rotate(var(--vl-rot)); } }
+body.ui-vellum #ui-root #hud-card.hurt { animation: vlShake .28s; }
+/* low hits: the numbers and the bar's frame go to rust, and the fill blinks (opacity only: composited) */
+body.ui-vellum #ui-root #hud-card.low { box-shadow: none; }
+body.ui-vellum #ui-root #hud-card.low .gauge.hp .vl-lab { color: var(--vl-rust); }
+body.ui-vellum #ui-root #hud-card.low .gauge.hp .frame { border-color: var(--vl-rust); box-shadow: none; }
+body.ui-vellum #ui-root #hud-card.low .gauge.hp .fill { animation: vlBlink 1s steps(1) infinite; }
+body.ui-vellum.reduce-flash #ui-root #hud-card.low .gauge.hp .fill { animation: none; }
+
+/* status chips: small scraps under the card */
+body.ui-vellum #ui-root #hud-status { top: 17.8rem; left: 1.3rem; width: 21rem; gap: .45rem; }
+body.ui-vellum #ui-root #hud-card.is-collapsed ~ #hud-status { top: 3.2rem; }
+body.ui-vellum #ui-root .status {
+  --vl-shadow: 0 .3rem .5rem .1rem rgba(0, 0, 0, .55); --vl-wear-at: -30rem -12rem;
+  --vl-tear: polygon(0 12%, 6% 0, 50% 6%, 94% 0, 100% 14%, 98.5% 55%, 100% 88%, 94% 100%, 50% 92%, 5% 100%, 0 86%, 1.5% 50%);
+  position: relative; padding: .22rem .65rem .2rem .45rem; gap: .35rem; font: italic 400 .88rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; animation: vlIn .3s ease-out;
+}
+body.ui-vellum #ui-root .status .ico { color: var(--vl-ink); filter: none; }
+body.ui-vellum #ui-root .status.off { opacity: .55; filter: none; }
+body.ui-vellum #ui-root .status.sword { color: var(--vl-rust); box-shadow: none; }
+body.ui-vellum #ui-root .status.sword .ico { color: var(--vl-rust); }
+
+/* ==========================================================================================
+   LEVEL PLATE + Umla's clock — top centre
+   ========================================================================================== */
+body.ui-vellum #ui-root #hud-depth {
+  --vl-rot: .6deg; --vl-wear-at: -34.01rem -20.41rem; --vl-s1: 80% 20%; --vl-s2: 200% 200%;
+  --vl-tear: polygon(0 6%, 5% 0, 30% 2%, 55% 0, 80% 3%, 97% 0, 100% 8%, 99% 50%, 100% 92%, 95% 100%, 70% 97%, 45% 100%, 20% 97%, 3% 100%, 0 90%, 1% 50%);
+  top: .68rem; min-width: 0; padding: .816rem 2.721rem .952rem; text-align: center; transform: translateX(-50%) rotate(var(--vl-rot));
+}
+body.ui-vellum #ui-root #hud-depth.low { box-shadow: none; }
+body.ui-vellum #ui-root #hud-depth .mc-band { justify-content: center; padding: 0; border: 0; }
+body.ui-vellum #ui-root #hud-depth .mc-band .mc-title { font: italic 400 .952rem/1.25 var(--font-body); color: var(--vl-rust); }
+body.ui-vellum #ui-root #hud-depth .depth {
+  display: block; margin: 0; font: 400 2.585rem/1 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-ink); white-space: nowrap;
+}
+body.ui-vellum #ui-root #hud-depth .depth .n {
+  margin: 0; font: inherit; letter-spacing: 0; background: none; -webkit-background-clip: border-box; background-clip: border-box; color: inherit; filter: none;
+}
+body.ui-vellum #ui-root #hud-depth.surface .vl-lvl { display: none; }
+body.ui-vellum #ui-root #hud-depth.enter .depth .n { animation: vlInk 1s ease-out; }
+body.ui-vellum #ui-root #hud-depth .band { margin: .068rem 0 0; font: italic 400 1.02rem/1.25 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #hud-depth .band::before, body.ui-vellum #ui-root #hud-depth .band::after { content: none; }
+body.ui-vellum #ui-root #hud-depth .seed { display: none; }
+body.ui-vellum #ui-root #hud-depth .timer { margin-top: .45rem; padding-top: .35rem; border-top: 1.5px solid var(--vl-ink-2); }
+body.ui-vellum #ui-root #hud-depth .timer .cap { font: italic 400 .88rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root #hud-depth .timer .clock { gap: .4rem; margin-top: 0; }
+body.ui-vellum #ui-root #hud-depth .timer .clock .ico { font-size: 1.05rem; color: var(--vl-ink); filter: none; animation: none; }
+body.ui-vellum #ui-root #hud-depth .timer .t { font: 400 1.6rem/1.1 var(--font-body); letter-spacing: .02em; color: var(--vl-ink); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root #hud-depth .fuse { height: .952rem; margin: .3rem 0 0; padding: 1px; border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: rgba(255, 245, 220, .25); box-shadow: none; overflow: hidden; }
+body.ui-vellum #ui-root #hud-depth .fuse .f { position: relative; height: 100%; border-radius: 0; background: var(--vl-ink-2); }
+body.ui-vellum #ui-root #hud-depth .fuse .f::after { content: none; }
+body.ui-vellum #ui-root #hud-depth.low .timer .t { color: var(--vl-rust); text-shadow: var(--vl-bleed); animation: vlBlink 1s steps(1) infinite; }
+body.ui-vellum #ui-root #hud-depth.low .timer .clock .ico { color: var(--vl-rust); filter: none; animation: none; }
+body.ui-vellum #ui-root #hud-depth.low .fuse { border-color: var(--vl-rust); }
+body.ui-vellum #ui-root #hud-depth.low .fuse .f { background: var(--vl-rust); }
+body.ui-vellum.reduce-flash #ui-root #hud-depth.low .timer .t { animation: none; }
+
+/* ==========================================================================================
+   SPELLS & SUNDRIES — bottom centre
+   ========================================================================================== */
+body.ui-vellum #ui-root #hud-hotbar {
+  --vl-rot: -.4deg; --vl-wear-at: -47.62rem -10.88rem; --vl-s1: 8% 30%; --vl-s2: 92% 70%;
+  --vl-tear: polygon(0 8%, 2% 0, 15% 3%, 30% 0, 45% 4%, 60% 0, 75% 3%, 90% 0, 98% 2%, 100% 10%, 99% 50%, 100% 90%, 98% 100%, 85% 97%, 70% 100%, 55% 96%, 40% 100%, 25% 97%, 10% 100%, 2% 98%, 0 90%, 1% 50%);
+  bottom: .816rem; padding: 2.9rem 1.224rem .816rem; gap: .136rem; align-items: stretch; max-width: calc(100vw - 2rem);
+  transform: translateX(-50%) rotate(var(--vl-rot));
+}
+/* the heading is taken out of flow: as a flex item its own text would widen the bar past its slots */
+body.ui-vellum #ui-root #hud-hotbar .mc-band { position: absolute; top: .68rem; left: 1.224rem; right: 1.224rem; padding-bottom: .136rem; }
+body.ui-vellum #ui-root #hud-hotbar .sep { width: 1px; align-self: stretch; margin: .272rem .408rem; background: var(--vl-ink-2); }
+body.ui-vellum #ui-root #hud-hotbar .sep::after { content: none; }
+body.ui-vellum #ui-root .slot {
+  width: 3.81rem; height: auto; padding: .272rem 0 .2rem; display: grid; grid-template-columns: 1fr 1fr; grid-template-areas: 'key cnt' 'glyph glyph' 'nm nm';
+  align-items: center; row-gap: .068rem; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; box-shadow: none;
+  color: var(--vl-ink); text-shadow: var(--vl-bleed); transition: opacity .15s;
+}
+body.ui-vellum #ui-root .slot::after, body.ui-vellum #ui-root .slot .glyph::before, body.ui-vellum #ui-root .slot.active .glyph::after { content: none; }
+body.ui-vellum #ui-root .slot .key {
+  grid-area: key; justify-self: end; position: static; min-width: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+  font: italic 400 .748rem/1.2 var(--font-body); color: inherit; text-align: right;
+}
+body.ui-vellum #ui-root .slot .cnt {
+  grid-area: cnt; justify-self: start; position: static; min-width: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+  font: italic 400 .748rem/1.2 var(--font-body); color: inherit; text-align: left; white-space: pre;
+}
+body.ui-vellum #ui-root .slot .cnt::before { content: ' \00b7 '; }
+body.ui-vellum #ui-root .slot:has(.cnt:empty) .key { grid-column: 1 / -1; justify-self: center; }
+body.ui-vellum #ui-root .slot .glyph { grid-area: glyph; justify-self: center; width: 1.36rem; height: 1.36rem; color: inherit; }
+body.ui-vellum #ui-root .slot .glyph .ico { width: 1.3rem; height: 1.3rem; filter: none; }
+body.ui-vellum #ui-root .slot .nm { grid-area: nm; justify-self: center; font: italic 400 .816rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: inherit; white-space: nowrap; }
+body.ui-vellum #ui-root .slot:hover { transform: none; background: rgba(46, 33, 18, .08); box-shadow: none; border-color: transparent; }
+body.ui-vellum #ui-root .slot:active { transform: none; background: rgba(46, 33, 18, .14); }
+body.ui-vellum #ui-root .slot:focus-visible { outline: 1.5px solid var(--vl-rust); outline-offset: -2px; }
+body.ui-vellum #ui-root .slot.empty { opacity: .5; filter: none; }
+body.ui-vellum #ui-root .slot.active { border-bottom-color: var(--vl-rust); box-shadow: none; }
+body.ui-vellum #ui-root .slot.active .nm { color: inherit; }
+body.ui-vellum #ui-root .slot.flash { animation: vlWash .45s ease-out; border-color: transparent; }
+body.ui-vellum #ui-root .slot.active.flash { border-bottom-color: var(--vl-rust); }
+body.ui-vellum #ui-root .slot[data-id="bury"] { color: var(--vl-rust); }
+
+/* ==========================================================================================
+   COMMANDS — bottom right, 160px
+   ========================================================================================== */
+body.ui-vellum #ui-root #hud-quick {
+  --vl-rot: -1deg; --vl-wear-at: -28.57rem -35.37rem; --vl-s1: 85% 15%; --vl-s2: 200% 200%;
+  --vl-tear: polygon(0 3%, 6% 0, 50% 2%, 94% 0, 100% 4%, 98% 50%, 100% 96%, 94% 100%, 50% 98%, 6% 100%, 0 96%, 2% 50%);
+  bottom: .816rem; right: .952rem; width: 10.88rem; min-width: 0; padding: .816rem 1.224rem .952rem; gap: .204rem; transform: rotate(var(--vl-rot));
+}
+body.ui-vellum #ui-root #hud-quick .mc-band { margin-bottom: .068rem; }
+body.ui-vellum #ui-root #hud-quick .mc-band .mc-title { font-size: 1.497rem; }
+body.ui-vellum #ui-root #hud-quick .qb {
+  display: flex; justify-content: space-between; align-items: baseline; gap: .68rem; padding: 0; border: 0; border-radius: 0; background: none;
+  font: italic 400 1.02rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink);
+}
+body.ui-vellum #ui-root #hud-quick .qb kbd {
+  min-width: 0; padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+  font: normal 400 .816rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed);
+}
+body.ui-vellum #ui-root #hud-quick .qb:hover { background: none; color: var(--vl-rust); border-color: transparent; }
+body.ui-vellum #ui-root #hud-quick .qb:hover kbd { color: var(--vl-rust); }
+body.ui-vellum #ui-root #hud-quick .qb:focus-visible { outline: 1.5px solid var(--vl-rust); outline-offset: 1px; }
+body.ui-vellum #ui-root #hud-quick .qb.on { background: none; color: var(--vl-rust); border-color: transparent; }
+body.ui-vellum #ui-root #hud-quick .qb.on span { text-decoration: underline 2px var(--vl-rust); text-underline-offset: .18em; }
+
+/* ==========================================================================================
+   CENTRE BANNER (auto-pause, notices) — animated, so it stays square to the screen
+   ========================================================================================== */
+/* below the level plate even when Umla's clock makes the plate taller */
+body.ui-vellum #ui-root #hud-banner { top: max(21%, 14rem); min-width: 22rem; padding: 1rem 2.4rem 1.1rem; }
+body.ui-vellum #ui-root #hud-banner .mc-band { justify-content: center; margin: 0 auto .35rem; }
+body.ui-vellum #ui-root #hud-banner .mc-band .mc-title { font-size: 1.9rem; }
+body.ui-vellum #ui-root #hud-banner.info .mc-band .mc-title { color: var(--vl-ink); }
+body.ui-vellum #ui-root #hud-banner .mark { display: none; }
+body.ui-vellum #ui-root #hud-banner .why { font: italic 400 1.3rem/1.25 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root #hud-banner .hint { margin-top: .2rem; font: italic 400 .88rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+
+/* ==========================================================================================
+   CHRONICLE — bottom left, 290px
+   ========================================================================================== */
+body.ui-vellum #ui-root #log {
+  --vl-rot: .8deg; --vl-wear-at: -4.08rem -28.57rem; --vl-s1: 20% 85%; --vl-s2: 200% 200%;
+  --vl-tear: polygon(0 4%, 5% 0, 28% 2%, 52% 0, 76% 2.5%, 96% 0, 100% 5%, 98.5% 40%, 100% 96%, 95% 100%, 70% 98%, 45% 100%, 20% 98%, 3% 100%, 0 94%, 1.5% 50%);
+  bottom: .816rem; left: .952rem; width: min(19.73rem, calc(50vw - var(--hotbar-w) / 2 - 1.6rem)); max-height: 11.4rem;
+  padding: .952rem 1.36rem 1.088rem; gap: .272rem; overflow: visible; transform: rotate(var(--vl-rot));
+}
+body.ui-vellum #ui-root #log:hover, body.ui-vellum #ui-root #log.expanded { max-height: 26rem; }
+body.ui-vellum #ui-root #log .lines { padding: .136rem 0 0; scrollbar-color: var(--vl-rust) transparent; -webkit-mask-image: none; mask-image: none; }
+body.ui-vellum #ui-root #log .line {
+  margin: 0 0 .136rem; padding: 0; border-radius: 0; font: italic 400 .952rem/1.3 var(--font-body); letter-spacing: 0; text-transform: none;
+  color: var(--vl-ink); text-shadow: var(--vl-bleed);
+}
+body.ui-vellum #ui-root #log .line::before { content: none; }
+body.ui-vellum #ui-root #log .line .t { display: none; position: static; margin-left: .4em; font: normal 400 .7rem var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root #log:hover .line .t, body.ui-vellum #ui-root #log.expanded .line .t { display: inline; opacity: 1; }
+body.ui-vellum #ui-root #log .line.old { opacity: .55; }
+body.ui-vellum #ui-root #log:hover .line.old, body.ui-vellum #ui-root #log.expanded .line.old { opacity: .8; }
+body.ui-vellum #ui-root #log .line.k-danger { font-weight: 700; font-synthesis: weight; color: var(--vl-rust); }
+body.ui-vellum #ui-root #log .line.k-quest { color: var(--vl-rust); font-weight: 400; }
+body.ui-vellum #ui-root #log .line.fresh { animation: logIn .32s var(--ease), vlWash 1.8s ease-out; }
+body.ui-vellum #ui-root #log .foot { display: none; }
+body.ui-vellum #ui-root #log:hover .foot, body.ui-vellum #ui-root #log.expanded .foot {
+  display: flex; margin: 0; padding-top: .2rem; border-top: 1px solid var(--vl-rule-soft); font: italic 400 .75rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint);
+}
+body.ui-vellum #ui-root #log .foot .pin .ico { color: var(--vl-ink); }
+body.ui-vellum #ui-root #log.expanded .foot .pin .ico { color: var(--vl-rust); filter: none; }
+body.ui-vellum #ui-root #log .foot .cnt { display: none; }
+
+/* ==========================================================================================
+   THE MAP — top right, 376px
+   ========================================================================================== */
+body.ui-vellum #ui-root #minimap {
+  --vl-rot: .9deg; --vl-wear-at: -20.41rem -2.72rem; --vl-s1: 90% 12%; --vl-s2: 10% 90%;
+  --vl-tear: polygon(0 2%, 3% 0, 25% 1%, 50% 0, 75% 1.5%, 97% 0, 100% 3%, 99% 25%, 100% 50%, 98.5% 75%, 100% 97%, 97% 100%, 75% 99%, 50% 100%, 25% 98.5%, 3% 100%, 0 97%, 1.5% 72%, 0 48%, 1% 24%);
+  top: .816rem; right: .952rem; width: 25.58rem; padding: .952rem 1.224rem; display: flex; flex-direction: column; gap: .544rem;
+  transform: rotate(var(--vl-rot));
+}
+body.ui-vellum #ui-root #minimap[hidden] { display: none; }
+body.ui-vellum #ui-root #minimap.big { width: auto; box-shadow: none; }
+body.ui-vellum #ui-root #minimap .cap { display: none; }
+body.ui-vellum #ui-root #minimap .mc-meta { margin-left: auto; font: italic 400 .884rem/1.2 var(--font-body); letter-spacing: 0; opacity: 1; }
+body.ui-vellum #ui-root #minimap .mc-band .mc-code { display: none; }
+body.ui-vellum #ui-root #minimap .wrap {
+  display: grid; place-items: center; padding: 0; border: 1px solid rgba(58, 42, 22, .5); border-radius: 0;
+  background: rgba(255, 245, 220, .18); box-shadow: none; overflow: hidden;
+}
+/* the small map is scaled to fill the frame exactly (Minimap.smallScale), so its memory veil has no seam */
+body.ui-vellum #ui-root #minimap canvas { margin: 0 auto; }
+body.ui-vellum #ui-root #minimap .wrap::after { content: none; }
+body.ui-vellum #ui-root #minimap .legend {
+  display: flex; justify-content: flex-start; flex-wrap: wrap; gap: .136rem .816rem; margin: 0; padding: 0; border: 0;
+  font: italic 400 .816rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink);
+}
+body.ui-vellum #ui-root #minimap .legend span { gap: .3rem; }
+body.ui-vellum #ui-root #minimap .legend i { box-shadow: none; }
+body.ui-vellum #ui-root #minimap .legend i:not(.tri) { width: 8px; height: 8px; }
+body.ui-vellum #ui-root #minimap .toast { bottom: .6rem; padding: 0 .45rem; background: var(--vl-paper); color: var(--vl-rust); font: italic 400 .8rem/1.3 var(--font-body); letter-spacing: 0; text-transform: none; text-shadow: none; }
+
+/* collapse handles and restore chips */
+body.ui-vellum #ui-root .collapse-handle .chev { border-color: var(--vl-ink); }
+body.ui-vellum #ui-root .collapse-handle:hover .chev { border-color: var(--vl-rust); }
+body.ui-vellum #ui-root .collapse-handle:focus-visible { outline: 1.5px solid var(--vl-rust); }
+body.ui-vellum #ui-root .collapsed-chip {
+  --vl-shadow: 0 .3rem .5rem .1rem rgba(0, 0, 0, .55); --vl-wear-at: -12rem -40rem;
+  padding: .35rem .75rem .3rem; gap: .4rem; font: italic 400 .9rem/1.1 var(--font-body); letter-spacing: 0; text-transform: none;
+}
+body.ui-vellum #ui-root .collapsed-chip:hover { color: var(--vl-rust); }
+body.ui-vellum #ui-root .collapsed-chip:focus-visible { outline: 1.5px solid var(--vl-rust); outline-offset: 2px; }
+body.ui-vellum #ui-root #hud-card-chip { top: .9rem; left: 1rem; }
+body.ui-vellum #ui-root #log-chip { bottom: .9rem; left: 1rem; }
+body.ui-vellum #ui-root #minimap-chip { top: .9rem; right: 1rem; }
+body.ui-vellum #ui-root #hud-quick-chip { bottom: .9rem; right: 1rem; }
+
+/* ==========================================================================================
+   TOOLTIP — follows the pointer, so it stays square
+   ========================================================================================== */
+body.ui-vellum #ui-root #tooltip { --vl-shadow: 0 .6rem .9rem .3rem rgba(0, 0, 0, .6); --vl-wear-at: -52rem -30rem; min-width: 14rem; max-width: 20.5rem; padding: .95rem 1.15rem 1rem; }
+body.ui-vellum #ui-root #tooltip.deadly, body.ui-vellum #ui-root #tooltip.quest { box-shadow: none; }
+body.ui-vellum #ui-root #tooltip .tt-head { gap: .55rem; margin: 0; padding-bottom: .3rem; border-bottom: 1.5px solid var(--vl-ink-2); }
+body.ui-vellum #ui-root #tooltip .tt-head ~ .tt-head { margin-top: .75rem; }
+body.ui-vellum #ui-root #tooltip .tt-ico { width: 1.9rem; height: 1.9rem; border: 1.5px solid var(--vl-ink-2); border-radius: 50%; background: none; box-shadow: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #tooltip.deadly .tt-ico { color: var(--vl-rust); border-color: var(--vl-rust); }
+body.ui-vellum #ui-root #tooltip .tt-ico .ico { width: 1.15rem; height: 1.15rem; filter: none; }
+body.ui-vellum #ui-root #tooltip .tt-title { font: 400 1.3rem/1.05 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-rust); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root #tooltip .tt-title.quest { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--vl-rust); }
+body.ui-vellum #ui-root #tooltip .tt-sub { margin-top: .1rem; font: italic 400 .82rem/1.25 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #tooltip .tt-sub b { font-weight: 400; color: var(--vl-ink); }
+body.ui-vellum #ui-root #tooltip .tt-threat { --tc: var(--vl-ink) !important; margin-top: .55rem; padding: .3rem .5rem; border: 1px solid var(--vl-rule-soft); border-radius: 0; background: var(--vl-wash); box-shadow: none; }
+body.ui-vellum #ui-root #tooltip.deadly .tt-threat { --tc: var(--vl-rust) !important; }
+body.ui-vellum #ui-root #tooltip .tt-threat .pips i { width: 8px; height: 8px; border: 1.5px solid var(--tc); opacity: .4; }
+body.ui-vellum #ui-root #tooltip .tt-threat .pips i.on { background: var(--tc); box-shadow: none; opacity: 1; }
+body.ui-vellum #ui-root #tooltip .tt-threat .tl { font: 400 1rem/1 var(--font-display); letter-spacing: .02em; text-transform: none; text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root #tooltip .tt-threat .tw { font: italic 400 .78rem/1.2 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #tooltip .tt-body { margin-top: .45rem; font: 400 .9rem/1.35 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #tooltip .tt-body b { font-weight: 400; color: var(--vl-rust); }
+body.ui-vellum #ui-root #tooltip .tt-body.warn { color: var(--vl-rust); }
+body.ui-vellum #ui-root #tooltip .tt-body.warn::before, body.ui-vellum #ui-root #tooltip .tt-body.special::before { color: var(--vl-rust); }
+body.ui-vellum #ui-root #tooltip .tt-body.special { color: var(--vl-ink); }
+body.ui-vellum #ui-root #tooltip .tt-lore { padding-top: .4rem; border-top: 1px solid var(--vl-rule-soft); font: italic 400 .84rem/1.35 var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root #tooltip .tt-rows { padding-top: .35rem; border-top: 1px solid var(--vl-rule-soft); }
+body.ui-vellum #ui-root #tooltip .tt-row { font: italic 400 .84rem/1.3 var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root #tooltip .tt-row span:last-child { font: normal 400 .88rem/1.3 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #tooltip .tt-row.bad span:last-child, body.ui-vellum #ui-root #tooltip .tt-row.gold span:last-child { color: var(--vl-rust); }
+body.ui-vellum #ui-root #tooltip .tt-row.good span:last-child { color: var(--vl-ink); }
+body.ui-vellum #ui-root #tooltip .tt-hint { font: italic 400 .76rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+
+/* ==========================================================================================
+   KEY TAGS, HINT BARS, BUTTONS — shared by every screen
+   ========================================================================================== */
+body.ui-vellum #ui-root kbd,
+body.ui-vellum #ui-root :is(.modal.mx, #inventory, #tooltip, .qol-sheet, .qol-prompt, #title) kbd,
+body.ui-vellum #ui-root .hint-bar kbd, body.ui-vellum #ui-root .keys kbd {
+  padding: .02em .38em; border: 1px solid rgba(46, 33, 18, .45); border-bottom-width: 1px; border-radius: 2px; background: rgba(255, 245, 220, .3); box-shadow: none;
+  font: normal 400 .8rem/1.25 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed);
+}
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .hint-bar {
+  border-top: 1px solid var(--vl-rule-soft); font: italic 400 .84rem/1.3 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint);
+}
+body.ui-vellum #ui-root .hint-bar .tapx { color: var(--vl-rust); }
+
+body.ui-vellum #ui-root :is(.modal.mx, #inventory, .qol-sheet, #title) .btn {
+  padding: .3rem 1rem .25rem; border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: var(--vl-wash); box-shadow: none; filter: none;
+  font: 400 1.1rem/1.1 var(--font-display); letter-spacing: .01em; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed);
+}
+body.ui-vellum #ui-root :is(.modal.mx, #inventory, .qol-sheet, #title) .btn:hover,
+body.ui-vellum #ui-root :is(.modal.mx, #inventory, .qol-sheet, #title) .btn.selected { background: var(--vl-ink-2); color: var(--vl-paper); text-shadow: none; }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .btn.primary { padding: .4rem 1.4rem .34rem; background: var(--vl-rust); border-color: var(--vl-rust-dk); color: var(--vl-on-rust); text-shadow: none; font-size: 1.25rem; }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .btn.primary:hover { background: var(--vl-rust-dk); filter: none; }
+body.ui-vellum #ui-root .btn:focus-visible { outline: 1.5px solid var(--vl-rust); outline-offset: 2px; }
+
+/* ==========================================================================================
+   MODALS — pause, help, settings, new quest, confirm, graphics lost, death, victory, hall
+   ========================================================================================== */
+body.ui-vellum #ui-root .modal-backdrop.mxbd { background: radial-gradient(ellipse at center, rgba(10, 7, 4, .42) 0%, rgba(6, 4, 2, .82) 100%); }
+body.ui-vellum #ui-root .modal-backdrop.mxbd.clear { background: rgba(6, 4, 2, .35); }
+body.ui-vellum #ui-root .modal-backdrop.mxbd.grave { background: radial-gradient(ellipse at center, rgba(40, 8, 4, .45) 0%, rgba(14, 3, 2, .86) 100%); }
+body.ui-vellum #ui-root .modal-backdrop.mxbd.dawn { background: radial-gradient(ellipse at center, rgba(40, 28, 10, .35) 0%, rgba(6, 4, 2, .84) 100%); }
+body.ui-vellum #ui-root .modal-backdrop.pxbd { background: radial-gradient(ellipse at center, rgba(10, 7, 4, .35) 0%, rgba(6, 4, 2, .78) 100%); }
+/* both sit above the panel (z 29): a veil or rays there would stain the vellum */
+body.ui-vellum #ui-root .death-veil, body.ui-vellum #ui-root .victory-rays { display: none; }
+
+body.ui-vellum #ui-root .modal.mx { --vl-wear-at: -14rem -9rem; --vl-s1: 10% 12%; --vl-s2: 92% 88%; padding: 1.7rem 2.1rem 1.4rem; overflow: visible; }
+body.ui-vellum #ui-root #inventory.modal { --vl-wear-at: -3rem -6rem; --vl-s1: 6% 10%; --vl-s2: 95% 90%; padding: 1.5rem 2rem 1.2rem; overflow: visible; }
+body.ui-vellum #ui-root .modal.mx.death, body.ui-vellum #ui-root .modal.mx.victory { background: transparent; border: 0; box-shadow: none; }
+
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .mhead { text-align: center; }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .mhead .eyebrow {
+  font: italic 400 1rem/1.25 var(--font-body); letter-spacing: 0; text-indent: 0; text-transform: none; color: var(--vl-rust);
+}
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .mhead .eyebrow::before { content: '~ '; }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .mhead .eyebrow::after { content: ' ~'; }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .mhead h1 {
+  margin: .1rem 0 0; font: 400 2.6rem/1 var(--font-display); letter-spacing: .005em; text-indent: 0; text-transform: none;
+  background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--vl-ink); filter: none; text-shadow: var(--vl-bleed); animation: none;
+}
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .mhead .subtitle { margin-top: .2rem; font: italic 400 1.02rem/1.3 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .mhead .subtitle b { font-weight: 400; color: var(--vl-rust); }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .orn { display: block; width: 72%; height: 1.5px; margin: .55rem auto .2rem; background: var(--vl-ink-2); }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .orn > * { display: none; }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) .mhead .logo { display: none; }
+body.ui-vellum #ui-root .modal .modal-close { color: var(--vl-ink); text-shadow: none; font: 400 1.25rem/1 var(--font-body); }
+body.ui-vellum #ui-root .modal .modal-close:hover { color: var(--vl-rust); transform: none; }
+body.ui-vellum #ui-root .modal .modal-close:focus-visible { outline: 1.5px solid var(--vl-rust); color: var(--vl-rust); }
+
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) h2 {
+  display: flex; align-items: center; gap: .6rem; margin: 1rem 0 .35rem; font: 400 1.3rem/1.1 var(--font-display); letter-spacing: .01em; text-transform: none; color: var(--vl-rust);
+}
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) h2::after { content: ''; flex: 1; height: 1.5px; background: var(--vl-ink-2); opacity: .7; }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) h2 .ico { color: var(--vl-ink); }
+body.ui-vellum #ui-root :is(.modal.mx, #inventory) h2 small { font: italic 400 .82rem/1 var(--font-body); letter-spacing: 0; color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal .scroll { scrollbar-color: var(--vl-rust) transparent; }
+
+/* menu rows */
+body.ui-vellum #ui-root .modal.mx .menu-list { gap: 0; margin-top: .9rem; }
+body.ui-vellum #ui-root .modal.mx .menu-item {
+  padding: .45rem .9rem .4rem; border: 0; border-top: 1px solid var(--vl-rule-soft); border-radius: 0; background: transparent; transform: none; transition: none;
+  font: italic 400 1.2rem/1.2 var(--font-body); letter-spacing: 0; text-indent: 0; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed);
+}
+body.ui-vellum #ui-root .modal.mx .menu-item:last-child { border-bottom: 1px solid var(--vl-rule-soft); }
+body.ui-vellum #ui-root .modal.mx .menu-item small { font: italic 400 .84rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .menu-item.selected, body.ui-vellum #ui-root .modal.mx .menu-item:hover {
+  background: rgba(46, 33, 18, .08); color: var(--vl-rust); text-shadow: var(--vl-bleed); box-shadow: inset 3px 0 0 var(--vl-rust); transform: none;
+}
+body.ui-vellum #ui-root .modal.mx .menu-item.selected small, body.ui-vellum #ui-root .modal.mx .menu-item:hover small { color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .menu-item.selected::before { content: none; }
+body.ui-vellum #ui-root .modal.mx .menu-item.danger { color: var(--vl-rust); }
+body.ui-vellum #ui-root .modal.mx .menu-item.danger.selected, body.ui-vellum #ui-root .modal.mx .menu-item.danger:hover { background: rgba(138, 47, 28, .14); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root .modal.mx .menu-item[disabled] { opacity: .4; }
+body.ui-vellum #ui-root .menu-item:focus-visible { outline: 1.5px solid var(--vl-rust); outline-offset: -2px; }
+body.ui-vellum #ui-root .modal.mx.death .menu-item:nth-last-child(2), body.ui-vellum #ui-root .modal.mx.victory .menu-item:nth-last-child(2) { border-bottom: 1px solid var(--vl-rule-soft); }
+
+/* new quest */
+body.ui-vellum #ui-root .modal.mx .card { border: 1.5px solid rgba(46, 33, 18, .45); border-radius: 0; background: rgba(255, 245, 220, .16); box-shadow: none; transform: none; transition: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .card .cn { font: 400 1.35rem/1.1 var(--font-display); letter-spacing: .01em; text-transform: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .card .cd { font: 400 .9rem/1.35 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .card .cd b { font-weight: 400; color: var(--vl-rust) !important; }
+body.ui-vellum #ui-root .modal.mx .card .ct { font: italic 400 .84rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .card:hover { border-color: var(--vl-ink-2); background: rgba(255, 245, 220, .24); box-shadow: none; transform: none; }
+body.ui-vellum #ui-root .modal.mx .card.selected { border: 2px solid var(--vl-rust); background: rgba(138, 47, 28, .08); box-shadow: none; transform: none; }
+body.ui-vellum #ui-root .modal.mx .card.selected::after { content: none; }
+body.ui-vellum #ui-root .modal.mx .card.selected .cn { color: var(--vl-rust); }
+body.ui-vellum #ui-root .skulls i { border: 1.5px solid var(--vl-ink-2); opacity: .45; box-shadow: none; }
+body.ui-vellum #ui-root .skulls i.on { background: var(--vl-ink-2); border-color: var(--vl-ink-2); box-shadow: none; opacity: 1; }
+body.ui-vellum #ui-root .skulls i.on::before { background: var(--vl-paper); box-shadow: 3px 0 0 var(--vl-paper); }
+body.ui-vellum #ui-root .modal.mx .field > span { font: 400 1.1rem/1.1 var(--font-display); letter-spacing: .01em; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root .modal.mx .field > span small { font: italic 400 .82rem var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx :is(.field, .setting) input[type=text] {
+  border: 0; border-bottom: 1.5px solid var(--vl-ink-2); border-radius: 0; background: rgba(255, 245, 220, .32); box-shadow: none;
+  font: 400 1.02rem/1.2 var(--font-body); color: var(--vl-ink);
+}
+body.ui-vellum #ui-root .modal.mx :is(.field, .setting) input[type=text]:focus { border-bottom-color: var(--vl-rust); box-shadow: none; }
+
+/* pause */
+body.ui-vellum #ui-root .modal.mx .vitals { border-top: 0; border-bottom: 1px solid var(--vl-rule-soft); }
+body.ui-vellum #ui-root .modal.mx .vital .l { font: italic 400 .84rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .vital .v { font: 400 1.4rem/1.15 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .vital .v.hp, body.ui-vellum #ui-root .modal.mx .vital .v.gold { color: var(--vl-rust); }
+body.ui-vellum #ui-root .modal.mx .vital .v.clock { color: var(--vl-ink); }
+
+/* settings */
+body.ui-vellum #ui-root .modal.mx .setting { border-left: 3px solid transparent; border-radius: 0; }
+body.ui-vellum #ui-root .modal.mx .setting.selected { border-left-color: var(--vl-rust); background: rgba(46, 33, 18, .07); }
+body.ui-vellum #ui-root .modal.mx .setting .sn { font: 400 1rem/1.25 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .setting .sn small { font: italic 400 .8rem/1.25 var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .setting .sv .num { font: 400 .95rem var(--font-body); color: var(--vl-rust); }
+body.ui-vellum #ui-root .modal.mx .setting input[type=range] { height: 4px; border-radius: 0; box-shadow: none; background: linear-gradient(90deg, var(--vl-rust) 0, var(--vl-rust) var(--v, 50%), rgba(46, 33, 18, .25) var(--v, 50%)); }
+body.ui-vellum #ui-root .modal.mx .setting input[type=range]::-webkit-slider-thumb { width: 10px; height: 16px; border-radius: 0; background: var(--vl-ink-2); border: 0; box-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .setting input[type=range]::-moz-range-thumb { width: 10px; height: 16px; border-radius: 0; background: var(--vl-ink-2); border: 0; }
+body.ui-vellum #ui-root .modal.mx .toggle { border: 1.5px solid var(--vl-ink-2); background: rgba(255, 245, 220, .3); box-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .toggle::after { background: var(--vl-ink-2); box-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .toggle.on { background: var(--vl-rust); border-color: var(--vl-rust-dk); box-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .toggle.on::after { background: var(--vl-on-rust); }
+body.ui-vellum #ui-root .modal.mx .toggle::before { font: italic 400 .62rem var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .toggle.on::before { color: var(--vl-on-rust); }
+
+/* help */
+body.ui-vellum #ui-root .modal.mx .keys .k { border-bottom: 1px solid var(--vl-rule-soft); }
+body.ui-vellum #ui-root .modal.mx .keys .k span:first-child { font: 400 .95rem/1.3 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .keys .k span:last-child, body.ui-vellum #ui-root .modal.mx .keys .k em { color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .lore { font: 400 .98rem/1.5 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .lore p:first-of-type::first-letter { font-family: var(--font-display); color: var(--vl-rust); text-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .lore b { font-weight: 400; color: var(--vl-rust); }
+body.ui-vellum #ui-root .modal.mx .lore em { font-style: italic; color: var(--vl-rust); }
+
+/* death & victory */
+body.ui-vellum #ui-root .modal.mx.death .mhead h1 { font-size: 3.2rem; color: var(--vl-rust); background: none; -webkit-background-clip: border-box; background-clip: border-box; filter: none; }
+body.ui-vellum #ui-root .modal.mx.death .eyebrow { color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx.victory .mhead h1 { font-size: 3.2rem; }
+body.ui-vellum #ui-root .modal.mx .epitaph { font: italic 400 1.12rem/1.5 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .epitaph b { font: normal 400 1.12em/1 var(--font-display); letter-spacing: .01em; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root .modal.mx .hero-stats .hs { border-right: 1px solid var(--vl-rule-soft); }
+body.ui-vellum #ui-root .modal.mx .hero-stats .hs:last-child { border-right: 0; }
+body.ui-vellum #ui-root .modal.mx .hero-stats .l { font: italic 400 .88rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .hero-stats .v { font: 400 2.3rem/1.1 var(--font-body); color: var(--vl-ink); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root .modal.mx .hero-stats .v.gold, body.ui-vellum #ui-root .modal.mx .hero-stats .v.blood { color: var(--vl-rust); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root .modal.mx .hero-stats .v.magic { color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .hero-stats .s { font: italic 400 .82rem/1.2 var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .minor-stats { border-top: 1px solid var(--vl-rule-soft); border-bottom: 1px solid var(--vl-rule-soft); font: italic 400 .88rem/1.3 var(--font-body); }
+body.ui-vellum #ui-root .modal.mx .minor-stats .ms { border-right: 1px solid var(--vl-rule-soft); color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .minor-stats .ms b { font: normal 400 .95rem var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .ribbon { padding: .3rem 1.6rem .26rem; background: var(--vl-rust); color: var(--vl-on-rust); box-shadow: none; font: 400 1.1rem/1.1 var(--font-display); letter-spacing: .02em; text-indent: 0; text-transform: none; text-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .ribbon.grey { background: var(--vl-ink-2); }
+body.ui-vellum #ui-root .modal.mx .timeline { border: 1px solid var(--vl-rule-soft); background: var(--vl-wash); box-shadow: none; scrollbar-color: var(--vl-rust) transparent; }
+body.ui-vellum #ui-root .modal.mx .timeline .tl { font: italic 400 .86rem/1.35 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .timeline .tl::before { background: var(--vl-ink-2); box-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .timeline .tl .t { font-style: normal; color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .escape .big .l { font: italic 400 .88rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .escape .big .v, body.ui-vellum #ui-root .modal.mx .escape .big .v.magic {
+  font: 400 2.6rem/1.05 var(--font-body); background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--vl-ink); filter: none; text-shadow: var(--vl-bleed);
+}
+body.ui-vellum #ui-root .modal.mx .escape .big .v.magic { color: var(--vl-rust); }
+body.ui-vellum #ui-root .modal.mx .clock .bar { height: .62rem; padding: 1px; border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: rgba(255, 245, 220, .25); box-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .clock .bar i { background: var(--vl-ink-2); box-shadow: none; }
+body.ui-vellum #ui-root .modal.mx .clock .cl { font: italic 400 .8rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+
+/* hall of fame */
+body.ui-vellum #ui-root .modal.mx table.hall th { font: 400 1.05rem/1.1 var(--font-display); letter-spacing: .01em; text-transform: none; color: var(--vl-rust); border-bottom: 1.5px solid var(--vl-ink-2); }
+body.ui-vellum #ui-root .modal.mx table.hall td { font: 400 .92rem/1.3 var(--font-body); border-bottom-color: var(--vl-rule-soft); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx table.hall td.nm { font-style: italic; color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx table.hall td.rk { font-family: var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx table.hall tr:nth-child(-n+3) td.rk, body.ui-vellum #ui-root .modal.mx table.hall td.sc { color: var(--vl-rust); font-weight: 400; }
+body.ui-vellum #ui-root .modal.mx table.hall tr.me td { background: rgba(138, 47, 28, .12); color: var(--vl-ink); }
+body.ui-vellum #ui-root .modal.mx .empty { font: italic 400 1rem var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root .modal.mx .filters .btn { padding: .2rem .75rem .16rem; font-size: 1rem; }
+
+/* ==========================================================================================
+   TITLE — a large torn plate over the rotating dungeon
+   ========================================================================================== */
+body.ui-vellum #ui-root #title { padding-top: 6.5vh; background: radial-gradient(ellipse 70% 60% at 50% 42%, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, .4) 60%, rgba(0, 0, 0, .8) 100%); }
+body.ui-vellum #ui-root #title .heat, body.ui-vellum #ui-root #title .epyx, body.ui-vellum #ui-root #title .t1, body.ui-vellum #ui-root #title .logo { display: none; }
+body.ui-vellum #ui-root #title .wordmark { width: min(44rem, 84vw); margin-top: 0; }
+body.ui-vellum #ui-root #title .vl-cover {
+  --vl-rot: -.7deg; --vl-wear-at: -10rem -14rem; --vl-s1: 12% 20%; --vl-s2: 86% 78%; --vl-shadow: 0 1.1rem 1.6rem .5rem rgba(0, 0, 0, .7);
+  --vl-tear: polygon(0 4%, 3% 0, 20% 1.5%, 38% 0, 58% 2%, 76% 0, 96% 1%, 100% 5%, 98.8% 34%, 100% 62%, 98.5% 86%, 100% 96%, 96% 100%, 76% 98.5%, 55% 100%, 36% 98%, 18% 100%, 3% 98.5%, 0 95%, 1.2% 66%, 0 36%);
+  display: block; position: relative; width: 100%; padding: 1.7rem 3rem 1.9rem; text-align: center; transform: rotate(var(--vl-rot)); animation: vlIn .6s ease-out both;
+}
+body.ui-vellum #ui-root #title .vl-kicker { font: italic 400 1.15rem/1.2 var(--font-body); color: var(--vl-rust); }
+body.ui-vellum #ui-root #title .vl-t1 { margin-top: .35rem; font: 400 2.5rem/1 var(--font-display); color: var(--vl-ink); }
+body.ui-vellum #ui-root #title .vl-title { margin-top: -.1rem; font: 400 clamp(4.6rem, 10.5vw, 8.6rem)/.92 var(--font-display); letter-spacing: .005em; color: var(--vl-rust); }
+body.ui-vellum #ui-root #title .vl-sub { width: 82%; margin: .75rem auto 0; padding-top: .5rem; border-top: 1.5px solid var(--vl-ink-2); font: italic 400 1.1rem/1.3 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #title .menu {
+  --vl-rot: .5deg; --vl-wear-at: -40rem -24rem; --vl-s1: 85% 15%; --vl-s2: 12% 88%;
+  --vl-tear: polygon(0 3%, 5% 0, 30% 1.5%, 55% 0, 80% 2%, 96% 0, 100% 4%, 98.5% 40%, 100% 72%, 98.5% 97%, 94% 100%, 70% 98.5%, 45% 100%, 20% 98.5%, 4% 100%, 0 96%, 1.5% 60%, 0 30%);
+  position: relative; width: 23rem; margin-top: 3.6vh; padding: 1rem 1.9rem 1.15rem; transform: rotate(var(--vl-rot)); animation: vlIn .7s .3s ease-out both;
+}
+body.ui-vellum #ui-root #title .menu .mc-band { justify-content: center; margin-bottom: .35rem; }
+body.ui-vellum #ui-root #title .menu .menu-list { margin: 0; }
+body.ui-vellum #ui-root #title .menu .menu-item {
+  justify-content: center; padding: .3rem 1rem .26rem; border: 0; border-radius: 0; background: none; backdrop-filter: none; -webkit-backdrop-filter: none; transition: none;
+  font: italic 400 1.3rem/1.2 var(--font-body); letter-spacing: 0; text-indent: 0; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed);
+}
+body.ui-vellum #ui-root #title .menu .menu-item::before, body.ui-vellum #ui-root #title .menu .menu-item::after { content: none; }
+body.ui-vellum #ui-root #title .menu .menu-item.selected, body.ui-vellum #ui-root #title .menu .menu-item:hover {
+  color: var(--vl-rust); background: none; letter-spacing: 0; text-indent: 0; text-shadow: var(--vl-bleed); text-decoration: underline 2px var(--vl-rust); text-underline-offset: .22em;
+}
+body.ui-vellum #ui-root #title .menu .menu-item[disabled] { opacity: .4; }
+body.ui-vellum #ui-root #title .tagline {
+  --vl-wear-at: -22rem -44rem; --vl-shadow: 0 .4rem .7rem .15rem rgba(0, 0, 0, .6);
+  position: relative; min-height: 0; margin-top: 1.2rem; padding: .45rem 1.3rem .5rem; font: italic 400 1.02rem/1.3 var(--font-body); letter-spacing: 0; animation: none;
+}
+body.ui-vellum #ui-root #title .tagline:empty { display: none; }
+body.ui-vellum #ui-root #title .foot { font: italic 400 .88rem/1.3 var(--font-body); letter-spacing: .01em; text-transform: none; color: #e2cfa2; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0, 0, 0, .8); }
+body.ui-vellum #ui-root #title .foot b { font-weight: 400; color: #f3e3bd; }
+body.ui-vellum #ui-root #title .foot kbd { background: rgba(201, 173, 118, .9); border-color: rgba(46, 33, 18, .6); }
+body.ui-vellum #ui-root #title .version, body.ui-vellum #ui-root #title .credit { font: italic 400 .84rem/1.45 var(--font-body); letter-spacing: .01em; text-transform: none; color: #d9c49a; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0, 0, 0, .8); }
+body.ui-vellum #ui-root #title .version b { font-weight: 400; color: #f3e3bd; }
+
+/* ==========================================================================================
+   INVENTORY / CHARACTER SHEET
+   ========================================================================================== */
+body.ui-vellum #ui-root #inventory .char { border-right: 1px solid var(--vl-rule-soft); }
+body.ui-vellum #ui-root #inventory .detail { border-left: 1px solid var(--vl-rule-soft); }
+body.ui-vellum #ui-root #inventory .medal { border: 1.5px solid var(--vl-ink-2); background: none; box-shadow: none; }
+body.ui-vellum #ui-root #inventory .medal::before { content: none; }
+body.ui-vellum #ui-root #inventory .medal .lv { font: 400 1.6rem/1 var(--font-body); background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--vl-ink); filter: none; }
+body.ui-vellum #ui-root #inventory .medal .lvl { border: 0; border-radius: 0; background: var(--vl-ink-2); color: var(--vl-paper); font: italic 400 .66rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; text-shadow: none; }
+body.ui-vellum #ui-root #inventory .name { font: 400 1.6rem/1.05 var(--font-display); letter-spacing: 0; text-transform: none; background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--vl-ink); filter: none; }
+body.ui-vellum #ui-root #inventory .title { font: italic 400 .9rem/1.2 var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root #inventory .gauge .lab .cap { font: italic 400 .9rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .gauge .lab .num { font: 400 1rem/1.2 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .gauge .lab .num small { font-weight: 400; color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .gauge .frame { height: .66rem; border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: rgba(255, 245, 220, .25); box-shadow: none; }
+body.ui-vellum #ui-root #inventory .gauge .fill { top: 1px; bottom: 1px; left: 1px; width: calc(100% - 2px); box-shadow: none; background: var(--vl-hp); }
+body.ui-vellum #ui-root #inventory .gauge.xp .fill { background: var(--vl-ink-2); }
+body.ui-vellum #ui-root #inventory .gauge .ticks { opacity: 1; background: repeating-linear-gradient(90deg, transparent 0 1.905rem, var(--vl-paper) 1.905rem 2.041rem); }
+body.ui-vellum #ui-root #inventory .gauge .end { display: none; }
+body.ui-vellum #ui-root #inventory .cr { border-bottom: 1px solid var(--vl-rule-soft); font: 400 .92rem/1.3 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .cr .ico { color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .cr .k { font-style: italic; }
+body.ui-vellum #ui-root #inventory .cr .v { font: 400 .95rem var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .cr .v small { color: var(--vl-faint); }
+body.ui-vellum #ui-root #inventory .cr .v.gold, body.ui-vellum #ui-root #inventory .cr .v.up { color: var(--vl-rust); }
+body.ui-vellum #ui-root #inventory .foot-meta { font: italic 400 .8rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root #inventory .foot-meta b { font-weight: 400; color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .sword { border: 1.5px solid var(--vl-rust); border-radius: 0; background: none; box-shadow: none; animation: none; font: 400 1.1rem/1.1 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root #inventory .sword .ico { color: var(--vl-rust); filter: none; }
+body.ui-vellum #ui-root #inventory .sword small { font: italic 400 .84rem/1.3 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+body.ui-vellum #ui-root #inventory .it { border: 1.5px solid rgba(46, 33, 18, .35); border-radius: 0; background: rgba(255, 245, 220, .14); box-shadow: none; transition: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .it::after, body.ui-vellum #ui-root #inventory .it.selected::before, body.ui-vellum #ui-root #inventory .it.active .glyph::after { content: none; }
+body.ui-vellum #ui-root #inventory .it .glyph { border-radius: 0; background: none; box-shadow: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .it .glyph .ico { filter: none; }
+body.ui-vellum #ui-root #inventory .it .nm { font: 400 1.02rem/1.1 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .it .st { font: italic 400 .78rem/1.2 var(--font-body); letter-spacing: 0; color: var(--vl-faint); }
+body.ui-vellum #ui-root #inventory .it .cnt { border: 0; border-radius: 0; background: var(--vl-ink-2); box-shadow: none; color: var(--vl-paper); font: 400 .74rem/1.3 var(--font-body); text-shadow: none; }
+body.ui-vellum #ui-root #inventory .it .key { border: 0; border-radius: 0; background: none; color: var(--vl-ink); font: italic 400 .72rem/1.2 var(--font-body); }
+body.ui-vellum #ui-root #inventory .it.empty { opacity: .45; filter: none; }
+body.ui-vellum #ui-root #inventory .it.active { border-bottom: 2px solid var(--vl-rust); }
+body.ui-vellum #ui-root #inventory .it:hover { transform: none; border-color: var(--vl-ink-2); box-shadow: none; }
+body.ui-vellum #ui-root #inventory .it.selected { transform: none; border: 2px solid var(--vl-rust); background: rgba(138, 47, 28, .08); box-shadow: none; filter: none; }
+body.ui-vellum #ui-root #inventory .it.selected .nm, body.ui-vellum #ui-root #inventory .it.selected .glyph { color: var(--vl-rust); text-shadow: var(--vl-bleed); box-shadow: none; }
+body.ui-vellum #ui-root #inventory .cl { border: 0; border-left: 3px solid var(--vl-ink-2); border-radius: 0; background: rgba(255, 245, 220, .14); font: italic 400 .88rem/1.35 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .cl .ico { color: var(--vl-ink); filter: none; }
+body.ui-vellum #ui-root #inventory .detail .big { border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: none; box-shadow: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .detail .big::before, body.ui-vellum #ui-root #inventory .detail .big::after { content: none; }
+body.ui-vellum #ui-root #inventory .detail .big .ico { filter: none; animation: none; }
+body.ui-vellum #ui-root #inventory .detail .big .n { border: 0; border-radius: 0; background: var(--vl-rust); color: var(--vl-on-rust); box-shadow: none; font: 400 .9rem/1.3 var(--font-body); text-shadow: none; }
+body.ui-vellum #ui-root #inventory .detail .kind { font: italic 400 .88rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root #inventory .detail .dn { font: 400 1.6rem/1.05 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root #inventory .detail .lore { font: 400 .92rem/1.45 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .detail .lore::first-letter { font-family: var(--font-display); color: var(--vl-rust); }
+body.ui-vellum #ui-root #inventory .detail .eff { border: 1px solid var(--vl-rule-soft); border-radius: 0; background: var(--vl-wash); box-shadow: none; font: 400 .88rem/1.35 var(--font-body); }
+body.ui-vellum #ui-root #inventory .detail .eff .er + .er { border-top-color: var(--vl-rule-soft); }
+body.ui-vellum #ui-root #inventory .detail .eff .er span:first-child { font-style: italic; color: var(--vl-faint); }
+body.ui-vellum #ui-root #inventory .detail .eff .er span:last-child { color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .detail .eff .er.warn span:last-child { color: var(--vl-rust); }
+body.ui-vellum #ui-root #inventory .detail .act { border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: var(--vl-wash); box-shadow: none; transition: none; font: 400 1.1rem/1.1 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-ink); }
+body.ui-vellum #ui-root #inventory .detail .act:hover { transform: none; background: var(--vl-ink-2); border-color: var(--vl-ink-2); color: var(--vl-paper); }
+body.ui-vellum #ui-root #inventory .detail .act.primary { background: var(--vl-rust); border-color: var(--vl-rust-dk); color: var(--vl-on-rust); text-shadow: none; box-shadow: none; filter: none; }
+body.ui-vellum #ui-root #inventory .detail .act.primary:hover { background: var(--vl-rust-dk); }
+body.ui-vellum #ui-root #inventory .detail .act.primary kbd { background: rgba(255, 245, 220, .18); border-color: rgba(241, 226, 191, .5); color: var(--vl-on-rust); text-shadow: none; }
+body.ui-vellum #ui-root #inventory .detail .act:focus-visible { outline: 1.5px solid var(--vl-rust); outline-offset: 2px; }
+body.ui-vellum #ui-root #inventory .detail .passive { border: 1.5px dashed rgba(46, 33, 18, .45); border-radius: 0; font: italic 400 .86rem var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root #inventory .hint-bar span { color: var(--vl-faint); }
+
+/* ==========================================================================================
+   QUALITY-OF-LIFE OVERLAYS (core/qol.css): confirm, chips, touch, controls, statistics, lantern
+   ========================================================================================== */
+body.ui-vellum #ui-root .qol-prompt { background: rgba(8, 5, 3, .6); }
+body.ui-vellum #ui-root .qol-prompt .box { --vl-wear-at: -26rem -18rem; padding: 1.4rem 1.9rem 1.25rem; }
+body.ui-vellum #ui-root .qol-prompt .sigil { display: none; }
+body.ui-vellum #ui-root .qol-prompt .eyebrow { margin: 0; font: italic 400 1rem/1.25 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root .qol-prompt .eyebrow::before { content: '~ '; } body.ui-vellum #ui-root .qol-prompt .eyebrow::after { content: ' ~'; }
+body.ui-vellum #ui-root .qol-prompt h1 { margin: .15rem 0 .5rem; font: 400 2.1rem/1.05 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root .qol-prompt p { font: 400 1rem/1.45 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .qol-prompt .clock { border: 1.5px solid var(--vl-rust); border-radius: 0; background: none; font: 400 1.1rem var(--font-body); color: var(--vl-rust); }
+body.ui-vellum #ui-root .qol-prompt .btns button {
+  border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: var(--vl-wash); color: var(--vl-ink); box-shadow: none; text-shadow: var(--vl-bleed); transition: none;
+  font: 400 1.15rem/1.1 var(--font-display); letter-spacing: .01em; text-transform: none;
+}
+body.ui-vellum #ui-root .qol-prompt .btns button.primary { background: var(--vl-rust); border-color: var(--vl-rust-dk); color: var(--vl-on-rust); text-shadow: none; }
+body.ui-vellum #ui-root .qol-prompt .btns button kbd { margin-left: .5rem; }
+body.ui-vellum #ui-root .qol-prompt .btns button.primary kbd { background: rgba(255, 245, 220, .18); border-color: rgba(241, 226, 191, .5); color: var(--vl-on-rust); text-shadow: none; }
+body.ui-vellum #ui-root .qol-prompt .btns button:hover, body.ui-vellum #ui-root .qol-prompt .btns button:focus-visible { transform: none; box-shadow: none; outline: 1.5px solid var(--vl-rust); outline-offset: 2px; }
+body.ui-vellum #ui-root .qol-prompt .btns button.selected { box-shadow: 0 0 0 2px var(--vl-rust); }
+body.ui-vellum #ui-root .qol-prompt .foot { font: italic 400 .82rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+
+body.ui-vellum #ui-root .qol-chip { --vl-wear-at: -6rem -50rem; --vl-shadow: 0 .4rem .7rem .15rem rgba(0, 0, 0, .6); padding: .4rem 1.1rem .42rem; font: italic 400 1rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; }
+body.ui-vellum #ui-root .qol-chip .dot { background: var(--vl-ink-2); box-shadow: none; }
+body.ui-vellum #ui-root .qol-chip.magic .dot, body.ui-vellum #ui-root .qol-chip.danger .dot { background: var(--vl-rust); box-shadow: none; }
+
+body.ui-vellum #ui-root .qol-touch .pad { background: rgba(201, 173, 118, .86); box-shadow: 0 0 0 1.5px var(--vl-ink-2), 0 .6rem 1rem rgba(0, 0, 0, .55); }
+body.ui-vellum #ui-root .qol-touch .pad::before { border: 1.5px solid rgba(46, 33, 18, .4); background: none; }
+body.ui-vellum #ui-root .qol-touch .pad .arrow { color: var(--vl-ink); }
+body.ui-vellum #ui-root .qol-touch .pad .arrow.lit { color: var(--vl-rust); text-shadow: none; }
+body.ui-vellum #ui-root .qol-touch .pad .thumb { background: var(--vl-ink-2); box-shadow: 0 2px 6px rgba(0, 0, 0, .5); }
+body.ui-vellum #ui-root .qol-touch .pad.active .thumb { background: var(--vl-rust); box-shadow: 0 2px 6px rgba(0, 0, 0, .5); }
+body.ui-vellum #ui-root .qol-touch .tb { border: 1.5px solid var(--vl-ink-2); background: rgba(201, 173, 118, .92); box-shadow: 0 .3rem .7rem rgba(0, 0, 0, .55); color: var(--vl-ink); font: italic 400 .7rem/1.1 var(--font-body); letter-spacing: 0; text-transform: none; }
+body.ui-vellum #ui-root .qol-touch .tb .g, body.ui-vellum #ui-root .qol-touch .tb.explore .g, body.ui-vellum #ui-root .qol-touch .tb.teleport .g { color: var(--vl-ink); text-shadow: none; }
+body.ui-vellum #ui-root .qol-touch .tb.potion .g { color: var(--vl-rust); text-shadow: none; }
+body.ui-vellum #ui-root .qol-touch .tb.act { border: 2px solid var(--vl-rust); box-shadow: 0 .3rem .7rem rgba(0, 0, 0, .55); }
+body.ui-vellum #ui-root .qol-touch .tb:active, body.ui-vellum #ui-root .qol-touch .tb.down { background: #b89a62; }
+body.ui-vellum #ui-root .qol-touch .tb.on { border-color: var(--vl-rust); box-shadow: 0 .3rem .7rem rgba(0, 0, 0, .55); }
+body.ui-vellum #ui-root .qol-touch .hint { padding: .15rem .6rem; background: rgba(201, 173, 118, .9); font: italic 400 .78rem var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-ink); }
+
+body.ui-vellum #ui-root .qol-sheet { background: rgba(8, 5, 3, .62); }
+body.ui-vellum #ui-root .qol-sheet .box { --vl-wear-at: -18rem -12rem; --vl-s1: 8% 10%; --vl-s2: 93% 90%; padding: 1.5rem 2rem 1.2rem; }
+body.ui-vellum #ui-root .qol-sheet .head .eyebrow { font: italic 400 1rem/1.25 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root .qol-sheet .head .eyebrow::before { content: '~ '; } body.ui-vellum #ui-root .qol-sheet .head .eyebrow::after { content: ' ~'; }
+body.ui-vellum #ui-root .qol-sheet .head h1 { margin-top: .1rem; font: 400 2.5rem/1 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-ink); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root .qol-sheet .head .sub { font: italic 400 1rem/1.3 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .qol-sheet .rule { height: 1.5px; background: var(--vl-ink-2); }
+body.ui-vellum #ui-root .qol-sheet .body { scrollbar-color: var(--vl-rust) transparent; }
+body.ui-vellum #ui-root .qol-sheet .foot { font: italic 400 .84rem/1.3 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root .qol-sheet .foot button { border: 1.5px solid var(--vl-ink-2); border-radius: 0; background: var(--vl-wash); color: var(--vl-ink); font: 400 1rem var(--font-display); text-transform: none; letter-spacing: 0; }
+body.ui-vellum #ui-root .qol-sheet .foot button:hover { background: var(--vl-ink-2); color: var(--vl-paper); border-color: var(--vl-ink-2); }
+body.ui-vellum #ui-root :is(.qol-controls, .qol-stats) h2 { font: 400 1.3rem/1.1 var(--font-display); letter-spacing: .01em; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root :is(.qol-controls, .qol-stats) h2::after { height: 1.5px; background: var(--vl-ink-2); opacity: .7; }
+body.ui-vellum #ui-root .qol-controls .row { border-radius: 0; font: 400 .98rem/1.3 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .qol-controls .row:hover, body.ui-vellum #ui-root .qol-controls .row.selected { background: rgba(46, 33, 18, .08); box-shadow: inset 3px 0 0 var(--vl-rust); }
+body.ui-vellum #ui-root .qol-controls .row.listening .k { font: italic 400 .9rem var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-rust); }
+body.ui-vellum #ui-root .qol-controls .row.changed .k kbd:first-child { border-color: var(--vl-rust); color: var(--vl-rust); }
+body.ui-vellum #ui-root .qol-controls .row.locked .k kbd { color: var(--vl-faint); }
+body.ui-vellum #ui-root .qol-controls .pad-note { border-left: 3px solid var(--vl-rust); background: rgba(255, 245, 220, .15); font: italic 400 .92rem/1.4 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .qol-controls .pad-note b { font-weight: 400; color: var(--vl-rust); }
+body.ui-vellum #ui-root .qol-stats .tile { border: 1.5px solid rgba(46, 33, 18, .4); border-radius: 0; background: rgba(255, 245, 220, .15); box-shadow: none; }
+body.ui-vellum #ui-root .qol-stats .tile .l { font: italic 400 .86rem/1.2 var(--font-body); letter-spacing: 0; text-transform: none; color: var(--vl-faint); }
+body.ui-vellum #ui-root .qol-stats .tile .v { font: 400 1.75rem/1.15 var(--font-body); color: var(--vl-ink); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root .qol-stats .tile .v.blood { color: var(--vl-rust); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root .qol-stats .tile .v.magic { color: var(--vl-ink); text-shadow: var(--vl-bleed); }
+body.ui-vellum #ui-root .qol-stats .tile .s { font: italic 400 .8rem/1.2 var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root .qol-stats .kv { font: 400 .95rem/1.35 var(--font-body); }
+body.ui-vellum #ui-root .qol-stats .kv span:nth-child(odd) { font-style: italic; color: var(--vl-faint); }
+body.ui-vellum #ui-root .qol-stats .kv span:nth-child(even) { font: 400 .95rem/1.35 var(--font-body); color: var(--vl-ink); }
+body.ui-vellum #ui-root .qol-stats .bars .d { font: italic 400 .84rem var(--font-body); letter-spacing: 0; color: var(--vl-faint); }
+body.ui-vellum #ui-root .qol-stats .bars .b { height: 7px; border-radius: 0; background: var(--vl-ink-2); box-shadow: none; }
+body.ui-vellum #ui-root .qol-stats .bars .b.now { background: var(--vl-rust); box-shadow: none; }
+body.ui-vellum #ui-root .qol-stats .bars .t { font: 400 .84rem var(--font-body); color: var(--vl-faint); }
+body.ui-vellum #ui-root .qol-stats .career { border-top: 1px dashed rgba(46, 33, 18, .35); }
+body.ui-vellum #ui-root .qol-stats .seedline { font: italic 400 .88rem var(--font-body); letter-spacing: 0; color: var(--vl-faint); }
+body.ui-vellum #ui-root .qol-stats .seedline b { font-weight: 400; color: var(--vl-rust); }
+
+body.ui-vellum .torch-pick .tp-box { --vl-wear-at: -44rem -8rem; --vl-shadow: 0 .5rem .8rem .2rem rgba(0, 0, 0, .6); padding: .75rem .85rem .8rem; color: var(--vl-ink); }
+body.ui-vellum .torch-pick .tp-title { font: 400 1.25rem/1 var(--font-display); letter-spacing: 0; text-transform: none; color: var(--vl-rust); opacity: 1; }
+body.ui-vellum .torch-pick .tp-sw { border: 1.5px solid transparent; border-radius: 0; color: var(--vl-ink); font: italic 400 .8rem/1.1 var(--font-body); }
+body.ui-vellum .torch-pick .tp-sw:hover { border-color: rgba(46, 33, 18, .4); background: rgba(46, 33, 18, .06); }
+body.ui-vellum .torch-pick .tp-sw.on { border-color: var(--vl-rust); background: rgba(138, 47, 28, .08); }
+body.ui-vellum .torch-pick .tp-name { opacity: 1; }
+body.ui-vellum .torch-pick .tp-sw.on .tp-name { color: var(--vl-rust); }
+body.ui-vellum .torch-pick .tp-dot, body.ui-vellum .torch-pick .tp-sw.on .tp-dot { box-shadow: 0 0 0 1.5px var(--vl-ink-2); }
+
+/* responsiveness */
+@media (max-width: 1100px) {
+  body.ui-vellum #ui-root #hud-card, body.ui-vellum #ui-root #hud-status { width: 18.5rem; }
+  body.ui-vellum #ui-root #minimap { width: 21rem; }
+  body.ui-vellum #ui-root .slot { width: 3.3rem; }
+}
+
+/* ==========================================================================================
+   SAFE AREAS — every corner panel is inset by the device's safe area. On a desktop browser every
+   env() is 0 and each position below computes to exactly the value it overrides; in landscape on an
+   iPhone it keeps the panels clear of the Dynamic Island and the home indicator.
+   ========================================================================================== */
+body.ui-vellum #ui-root #hud-card { top: calc(.816rem + env(safe-area-inset-top, 0px)); left: calc(.952rem + env(safe-area-inset-left, 0px)); }
+body.ui-vellum #ui-root #hud-status { left: calc(1.3rem + env(safe-area-inset-left, 0px)); }
+body.ui-vellum #ui-root #hud-depth { top: calc(.68rem + env(safe-area-inset-top, 0px)); }
+body.ui-vellum #ui-root #hud-hotbar { bottom: calc(.816rem + env(safe-area-inset-bottom, 0px)); }
+body.ui-vellum #ui-root #hud-quick { bottom: calc(.816rem + env(safe-area-inset-bottom, 0px)); right: calc(.952rem + env(safe-area-inset-right, 0px)); }
+body.ui-vellum #ui-root #log { bottom: calc(.816rem + env(safe-area-inset-bottom, 0px)); left: calc(.952rem + env(safe-area-inset-left, 0px)); }
+body.ui-vellum #ui-root #minimap { top: calc(.816rem + env(safe-area-inset-top, 0px)); right: calc(.952rem + env(safe-area-inset-right, 0px)); }
+body.ui-vellum #ui-root #hud-card-chip { top: calc(.9rem + env(safe-area-inset-top, 0px)); left: calc(1rem + env(safe-area-inset-left, 0px)); }
+body.ui-vellum #ui-root #log-chip { bottom: calc(.9rem + env(safe-area-inset-bottom, 0px)); left: calc(1rem + env(safe-area-inset-left, 0px)); }
+body.ui-vellum #ui-root #minimap-chip { top: calc(.9rem + env(safe-area-inset-top, 0px)); right: calc(1rem + env(safe-area-inset-right, 0px)); }
+body.ui-vellum #ui-root #hud-quick-chip { bottom: calc(.9rem + env(safe-area-inset-bottom, 0px)); right: calc(1rem + env(safe-area-inset-right, 0px)); }
+
+/* ==========================================================================================
+   MOBILE — the vellum phone layout (body.mobile, set by main.js from core/mobile.js). Nothing here
+   reaches a desktop browser. The theme-agnostic phone rules (no zoom / selection / callout, the type
+   scale, the touch pad placement, dialogs that scroll) live in ui/phone.css, which every theme gets.
+   ========================================================================================== */
+
+/* ------------------------------------------------------------------------------------------
+   THE PHONE LAYOUT — a landscape phone is ~930x430 CSS px. The desktop HUD at that size covered
+   seven tenths of the dungeon, so: a smaller type scale, the four corner panels trimmed to what a
+   glance needs, Chronicle and Commands folded to chips along the top edge (ui/collapse.js folds
+   them by default on mobile), the spells bar across the bottom between the thumb pad and the
+   action cluster, and every tap target at least 36px.
+   ------------------------------------------------------------------------------------------ */
+@media (max-height: 540px) {
+
+  /* Adventurer: top left, no heading */
+  body.mobile.ui-vellum #ui-root #hud-card {
+    top: calc(.45rem + env(safe-area-inset-top, 0px)); left: calc(.6rem + env(safe-area-inset-left, 0px));
+    width: 15.5rem; padding: .7rem 1rem .8rem; gap: .2rem;
+  }
+  body.mobile.ui-vellum #ui-root #hud-card .mc-band { display: none; }
+  body.mobile.ui-vellum #ui-root #hud-card .gauge { gap: .15rem; }
+  body.mobile.ui-vellum #ui-root #hud-card .vl-lab > span { font-size: .95rem; }
+  body.mobile.ui-vellum #ui-root #hud-card .vl-lab > b { font-size: 1.05rem; }
+  body.mobile.ui-vellum #ui-root #hud-card .vl-stats { margin-top: .15rem; padding-top: .25rem; }
+  body.mobile.ui-vellum #ui-root #hud-status { top: calc(11.6rem + env(safe-area-inset-top, 0px)); left: calc(.8rem + env(safe-area-inset-left, 0px)); width: 15.5rem; }
+  body.mobile.ui-vellum #ui-root #hud-card.is-collapsed ~ #hud-status { top: calc(4rem + env(safe-area-inset-top, 0px)); }
+
+  /* Level plate: top centre, the name and band only */
+  body.mobile.ui-vellum #ui-root #hud-depth { top: calc(.35rem + env(safe-area-inset-top, 0px)); padding: .45rem 1.5rem .55rem; }
+  body.mobile.ui-vellum #ui-root #hud-depth .mc-band { display: none; }
+  body.mobile.ui-vellum #ui-root #hud-depth .depth { font-size: 1.75rem; }
+  body.mobile.ui-vellum #ui-root #hud-depth .band { font-size: .9rem; }
+  body.mobile.ui-vellum #ui-root #hud-depth .timer { margin-top: .25rem; padding-top: .2rem; }
+  body.mobile.ui-vellum #ui-root #hud-depth .timer .t { font-size: 1.2rem; }
+
+  /* The map: top right, no legend */
+  body.mobile.ui-vellum #ui-root #minimap {
+    top: calc(.45rem + env(safe-area-inset-top, 0px)); right: calc(.6rem + env(safe-area-inset-right, 0px));
+    width: 15rem; padding: .55rem .8rem .7rem; gap: .3rem;
+  }
+  body.mobile.ui-vellum #ui-root #minimap .mc-band .mc-title { font-size: 1.25rem; }
+  body.mobile.ui-vellum #ui-root #minimap .legend { display: none; }
+
+  /* Spells & Sundries: bottom centre, no heading, no key hints (there is no keyboard) */
+  body.mobile.ui-vellum #ui-root #hud-hotbar {
+    bottom: calc(.3rem + env(safe-area-inset-bottom, 0px)); padding: .4rem .7rem .35rem;
+    max-width: calc(100vw - 2 * (11.5rem + max(18px, env(safe-area-inset-left, 0px))));
+  }
+  body.mobile.ui-vellum #ui-root #hud-hotbar .mc-band { display: none; }
+  body.mobile.ui-vellum #ui-root .slot { width: 3.6rem; min-width: 36px; min-height: 40px; padding: .2rem 0 .15rem; grid-template-areas: 'glyph glyph' 'nm nm'; }
+  body.mobile.ui-vellum #ui-root .slot .key { display: none; }
+  body.mobile.ui-vellum #ui-root .slot .cnt { position: absolute; top: 0; right: .15rem; font-size: .75rem; }
+  body.mobile.ui-vellum #ui-root .slot .cnt::before { content: none; }
+  body.mobile.ui-vellum #ui-root .slot .nm { font-size: .78rem; }
+  body.mobile.ui-vellum #ui-root #hud-hotbar .sep { margin: .2rem .3rem; }
+
+  /* Chronicle and Commands: chips along the top edge, and when opened they unfold from there */
+  body.mobile.ui-vellum #ui-root #log-chip, body.mobile.ui-vellum #ui-root #log {
+    top: calc(.45rem + env(safe-area-inset-top, 0px)); bottom: auto; left: calc(17rem + env(safe-area-inset-left, 0px));
+  }
+  body.mobile.ui-vellum #ui-root #log { width: 14rem; max-height: 12rem; padding: .6rem .9rem .7rem; }
+  body.mobile.ui-vellum #ui-root #log:hover, body.mobile.ui-vellum #ui-root #log.expanded { max-height: 20rem; }
+  body.mobile.ui-vellum #ui-root #log .mc-band .mc-title, body.mobile.ui-vellum #ui-root #hud-quick .mc-band .mc-title { font-size: 1.2rem; }
+  body.mobile.ui-vellum #ui-root #log .line { font-size: .9rem; }
+  body.mobile.ui-vellum #ui-root #hud-quick-chip, body.mobile.ui-vellum #ui-root #hud-quick {
+    top: calc(.45rem + env(safe-area-inset-top, 0px)); bottom: auto; right: calc(16.4rem + env(safe-area-inset-right, 0px));
+  }
+  body.mobile.ui-vellum #ui-root #hud-quick { width: 9.5rem; padding: .55rem 1rem .6rem; gap: 0; }
+  body.mobile.ui-vellum #ui-root #hud-quick .qb { min-height: 36px; align-items: center; font-size: 1.1rem; }
+  body.mobile.ui-vellum #ui-root #hud-quick .qb kbd { display: none; }
+  body.mobile.ui-vellum #ui-root .collapsed-chip { min-height: 36px; padding: .3rem .85rem .25rem; font-size: 1.05rem; }
+  /* the character card and the map fold to their own corners, like the desktop */
+  body.mobile.ui-vellum #ui-root #hud-card-chip { top: calc(.45rem + env(safe-area-inset-top, 0px)); left: calc(.6rem + env(safe-area-inset-left, 0px)); }
+  body.mobile.ui-vellum #ui-root #minimap-chip { top: calc(.45rem + env(safe-area-inset-top, 0px)); right: calc(.6rem + env(safe-area-inset-right, 0px)); }
+
+  body.mobile.ui-vellum #ui-root #hud-banner { top: max(30%, 9rem); min-width: 0; padding: .6rem 1.6rem .7rem; }
+  body.mobile.ui-vellum #ui-root #hud-banner .mc-band .mc-title { font-size: 1.5rem; }
+  body.mobile.ui-vellum #ui-root #hud-banner .why { font-size: 1.1rem; }
+
+  /* TITLE: the cover on the left, the menu on the right, no keyboard legend */
+  body.mobile.ui-vellum #ui-root #title {
+    display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); grid-template-rows: auto auto; align-content: center; align-items: center;
+    column-gap: 2rem; row-gap: .6rem;
+    padding: calc(.6rem + env(safe-area-inset-top, 0px)) calc(1.4rem + env(safe-area-inset-right, 0px)) calc(.6rem + env(safe-area-inset-bottom, 0px)) calc(1.4rem + env(safe-area-inset-left, 0px));
+  }
+  body.mobile.ui-vellum #ui-root #title .wordmark { grid-column: 1; grid-row: 1 / span 2; width: 100%; }
+  body.mobile.ui-vellum #ui-root #title .vl-cover { padding: 1.2rem 1.8rem 1.4rem; }
+  body.mobile.ui-vellum #ui-root #title .vl-kicker { font-size: 1rem; }
+  body.mobile.ui-vellum #ui-root #title .vl-t1 { font-size: 1.9rem; }
+  body.mobile.ui-vellum #ui-root #title .vl-title { font-size: min(6.4rem, 19vh); }
+  body.mobile.ui-vellum #ui-root #title .vl-sub { font-size: 1rem; }
+  body.mobile.ui-vellum #ui-root #title .menu { grid-column: 2; grid-row: 1; width: 100%; max-width: 22rem; justify-self: center; margin-top: 0; padding: .8rem 1.4rem .9rem; }
+  body.mobile.ui-vellum #ui-root #title .menu .menu-item { min-height: 36px; padding: .15rem 1rem; align-items: center; font-size: 1.3rem; }
+  body.mobile.ui-vellum #ui-root #title .tagline { grid-column: 2; grid-row: 2; max-width: 22rem; justify-self: center; margin-top: 0; font-size: .95rem; }
+  body.mobile.ui-vellum #ui-root #title :is(.foot, .version, .credit) { display: none; }
+}

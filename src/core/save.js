@@ -26,6 +26,8 @@ export const DEFAULT_SETTINGS = {
   cameraTilt: 17,          // degrees off straight-down; higher leans the plan view further forward
   flatDecor: true,          // false strips the painted 2D dressing and draws only real geometry
   tileSkin: '',             // '' = the procedural fields (render/tiles.js); otherwise a render/tileSkins.js id
+  uiTheme: 'vellum',        // interface style: 'vellum' | 'module' (TSR module cover) | 'classic'; ?ui= in the URL wins
+  renderScale: 'standard',  // 3D render resolution: 'standard' (1.5x desktop / 1x phone) | 'high' (2x) | 'native' (the screen's own)
   // Lighting layers (Settings -> Lighting). All on is the shipping look; each one off is a
   // diagnostic, not a style — they are here so a frame can be taken apart layer by layer.
   lightAmbient: true,       // the hemisphere fill

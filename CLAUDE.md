@@ -23,9 +23,19 @@ These are not style preferences. Each one has already cost a rebuild.
    the same dungeon and the same run — the QA bots and the screenshot tests depend on it. Fork a new
    stream with `seedFrom(seed, 'label')` rather than drawing from an existing one, or you shift every
    placement downstream of it.
-2. **One pixel grid.** `TEXELS_PER_TILE` is 32. The camera frustum is derived *from* an integer texel
-   size, not the other way round. Floors, props and the cast must all land on the same grid; the
-   moment one is resampled finer than the others it reads as two resolutions on one screen.
+2. **One pixel grid — for the PIXEL ART, not for the models.** `TEXELS_PER_TILE` is 32 and the camera
+   frustum is derived *from* an integer texel size, not the other way round. Flat art on quads — the
+   cast, the pickup sprites, the wall plates — is snapped to that grid in the vertex shader
+   (`pixelSnap`, `render/props.js`), because its texels should land on whole pixels.
+   **Solid modelled props are NOT snapped, by the owner's decision** (2026-09-16, "Straight 3d"): the
+   floor field is not snapped either, so a snapped prop held still for two or three frames and then
+   jumped a whole texel while the floor slid smoothly beneath it, and on screen the props wobbled and
+   melted whenever the camera followed the hero. Measured at the play camera, walking a hundredth of a
+   tile a step: floor 0.21px every step, the prop beside it 0, 0, 0.6, 0, 0, 0.6. Do not re-snap the
+   kit or Freeport meshes to "fix" the audit's PROPS `onGrid`/`edgeAlign` row — that row rewards the
+   very rounding that caused the bug. `?snap=rigid` and `?snap=vertex` restore the lattice for
+   comparison, and `?camsnap=1` snaps the CAMERA to whole texels (which also cures the stutter, by
+   stepping the whole frame in 2px units — rejected because scrolling then reads as chunky).
 3. **Two projections, one pixel grid.** The default is orthographic — a near-plan view, tilt
    user-adjustable around 17° — but `CameraRig.setProjection('perspective')` swaps in a real
    `PerspectiveCamera(35, …)` and emits `camera:projection`; the renderer must rebind to the camera
@@ -135,9 +145,13 @@ normal-map green flip live in `render/paintedTiles.js`; laying them into the fie
 The user called these tiles "what was missing" — prefer their assets (Dropbox `Dungeon Crawlers/…/Atlases/`,
 which also holds props, banners and decals) over generated or procedural art.
 
-**The UI** is the late-70s TSR module-cover theme (`src/ui/module.css`, `body.ui-module`); `?ui=classic` restores
-the old parchment HUD. Futura / Avenir Next Condensed are Apple system fonts — bundle open-licence equivalents
-(e.g. Jost, Barlow Condensed) before shipping to other machines.
+**The UI** is the user's "4a Worn vellum" design (2026-09-15): torn, slightly rotated vellum panels with burn and wear
+textures, Pirata One headings and IM Fell English body — `src/ui/vellum.css` (`body.ui-vellum`), helpers in
+`src/ui/theme.js` (ordinal words, roman numerals), textures in `src/assets/ui/`, fonts bundled in `src/assets/fonts/`
+(SIL OFL, see FONTS.md). The design board lives in the handoff zip ("Fargoal UI Explorations.dc.html", option 4a).
+`?ui=module` gives the TSR module-cover theme (`src/ui/module.css`; its Futura / Avenir fonts are Apple system fonts,
+not bundled) and `?ui=classic` the original parchment HUD. The panels' shadows are box-shadows on pseudo-elements,
+not `filter: drop-shadow` — keep it that way; Safari has already reloaded this page for memory use.
 
 **Saves:** the game built at boot (behind the title screen) is marked `placeholder` and nothing saves it; before
 that, every page load overwrote the player's quest (the title menu pauses the game and a pause autosaves).

@@ -1,0 +1,13 @@
+{
+  "appId": "com.chud575.fargoal",
+  "appName": "Sword of Fargoal",
+  "webDir": "dist",
+  "backgroundColor": "#000000",
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#000000",
+    "scrollEnabled": false,
+    "allowsLinkPreview": false,
+    "preferredContentMode": "mobile"
+  }
+}

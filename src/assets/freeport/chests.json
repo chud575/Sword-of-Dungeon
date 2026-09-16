@@ -1,0 +1,58 @@
+[
+ {
+  "id": "chest_a",
+  "bytes": 138048,
+  "tris": 2892,
+  "source": "ChestsPrinting1.STL components 2 (body) + 3 (lid)",
+  "foot": [
+   0.796,
+   0.557
+  ],
+  "height": 0.68,
+  "rimY": 0.398,
+  "hinge": [
+   0.389,
+   -0.275
+  ],
+  "inner": 0.303
+ },
+ {
+  "id": "chest_b",
+  "bytes": 146560,
+  "tris": 3172,
+  "source": "ChestsPrinting1.STL components 4 (body) + 5 (lid)",
+  "foot": [
+   0.779,
+   0.576
+  ],
+  "height": 0.676,
+  "rimY": 0.383,
+  "hinge": [
+   0.39,
+   -0.259
+  ],
+  "inner": 0.309
+ },
+ {
+  "id": "chest_long",
+  "bytes": 166384,
+  "tris": 3699,
+  "source": "LongChest_Printing1.STL components 1 (body) + 2 (lid)",
+  "foot": [
+   0.911,
+   0.406
+  ],
+  "height": 0.42,
+  "rimY": 0.264,
+  "hinge": [
+   0.244,
+   -0.225
+  ],
+  "inner": 0.172
+ },
+ {
+  "id": "coins",
+  "bytes": 54088,
+  "tris": 1316
+ }
+]

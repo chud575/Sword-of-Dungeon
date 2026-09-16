@@ -6,6 +6,7 @@ import './menus.css';
 import { DIFFICULTIES } from '../core/constants.js';
 import { listSaves, getHallOfFame, addHallOfFameEntry, dailySeed, todayUtc, dailyAttempted, markDailyAttempted, formatTime, saveSettings, DEFAULT_SETTINGS } from '../core/save.js';
 import { seedFrom } from '../core/rng.js';
+import { MOBILE } from '../core/mobile.js';
 import { logoSvg, swordRule, heading, ornament, skulls, ParticleLayer } from './menu-fx.js';
 
 const DIFF_INFO = {
@@ -195,6 +196,12 @@ export class Menus {
           <div class="mc-cover-title">Fargoal</div>
           <div class="mc-cover-sub">An adventure beneath the mountains · for character levels 1 and up</div>
         </div>
+        <div class="vl-cover">
+          <div class="vl-kicker">~ Dungeon Module F1 ~</div>
+          <div class="vl-t1">The Sword of</div>
+          <div class="vl-title">Fargoal</div>
+          <div class="vl-sub">An adventure beneath the mountains, for heroes of the first level and up</div>
+        </div>
       </div>
       <div class="menu"><div class="mc-band"><span class="mc-title">Begin the Quest</span></div><div class="menu-list"></div></div>
       <div class="tagline"></div>
@@ -332,6 +339,8 @@ export class Menus {
       { id: 'flatDecor', name: '2D decor', desc: 'off draws only the 3D props — no painted billboards, stains or cobwebs', type: 'toggle' },
       { id: 'screenShake', name: 'Screen shake', type: 'toggle' },
       { id: 'reduceFlash', name: 'Reduce flashes', desc: 'softer explosion and trap flashes', type: 'toggle' },
+      { id: 'uiTheme', name: 'Interface style', desc: 'worn vellum, TSR module cover or the classic HUD — the game saves and reloads to switch', type: 'choice', options: [['vellum', 'Worn vellum'], ['module', 'TSR module'], ['classic', 'Classic']] },
+      { id: 'renderScale', name: 'Render resolution', desc: 'sharper 3D edges, props and shadows at High or Native — uses more memory; step back down if the game reloads', type: 'choice', options: [['standard', 'Standard'], ['high', 'High'], ['native', 'Native']] },
       { id: 'fontScale', name: 'Interface scale', type: 'range', min: 0.8, max: 2, step: 0.1 },
       { id: 'colorblind', name: 'Colour-blind palette', desc: 'Okabe–Ito accents for log, map and spells', type: 'toggle' },
       { group: 'Lighting' },
@@ -355,6 +364,27 @@ export class Menus {
     let sel = 0; // index into opts
     const html = heading({ eyebrow: 'Applied immediately · saved in this browser', title: 'Settings' }) + `<div class="scroll" id="settings-rows"></div><div class="hint-bar"><kbd>↑↓</kbd> choose &nbsp; <kbd>←→</kbd> adjust &nbsp; <kbd>Enter</kbd> toggle &nbsp; <kbd>Esc</kbd> or <span class="tapx">✕</span> close</div>`;
     const apply = () => { saveSettings(S); this.app.applySettings(S); };
+    // The interface style is chosen before any panel is built (main.js), so a change saves the quest and reloads. A
+    // ?ui= in the address would override the saved choice, so it is dropped from the URL on the way.
+    const bootTheme = S.uiTheme;
+    const reloadForTheme = () => {
+      if (S.uiTheme === bootTheme) return;
+      saveSettings(S);
+      try { this.app.save(); } catch { /* nothing to save */ }
+      const url = new URL(location.href); url.searchParams.delete('ui');
+      location.replace(url.toString());
+    };
+    // The real drawing size for a render-resolution mode on THIS screen. High and Native are the same
+    // pixel count on a 2x display (most Macs) and only part on 3x phones — say so rather than look broken.
+    const renderScaleNote = (mode) => {
+      const dpr = window.devicePixelRatio || 1;
+      const ratio = (m) => Math.min(dpr, m === 'native' ? 3 : m === 'high' ? 2 : MOBILE.mobile ? 1 : 1.5);
+      const pr = ratio(mode);
+      const px = `${Math.round(window.innerWidth * pr)}×${Math.round(window.innerHeight * pr)}`;
+      const same = mode !== 'standard' && ratio('high') === ratio('native') ? ' · High = Native here' : '';
+      return ` · ${px}${same}`;
+    };
+    const cycleChoice = (r, d) => { const k = r.options.findIndex((o) => o[0] === S[r.id]); S[r.id] = r.options[((k < 0 ? 0 : k) + d + r.options.length) % r.options.length][0]; apply(); render(); this.bus.emit('sfx:ui', { kind: 'click' }); if (r.id === 'uiTheme') reloadForTheme(); };
     const pct = (r) => Math.round(((S[r.id] - r.min) / (r.max - r.min)) * 100) + '%';
     const num = (r) => (r.id === 'fontScale' ? Math.round(S[r.id] * 100) + '%' : r.id === 'cameraTilt' ? `${S[r.id]}\u00b0` : String(Math.round(S[r.id] * 100)));
     const render = () => {
@@ -365,20 +395,23 @@ export class Menus {
         if (r.type === 'range') v = `<input type="range" min="${r.min}" max="${r.max}" step="${r.step}" value="${S[r.id]}" data-id="${r.id}" style="--v:${pct(r)}"><span class="num">${num(r)}</span>`;
         else if (r.type === 'toggle') v = `<button class="toggle${S[r.id] ? ' on' : ''}" data-id="${r.id}" aria-label="${r.name}"></button>`;
         else if (r.type === 'text') v = `<input type="text" maxlength="16" value="${esc(S[r.id])}" data-id="${r.id}" autocomplete="off">`;
+        else if (r.type === 'choice') v = `<button class="btn choice" data-choice="${r.id}">‹ ${esc((r.options.find((o) => o[0] === S[r.id]) || r.options[0])[1])}${r.id === 'renderScale' ? esc(renderScaleNote(S[r.id])) : ''} ›</button>`;
         else v = `<button class="btn" data-id="${r.id}">Reset</button>`;
         return `<div class="setting${i === opts[sel] ? ' selected' : ''}" data-i="${i}"><div class="sn">${r.name}${r.desc ? `<small>${r.desc}</small>` : ''}</div><div class="sv">${v}</div></div>`;
       }).join('');
       box.querySelectorAll('input[type=range]').forEach((inp) => inp.addEventListener('input', () => { const r = rows.find((x) => x.id === inp.dataset.id); S[r.id] = Number(inp.value); apply(); inp.style.setProperty('--v', pct(r)); inp.nextElementSibling.textContent = num(r); }));
       box.querySelectorAll('.toggle').forEach((b) => b.addEventListener('click', () => { S[b.dataset.id] = !S[b.dataset.id]; apply(); render(); this.bus.emit('sfx:ui', { kind: 'click' }); }));
       box.querySelectorAll('input[type=text]').forEach((inp) => inp.addEventListener('change', () => { S[inp.dataset.id] = inp.value.trim() || 'Warrior'; apply(); }));
-      box.querySelectorAll('.btn[data-id=reset]').forEach((b) => b.addEventListener('click', () => { Object.assign(S, DEFAULT_SETTINGS); apply(); render(); }));
+      box.querySelectorAll('.btn[data-choice]').forEach((b) => b.addEventListener('click', () => cycleChoice(rows.find((x) => x.id === b.dataset.choice), 1)));
+      box.querySelectorAll('.btn[data-id=reset]').forEach((b) => b.addEventListener('click', () => { Object.assign(S, DEFAULT_SETTINGS); apply(); render(); reloadForTheme(); }));
       box.querySelectorAll('.setting').forEach((row) => row.addEventListener('mouseenter', () => { const k = opts.indexOf(Number(row.dataset.i)); if (k >= 0) sel = k; box.querySelectorAll('.setting').forEach((x) => x.classList.toggle('selected', x === row)); }));
     };
     const adjust = (d) => {
       const r = rows[opts[sel]];
       if (r.type === 'range') { S[r.id] = Math.round(Math.max(r.min, Math.min(r.max, S[r.id] + d * r.step)) * 100) / 100; apply(); render(); this.bus.emit('sfx:ui', { kind: 'hover' }); }
       else if (r.type === 'toggle') { S[r.id] = !S[r.id]; apply(); render(); this.bus.emit('sfx:ui', { kind: 'click' }); }
-      else if (r.type === 'button') { Object.assign(S, DEFAULT_SETTINGS); apply(); render(); }
+      else if (r.type === 'choice') cycleChoice(r, d);
+      else if (r.type === 'button') { Object.assign(S, DEFAULT_SETTINGS); apply(); render(); reloadForTheme(); }
       else if (r.type === 'text') { const inp = entry.panel.querySelector('input[type=text]'); if (inp) inp.focus(); }
     };
     const entry = this.openModal({

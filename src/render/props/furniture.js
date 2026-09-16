@@ -51,6 +51,7 @@ import {
 } from '../props.js';
 import { makePropModel, modelBounds } from './models.js';
 import { buildKitProp, isKitProp } from './kitProps.js';
+import { buildFreeportProp } from './freeport.js';
 
 // ------------------------------------------------------------------------------- the materials
 // One base colour per material in the dungeon, shared by every piece that is made of it, so the
@@ -982,6 +983,10 @@ export function buildFurniture(type, o = {}) {
   if (!f) return null;
   // THE SOLID PIECE FIRST (props/kitProps.js). The painted billboard below stays as the art the plates
   // and tests read and as the fallback for a type the kit does not cut yet.
+  // THE OWNER'S OWN MODELS FIRST (props/freeport.js): the imported Freeport chests, braziers, cupboard
+  // and tables, unless `?props=kit` asks for the kit pieces they replace.
+  const imported = buildFreeportProp(type, o, f);
+  if (imported) return imported;
   const solid = buildKitProp(type, o, f);
   if (solid) return solid;
   const v = Math.max(0, Math.min(f.v - 1, o.variant | 0));

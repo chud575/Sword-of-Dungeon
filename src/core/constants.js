@@ -55,18 +55,28 @@ export function monsterPhaseSeconds(depth) {
   return Math.max(0.2, (20 - depth) / 6);
 }
 
+/** Share of the hero's 6 tiles/s a hunting monster moves at on level 1, and from level 15 down [designed]. */
+export const MONSTER_PACE_EARLY = 0.37;
+export const MONSTER_PACE_DEEP = 0.95;
+
 /**
  * How fast a monster moves when it means it, in tiles per second [designed, after the 2009 iOS port].
  * The C64 moved monsters once every `20 - level` polls, which the old mapping turned into one tile per
  * monsterPhaseSeconds — 3.2 s on level 1, seventeen times slower than the hero, so any monster could be
- * walked round at leisure. The iOS port closes on you at close to walking pace (measured off its
- * footage: an ogre covers two tiles in half a second). So monsters start a little under the player's
- * 6 tiles/s and reach it by the sword levels; AI.pace still slows the ones only wandering or searching.
- * The PHASE above is not retired: it is still the clock for cooldowns, breath charge-ups and staggers.
+ * walked round at leisure. The iOS port closes on you at close to walking pace by the deep levels.
+ * But at 60-90% of walking pace from level 1 a monster always reached you and struck first, so
+ * the curve starts low: 2.2 tiles/s on level 1 (37% of the hero, a dire wolf at x1.5 still well under
+ * him), rising on an ease-in curve to 5.7 tiles/s (95%) at level 15 and level from there on. It meets the
+ * deep value with the same slope as the earlier straight line, and never runs ahead of that line, so no
+ * depth moves faster than before and nothing from level 15 down moves slower.
+ * AI.pace still slows the ones only wandering or searching.
+ * The PHASE above is not retired: it is still the clock for cooldowns, breath charge-ups, staggers,
+ * flank blows and the wind-up before a monster's first blow (AI.engageWindup).
  */
 export function monsterTilesPerSecond(depth) {
   const k = Math.max(0, Math.min(1, (depth - 1) / 14));
-  return 6 * (0.62 + 0.33 * k);
+  const line = 0.62 + (MONSTER_PACE_DEEP - 0.62) * k;            // the previous straight line, 62% -> 95%
+  return 6 * (line - (0.62 - MONSTER_PACE_EARLY) * (1 - k) ** 2);
 }
 
 const CLASSIC = {

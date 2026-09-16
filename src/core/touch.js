@@ -3,6 +3,7 @@
 // first touch, with ?touch=1, or when the setting forces it. Pure DOM; emits through callbacks so
 // core/input.js stays the only thing that talks to the bus.
 import { el, uiRoot } from './qolDom.js';
+import { MOBILE } from './mobile.js';
 
 const DIRS = [
   { a: 0, dx: 0, dy: -1, g: '▲' }, { a: 45, dx: 1, dy: -1, g: '◥', diag: true }, { a: 90, dx: 1, dy: 0, g: '▶' }, { a: 135, dx: 1, dy: 1, g: '◢', diag: true },
@@ -45,7 +46,7 @@ export class TouchPad {
       cluster.appendChild(btn); this.buttons[b.id] = btn;
     }
     root.appendChild(cluster);
-    root.appendChild(el('div', 'hint', 'Hold the pad to walk · tap the floor to travel · tap yourself to act'));
+    root.appendChild(el('div', 'hint', (MOBILE.mobile ? 'Hold the pad to walk · tap yourself to act · tap a monster beside you to attack' : 'Hold the pad to walk · tap the floor to travel · tap yourself to act')));
     host.appendChild(root);
     this.root = root; this.pad = pad; this.thumb = thumb;
 
@@ -109,7 +110,8 @@ export function wantsTouch(setting = 'auto', touched = false) {
   if (coarseDevice === null) {
     coarseDevice = false;
     try {
-      if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('touch') === '1') coarseDevice = true;
+      if (MOBILE.mobile) coarseDevice = true; // phones and the iOS app: on from the start, not on the first touch
+      else if (typeof location !== 'undefined' && new URLSearchParams(location.search).get('touch') === '1') coarseDevice = true;
       else if (typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches && !matchMedia('(pointer: fine)').matches) coarseDevice = true;
     } catch { /* ignore */ }
   }

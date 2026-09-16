@@ -12,6 +12,9 @@ import { Hud } from './ui/hud.js';
 import { PanelCollapse } from './ui/collapse.js';
 import { Surround } from './render/surround.js';
 import { loadPaintedTiles } from './render/paintedTiles.js';
+import { freeportReady } from './render/props/freeport.js';
+import { setCleanFieldTexels } from './render/floorField.js';
+import { MOBILE, MOBILE_FIELD_TEXELS, MOBILE_BLOOM_SCALE } from './core/mobile.js';
 import { TILE_SKINS, SKIN_IDS } from './render/tileSkins.js';
 import { TorchColorPicker, torchColorFor } from './ui/torchColor.js';
 import { MessageLog } from './ui/log.js';
@@ -19,13 +22,38 @@ import { InventoryPanel } from './ui/inventory.js';
 import { Minimap } from './ui/minimap.js';
 import { Menus } from './ui/menus.js';
 import { Tooltip } from './ui/tooltip.js';
-import './ui/module.css'; // last, so the module-cover theme wins the cascade over every panel sheet
+import './ui/module.css'; // after the panel sheets, so the module-cover theme wins the cascade over them
+import './ui/vellum.css'; // last: the default "worn vellum" theme
+import './ui/phone.css'; // after every theme: the theme-agnostic phone rules (body.mobile / html.mobile)
 
 const params = new URLSearchParams(location.search);
-// UI theme: the late-70s "module cover" look is the default; ?ui=classic restores the parchment-and-brass
-// HUD for side-by-side comparison. Set before any panel is built: templates and the minimap's palette
-// read it at construction.
-document.body.classList.toggle('ui-module', params.get('ui') !== 'classic');
+// UI theme: "4a Worn vellum" is the default; ?ui=module gives the late-70s module cover and ?ui=classic the
+// parchment-and-brass HUD. Set before any panel is built: templates and the minimap's palette read it at
+// construction (ui/theme.js).
+// The saved Settings choice (Display → Interface style) applies when the URL does not name one — which is how the
+// native iOS app, which cannot pass a query string, gets the other themes.
+const UI_THEMES = ['vellum', 'module', 'classic'];
+const uiParam = params.get('ui');
+const uiSaved = loadSettings().uiTheme;
+const uiThemeName = UI_THEMES.includes(uiParam) ? uiParam : UI_THEMES.includes(uiSaved) ? uiSaved : 'vellum';
+document.body.classList.toggle('ui-vellum', uiThemeName === 'vellum');
+document.body.classList.toggle('ui-module', uiThemeName === 'module');
+// THE MOBILE PROFILE (core/mobile.js): phones and the Capacitor shell get the low render quality, a 32-texel floor
+// field, half-resolution bloom, touch controls and the compact HUD (body.mobile: ui/phone.css, plus the phone blocks at the end of vellum.css and module.css). Desktop is unchanged.
+document.documentElement.classList.toggle('mobile', MOBILE.mobile);
+document.body.classList.toggle('mobile', MOBILE.mobile);
+document.body.classList.toggle('native', MOBILE.native);
+const fieldParam = params.get('field'); // ?field=32|64 overrides the floor field density on any device
+const fieldTexels = setCleanFieldTexels(fieldParam === '32' || fieldParam === '64' ? Number(fieldParam) : MOBILE.mobile ? MOBILE_FIELD_TEXELS : 64);
+if (MOBILE.mobile) {
+  // iOS ignores user-scalable=no: Safari's pinch and double-tap zoom are stopped here instead (the canvas's own
+  // two-finger pinch is a pointer gesture in core/input.js and is not affected)
+  for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
+  let lastTouchEnd = 0;
+  document.addEventListener('touchend', (e) => { const now = e.timeStamp; if (now - lastTouchEnd < 350 && e.target === canvasEl()) e.preventDefault(); lastTouchEnd = now; }, { passive: false });
+  document.addEventListener('contextmenu', (e) => { if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)) e.preventDefault(); });
+}
+function canvasEl() { return document.getElementById('game-canvas'); }
 const debugMode = params.get('debug') === '1';
 const seedParam = params.get('seed');
 let currentSeed = seedParam !== null && seedParam !== '' ? (Number.isFinite(Number(seedParam)) ? Number(seedParam) : seedParam) : 42;
@@ -33,7 +61,7 @@ const difficultyParam = params.get('difficulty') || 'standard';
 const biomeParam = params.get('biome'); // ?biome=forest: the first level is the outdoor forest (prototype)
 
 const canvas = document.getElementById('game-canvas');
-const renderer = new Renderer({ canvas, bus, quality: params.get('quality') || 'high' }); // ?quality=low: cheaper fill for bots / weak GPUs
+const renderer = new Renderer({ canvas, bus, quality: params.get('quality') || (MOBILE.mobile ? 'low' : 'high'), bloomScale: MOBILE.mobile ? MOBILE_BLOOM_SCALE : 1 }); // ?quality=low: cheaper fill for bots / weak GPUs / phones
 const surround = new Surround({ scene: renderer.scene, bus });
 const input = new Input({ canvas, bus, pickTile: (x, y) => renderer.pickTile(x, y) });
 const DEFAULT_YAW = renderer.cameraRig.yaw;
@@ -128,6 +156,7 @@ const app = {
     renderer.cameraRig.shakeEnabled = s.screenShake !== false;
     renderer.cameraRig.setTilt(s.cameraTilt ?? 17);
     renderer.setCameraProjection(s.perspectiveCamera ? 'perspective' : 'orthographic');
+    renderer.setResolution(s.renderScale || 'standard');
     renderer.dungeon.setModelsOnly(s.flatDecor === false);
     renderer.setTileSkin(s.tileSkin || null);
     renderer.setLanternColor(torchColorFor(s.torchColor).hex);
@@ -367,12 +396,15 @@ const debug = {
 };
 registerScenarios(debug);
 
-window.__game = { get game() { return game; }, renderer, ui, debug, bus };
+window.__game = { get game() { return game; }, renderer, ui, debug, bus, mobile: MOBILE, fieldTexels };
 
 // ------------------------------------------------------------------ start
 // the hand-painted tiles are decoded before the first level is built; on any failure the floor falls back
 // to procedural stone (render/paintedTiles.js)
-await loadPaintedTiles(64);
+await loadPaintedTiles(fieldTexels);
+// ...and so are the imported Freeport props' textures (render/props/freeport.js), capped so a browser that
+// cannot decode WebP still boots
+await Promise.race([freeportReady(), new Promise((r) => setTimeout(r, 4000))]);
 newGame(currentSeed);
 // THE BOOT GAME IS NOBODY'S QUEST. It stands behind the title screen so the renderer has a level; the title menu
 // pauses it, and a pause autosaves — so every page load used to write this empty level-1 hero over the player's
@@ -384,3 +416,9 @@ window.__GAME_READY = true;
 requestAnimationFrame(frame);
 const scenarioParam = params.get('scenario');
 if (debugMode && scenarioParam) debug.runScenario(scenarioParam, { seed: currentSeed });
+
+// HOME-SCREEN WEB APP: the offline cache (public/sw.js) is registered only in a production build served over http(s),
+// never by the dev server (it would serve stale modules) and never inside the Capacitor app (the files are local).
+if (import.meta.env.PROD && !MOBILE.native && 'serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  navigator.serviceWorker.register('./sw.js').catch((e) => console.warn('service worker registration failed', e));
+}

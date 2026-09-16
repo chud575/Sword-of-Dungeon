@@ -680,3 +680,224 @@ body.ui-module .torch-pick .tp-dot, body.ui-module .torch-pick .tp-sw.on .tp-dot
   body.ui-module #ui-root #hud-status { top: calc(12px + 12.6rem); }
   body.ui-module #ui-root .slot { width: 3.9rem; }
 }
+
+/* ==========================================================================================
+   PHONE — the module cover on a phone (body.mobile, set by main.js from core/mobile.js). The same
+   layout decisions as the phone block at the end of vellum.css, in print dress. The theme-agnostic
+   half (no zoom / selection, the type scale, touch pad placement, scrolling dialogs) is ui/phone.css.
+   Every rule here is under body.mobile, so a desktop browser never sees one of them.
+   ========================================================================================== */
+/* safe areas: every corner panel is inset by the device's safe area */
+body.mobile.ui-module #ui-root #hud-card { top: calc(12px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); }
+body.mobile.ui-module #ui-root #hud-status { left: calc(12px + env(safe-area-inset-left, 0px)); }
+body.mobile.ui-module #ui-root #hud-depth { top: calc(10px + env(safe-area-inset-top, 0px)); }
+body.mobile.ui-module #ui-root #hud-hotbar { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+body.mobile.ui-module #ui-root #hud-quick { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
+body.mobile.ui-module #ui-root #log { bottom: calc(10px + env(safe-area-inset-bottom, 0px)); left: calc(10px + env(safe-area-inset-left, 0px)); }
+body.mobile.ui-module #ui-root #minimap { top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(10px + env(safe-area-inset-right, 0px)); }
+body.mobile.ui-module #ui-root #hud-card-chip { top: calc(12px + env(safe-area-inset-top, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); }
+body.mobile.ui-module #ui-root #log-chip { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); left: calc(12px + env(safe-area-inset-left, 0px)); }
+body.mobile.ui-module #ui-root #minimap-chip { top: calc(12px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); }
+body.mobile.ui-module #ui-root #hud-quick-chip { bottom: calc(12px + env(safe-area-inset-bottom, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); }
+body.mobile.ui-module #ui-root #title::after { inset: calc(.9rem + env(safe-area-inset-top, 0px)) calc(.9rem + env(safe-area-inset-right, 0px)) calc(.9rem + env(safe-area-inset-bottom, 0px)) calc(.9rem + env(safe-area-inset-left, 0px)); }
+
+/* the level-up flash on an orange heading: ink on band, not band on band */
+@keyframes mcFlashInk { 0%, 49% { background: var(--mc-ink); color: var(--mc-band); } 50%, 100% { background: transparent; color: inherit; } }
+
+/* ------------------------------------------------------------------------------------------
+   THE PHONE LAYOUT — a landscape phone is ~930x430 CSS px (874x402 on an iPhone 17 Pro). The four
+   corner panels trimmed to what a glance needs, Chronicle and Commands folded to orange tabs along
+   the top edge (ui/collapse.js folds them by default on mobile), the spells bar across the bottom
+   between the thumb pad and the action cluster, every tap target at least 36px, and no print
+   smaller than about 8px.
+   ------------------------------------------------------------------------------------------ */
+@media (max-height: 540px) {
+  /* Adventurer: top left; the name row becomes the band */
+  body.mobile.ui-module #ui-root #hud-card { top: calc(.45rem + env(safe-area-inset-top, 0px)); left: calc(.6rem + env(safe-area-inset-left, 0px)); width: 16.5rem; }
+  body.mobile.ui-module #ui-root #hud-card .mc-band { display: none; }
+  body.mobile.ui-module #ui-root #hud-card .mc-body { padding: 0 .6rem .45rem; }
+  body.mobile.ui-module #ui-root #hud-card .mc-head { align-items: center; gap: .3rem; margin: 0 -.6rem .05rem; padding: .24rem 32px .14rem .6rem; background: var(--mc-band); }
+  body.mobile.ui-module #ui-root #hud-card .name { font-size: 1.15rem; letter-spacing: .03em; color: var(--mc-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.mobile.ui-module #ui-root #hud-card .medal { gap: .25rem; padding: 0; }
+  body.mobile.ui-module #ui-root #hud-card .medal .lvl { font-size: .72rem; letter-spacing: .1em; color: var(--mc-ink); }
+  body.mobile.ui-module #ui-root #hud-card .medal .lv { font-size: 1.2rem; color: var(--mc-ink); }
+  body.mobile.ui-module #ui-root #hud-card .medal.levelup { animation: mcFlashInk .22s steps(1) 4; }
+  body.mobile.ui-module #ui-root #hud-card .medal.levelup .lv, body.mobile.ui-module #ui-root #hud-card .medal.levelup .lvl { color: inherit; }
+  body.mobile.ui-module #ui-root #hud-card.low .mc-head { background: var(--mc-red); }
+  body.mobile.ui-module #ui-root #hud-card.low :is(.name, .medal .lv, .medal .lvl) { color: var(--mc-paper); }
+  body.mobile.ui-module #ui-root #hud-card > .collapse-handle { top: 0; right: 0; width: 34px; height: 2.1rem; }
+  body.mobile.ui-module #ui-root #hud-card .gauge { margin-top: .3rem; }
+  body.mobile.ui-module #ui-root #hud-card .gauge .lab { margin-bottom: .12rem; }
+  body.mobile.ui-module #ui-root #hud-card .gauge .frame { height: .85rem; }
+  body.mobile.ui-module #ui-root #hud-card .mc-lab { font-size: .8rem; letter-spacing: .12em; }
+  body.mobile.ui-module #ui-root #hud-card .mc-val { font-size: 1.15rem; }
+  body.mobile.ui-module #ui-root #hud-card .mc-stats { margin-top: .4rem; }
+  body.mobile.ui-module #ui-root #hud-card .mc-stats b { font-size: 1.05rem; }
+  body.mobile.ui-module #ui-root #hud-card .gold { font-size: .8rem; }
+  body.mobile.ui-module #ui-root #hud-status { top: calc(11rem + env(safe-area-inset-top, 0px)); left: calc(.6rem + env(safe-area-inset-left, 0px)); width: 16.5rem; gap: .3rem; }
+  body.mobile.ui-module #ui-root #hud-card.is-collapsed ~ #hud-status { top: calc(4.4rem + env(safe-area-inset-top, 0px)); }
+  body.mobile.ui-module #ui-root .status { padding: .2rem .5rem .14rem .35rem; font-size: .78rem; letter-spacing: .1em; }
+
+  /* Level plate: top centre, the level and band only, under a thin orange strip */
+  body.mobile.ui-module #ui-root #hud-depth { top: calc(.35rem + env(safe-area-inset-top, 0px)); min-width: 13rem; padding: 0 0 .4rem; }
+  body.mobile.ui-module #ui-root #hud-depth .mc-band { height: .5rem; padding: 0; font-size: 0; }
+  body.mobile.ui-module #ui-root #hud-depth .mc-band .mc-title { display: none; }
+  body.mobile.ui-module #ui-root #hud-depth .depth { margin-top: .3rem; font-size: 1.6rem; }
+  body.mobile.ui-module #ui-root #hud-depth .band { margin-top: .2rem; font-size: .8rem; letter-spacing: .18em; }
+  body.mobile.ui-module #ui-root #hud-depth .timer { margin: .3rem .6rem 0; padding-top: .25rem; }
+  body.mobile.ui-module #ui-root #hud-depth .timer .cap { font-size: .75rem; }
+  body.mobile.ui-module #ui-root #hud-depth .timer .t { font-size: 1.25rem; }
+  body.mobile.ui-module #ui-root #hud-depth .fuse { height: .75rem; margin-top: .25rem; }
+
+  /* The map: top right, band kept (it carries the charted share and the level), no legend */
+  body.mobile.ui-module #ui-root #minimap { top: calc(.45rem + env(safe-area-inset-top, 0px)); right: calc(.6rem + env(safe-area-inset-right, 0px)); width: 15rem; }
+  body.mobile.ui-module #ui-root #minimap .mc-band { padding-right: 36px; font-size: .8rem; }
+  body.mobile.ui-module #ui-root #minimap .mc-meta { font-size: .75rem; }
+  body.mobile.ui-module #ui-root #minimap > .collapse-handle { top: 0; right: 0; width: 34px; height: 1.9rem; }
+  body.mobile.ui-module #ui-root #minimap .wrap { margin: .35rem .4rem .4rem; }
+  body.mobile.ui-module #ui-root #minimap .legend { display: none; }
+  body.mobile.ui-module #ui-root #minimap .toast { font-size: .72rem; }
+
+  /* Spells & Items: bottom centre, the band a thin strip, no key hints (there is no keyboard) */
+  body.mobile.ui-module #ui-root #hud-hotbar {
+    bottom: calc(.3rem + env(safe-area-inset-bottom, 0px)); padding: .45rem 0 0;
+    max-width: calc(100vw - 2 * (11.5rem + max(18px, env(safe-area-inset-left, 0px))));
+  }
+  body.mobile.ui-module #ui-root #hud-hotbar .mc-band { height: .45rem; padding: 0; font-size: 0; }
+  body.mobile.ui-module #ui-root #hud-hotbar .mc-band .mc-title { display: none; }
+  body.mobile.ui-module #ui-root #hud-hotbar > .collapse-handle { display: none; }
+  body.mobile.ui-module #ui-root .slot { width: 4rem; min-width: 36px; height: auto; min-height: 40px; padding: .35rem 0 .25rem; gap: .15rem; grid-template-areas: 'glyph glyph' 'nm nm'; }
+  body.mobile.ui-module #ui-root .slot .key { display: none; }
+  body.mobile.ui-module #ui-root .slot .cnt { top: 1px; right: 3px; font-size: .85rem; }
+  body.mobile.ui-module #ui-root .slot .glyph { width: 1.6rem; height: 1.6rem; }
+  body.mobile.ui-module #ui-root .slot .glyph .ico { width: 1.55rem; height: 1.55rem; }
+  body.mobile.ui-module #ui-root .slot .nm { font-size: .76rem; letter-spacing: .05em; }
+
+  /* Chronicle and Commands: orange tabs along the top edge, and when opened they unfold from there */
+  body.mobile.ui-module #ui-root #log-chip, body.mobile.ui-module #ui-root #log {
+    top: calc(.45rem + env(safe-area-inset-top, 0px)); bottom: auto; left: calc(17.8rem + env(safe-area-inset-left, 0px));
+  }
+  body.mobile.ui-module #ui-root #log { width: 15rem; max-height: 13rem; }
+  body.mobile.ui-module #ui-root #log:hover, body.mobile.ui-module #ui-root #log.expanded { max-height: 20rem; }
+  body.mobile.ui-module #ui-root :is(#log, #hud-quick) .mc-band { padding-right: 36px; font-size: .8rem; }
+  body.mobile.ui-module #ui-root :is(#log, #hud-quick) > .collapse-handle { top: 0; right: 0; width: 34px; height: 1.9rem; }
+  body.mobile.ui-module #ui-root #log .line { font-size: .95rem; line-height: 1.3; }
+  body.mobile.ui-module #ui-root #log .line .t { font-size: .7rem; }
+  body.mobile.ui-module #ui-root #log .line.shout { font-size: .88rem; }
+  body.mobile.ui-module #ui-root #log .foot { font-size: .7rem; }
+  body.mobile.ui-module #ui-root #hud-quick-chip, body.mobile.ui-module #ui-root #hud-quick {
+    top: calc(.45rem + env(safe-area-inset-top, 0px)); bottom: auto; right: calc(16.4rem + env(safe-area-inset-right, 0px));
+  }
+  body.mobile.ui-module #ui-root #hud-quick { width: 11rem; min-width: 0; }
+  body.mobile.ui-module #ui-root #hud-quick .qb { min-height: 36px; align-items: center; padding-top: .2rem; padding-bottom: 0; font-size: .92rem; }
+  body.mobile.ui-module #ui-root #hud-quick .qb kbd { display: none; }
+  body.mobile.ui-module #ui-root .collapsed-chip {
+    min-height: 36px; padding: .2rem .85rem 0; gap: .45rem; font-size: .85rem; letter-spacing: .12em;
+    background: var(--mc-band); color: var(--mc-ink); border-color: var(--mc-paper);
+  }
+  body.mobile.ui-module #ui-root .collapsed-chip .ico { color: var(--mc-ink); }
+  body.mobile.ui-module #ui-root .collapsed-chip:hover, body.mobile.ui-module #ui-root .collapsed-chip:active { background: var(--mc-band-hi); color: var(--mc-ink); }
+  body.mobile.ui-module #ui-root .collapsed-chip:hover .ico { color: var(--mc-ink); }
+  /* the character card and the map fold to their own corners, like the desktop */
+  body.mobile.ui-module #ui-root #hud-card-chip { top: calc(.45rem + env(safe-area-inset-top, 0px)); left: calc(.6rem + env(safe-area-inset-left, 0px)); }
+  body.mobile.ui-module #ui-root #minimap-chip { top: calc(.45rem + env(safe-area-inset-top, 0px)); right: calc(.6rem + env(safe-area-inset-right, 0px)); }
+
+  body.mobile.ui-module #ui-root #hud-banner { top: max(30%, 9rem); min-width: 0; max-width: calc(100vw - 2rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)); padding-bottom: .5rem; }
+  body.mobile.ui-module #ui-root #hud-banner .mc-band { font-size: .9rem; }
+  body.mobile.ui-module #ui-root #hud-banner .why { margin-top: .45rem; padding: 0 1rem; font-size: 1.1rem; }
+  body.mobile.ui-module #ui-root #hud-banner .hint { font-size: .78rem; }
+
+  /* the thumb pad and action buttons keep their print colours (above); only the labels grow */
+  body.mobile.ui-module #ui-root .qol-touch .tb { font-size: .6rem; letter-spacing: .02em; }
+  body.mobile.ui-module #ui-root .qol-touch .tb.act { font-size: .68rem; letter-spacing: .06em; }
+  body.mobile.ui-module #ui-root .qol-touch .tb .g { font-size: 1.3rem; }
+
+  /* ---------- dialogs: tighter gutters, bigger print, 36px rows ---------- */
+  body.mobile.ui-module #ui-root .modal.mx { --mpad: 1.1rem; padding-bottom: .8rem; }
+  body.mobile.ui-module #ui-root #inventory.modal { --mpad: 1rem; padding-bottom: .7rem; }
+  body.mobile.ui-module #ui-root :is(.modal .mhead h1, .modal.mx .mhead h1, #inventory .mhead h1) { min-height: 36px; padding: .22rem 3rem .12rem; font-size: 1.3rem; }
+  body.mobile.ui-module #ui-root .modal .modal-close { width: 36px; height: 36px; }
+  body.mobile.ui-module #ui-root .modal .mhead .eyebrow { margin-top: .45rem; font-size: .8rem; }
+  body.mobile.ui-module #ui-root .modal .mhead .subtitle { font-size: .9rem; }
+  body.mobile.ui-module #ui-root :is(.modal h2, .modal.mx h2, #inventory h2) { margin: .7rem 0 .3rem; font-size: .82rem; }
+  body.mobile.ui-module #ui-root :is(kbd, .modal.mx kbd, .px kbd, .hint-bar kbd, .keys kbd) { font-size: .7rem; }
+  body.mobile.ui-module #ui-root :is(.hint-bar, .modal.mx .hint-bar) { font-size: .72rem; }
+  body.mobile.ui-module #ui-root :is(.btn, .modal.mx .btn) { min-height: 36px; font-size: .85rem; }
+  body.mobile.ui-module #ui-root :is(.btn.primary, .modal.mx .btn.primary) { font-size: .9rem; }
+  body.mobile.ui-module #ui-root .modal.mx .menu-list { margin-top: .6rem; }
+  body.mobile.ui-module #ui-root .modal.mx .menu-item { min-height: 36px; align-items: center; padding: .2rem .85rem 0; font-size: 1rem; }
+  body.mobile.ui-module #ui-root .modal.mx .menu-item small { font-size: .82rem; }
+  body.mobile.ui-module #ui-root .modal.mx .menu-item kbd { display: none; }
+  /* new quest */
+  body.mobile.ui-module #ui-root .modal.mx .card { padding: .55rem .7rem .5rem; }
+  body.mobile.ui-module #ui-root .modal.mx .card .cn { font-size: .95rem; }
+  body.mobile.ui-module #ui-root .modal.mx .card .cd { font-size: .85rem; }
+  body.mobile.ui-module #ui-root .modal.mx .card .ct { font-size: .72rem; }
+  body.mobile.ui-module #ui-root .modal.mx .field > span { font-size: .78rem; }
+  body.mobile.ui-module #ui-root .modal.mx :is(.field, .setting) input[type=text] { min-height: 36px; font-size: 1rem; }
+  /* pause */
+  body.mobile.ui-module #ui-root .modal.mx .vital .l { font-size: .75rem; }
+  body.mobile.ui-module #ui-root .modal.mx .vital .v { font-size: 1.2rem; }
+  /* settings */
+  body.mobile.ui-module #ui-root .modal.mx .setting { min-height: 36px; }
+  body.mobile.ui-module #ui-root .modal.mx .setting .sn { font-size: .95rem; }
+  body.mobile.ui-module #ui-root .modal.mx .setting .sn small { font-size: .8rem; }
+  body.mobile.ui-module #ui-root .modal.mx .setting .sv .num { font-size: .95rem; }
+  /* help, death, victory, hall */
+  body.mobile.ui-module #ui-root .modal.mx .keys .k { font-size: .9rem; }
+  body.mobile.ui-module #ui-root .modal.mx .hero-stats .l { font-size: .75rem; }
+  body.mobile.ui-module #ui-root .modal.mx .minor-stats { font-size: .85rem; }
+  body.mobile.ui-module #ui-root .modal.mx table.hall th { font-size: .75rem; }
+
+  /* inventory */
+  body.mobile.ui-module #ui-root #inventory .name { font-size: 1.2rem; }
+  body.mobile.ui-module #ui-root #inventory .title { font-size: .82rem; }
+  body.mobile.ui-module #ui-root #inventory .gauge .lab .cap { font-size: .75rem; }
+  body.mobile.ui-module #ui-root #inventory .gauge .lab .num { font-size: .9rem; }
+  body.mobile.ui-module #ui-root #inventory .cr { font-size: .88rem; }
+  body.mobile.ui-module #ui-root #inventory .foot-meta { font-size: .7rem; }
+  body.mobile.ui-module #ui-root #inventory h2 small { font-size: .72rem; }
+  body.mobile.ui-module #ui-root #inventory .it .nm { font-size: .74rem; }
+  body.mobile.ui-module #ui-root #inventory .it .st { font-size: .74rem; }
+  body.mobile.ui-module #ui-root #inventory .it .key { display: none; }
+  body.mobile.ui-module #ui-root #inventory .it .cnt { font-size: .7rem; }
+  body.mobile.ui-module #ui-root #inventory .cl { font-size: .82rem; }
+  body.mobile.ui-module #ui-root #inventory .detail .kind { font-size: .75rem; }
+  body.mobile.ui-module #ui-root #inventory .detail .dn { font-size: 1.05rem; }
+  body.mobile.ui-module #ui-root #inventory .detail .lore { font-size: .88rem; }
+  body.mobile.ui-module #ui-root #inventory .detail .eff { font-size: .85rem; }
+  body.mobile.ui-module #ui-root #inventory .detail .act { min-height: 36px; font-size: .85rem; }
+  body.mobile.ui-module #ui-root #inventory .detail .act kbd { display: none; }
+  body.mobile.ui-module #ui-root #inventory .detail .passive { font-size: .72rem; }
+
+  /* confirm prompts and sheets */
+  body.mobile.ui-module #ui-root .qol-prompt .eyebrow { font-size: .85rem; }
+  body.mobile.ui-module #ui-root .qol-prompt h1 { font-size: 1.3rem; }
+  body.mobile.ui-module #ui-root .qol-prompt .btns button { min-height: 36px; font-size: .85rem; }
+  body.mobile.ui-module #ui-root .qol-prompt .foot { font-size: .72rem; }
+  body.mobile.ui-module #ui-root .qol-sheet .head h1 { font-size: 1.3rem; }
+  body.mobile.ui-module #ui-root .qol-sheet .head .eyebrow { font-size: .8rem; }
+  body.mobile.ui-module #ui-root .qol-sheet .foot { font-size: .72rem; }
+  body.mobile.ui-module #ui-root .qol-sheet .foot button { min-height: 36px; }
+  body.mobile.ui-module #ui-root :is(.qol-controls, .qol-stats) h2 { font-size: .82rem; }
+
+  /* TITLE: the cover on the left, the menu on the right, no keyboard legend */
+  body.mobile.ui-module #ui-root #title {
+    display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); grid-template-rows: auto auto; align-content: center; align-items: center;
+    column-gap: 1.6rem; row-gap: .6rem;
+    padding: calc(1.3rem + env(safe-area-inset-top, 0px)) calc(1.9rem + env(safe-area-inset-right, 0px)) calc(1.3rem + env(safe-area-inset-bottom, 0px)) calc(1.9rem + env(safe-area-inset-left, 0px));
+  }
+  body.mobile.ui-module #ui-root #title::after { inset: calc(.45rem + env(safe-area-inset-top, 0px)) calc(.45rem + env(safe-area-inset-right, 0px)) calc(.45rem + env(safe-area-inset-bottom, 0px)) calc(.45rem + env(safe-area-inset-left, 0px)); }
+  body.mobile.ui-module #ui-root #title .wordmark { grid-column: 1; grid-row: 1 / span 2; width: 100%; margin: 0; }
+  body.mobile.ui-module #ui-root #title .mc-cover { padding: .7rem 1.2rem .8rem; }
+  body.mobile.ui-module #ui-root #title .mc-cover-top { gap: .6rem; font-size: .78rem; letter-spacing: .12em; }
+  body.mobile.ui-module #ui-root #title .mc-cover-top .mc-code { border-width: 2px; font-size: .95rem; }
+  body.mobile.ui-module #ui-root #title .mc-cover-t1 { margin-top: .5rem; font-size: 1.15rem; letter-spacing: .32em; text-indent: .32em; }
+  body.mobile.ui-module #ui-root #title .mc-cover-title { margin: .1rem 0 .2rem; font-size: min(6.2rem, 15vh, 6.6vw); }
+  body.mobile.ui-module #ui-root #title .mc-cover-sub { padding-top: .4rem; border-top-width: 2px; font-size: .74rem; line-height: 1.35; letter-spacing: .12em; }
+  body.mobile.ui-module #ui-root #title .menu { grid-column: 2; grid-row: 1; width: 100%; max-width: 21rem; justify-self: center; margin-top: 0; }
+  body.mobile.ui-module #ui-root #title .menu .mc-band { padding: .3rem .5rem .22rem; font-size: .85rem; }
+  body.mobile.ui-module #ui-root #title .menu .menu-item { min-height: 36px; align-items: center; padding: .2rem 1rem 0; font-size: 1.05rem; }
+  body.mobile.ui-module #ui-root #title .tagline { grid-column: 2; grid-row: 2; max-width: 21rem; justify-self: center; margin-top: 0; font-size: .85rem; text-align: center; }
+  body.mobile.ui-module #ui-root #title :is(.foot, .version, .credit) { display: none; }
+}

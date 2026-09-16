@@ -7,6 +7,7 @@ import { SPELL_TABLE } from '../game/items.js';
 import { xpForLevel } from '../core/constants.js';
 import { formatTime } from '../core/save.js';
 import { icon } from './icons.js';
+import { isVellum, roman, ordinalWord, capWord } from './theme.js';
 
 const SPELL_KEYS = { teleport: '1', shield: '2', regeneration: '3', invisibility: '4', light: '5', drift: '6' };
 const SPELL_SHORT = { teleport: 'Teleport', shield: 'Shield', regeneration: 'Regen', invisibility: 'Unseen', light: 'Light', drift: 'Drift' };
@@ -32,17 +33,29 @@ export class Hud {
     this.bannerTimer = 0;
     this.unsub = [];
     this.cache = {};
+    this.vel = isVellum(); // "4a Worn vellum" (the default theme): its own card, plate and slot formatting
     this.build();
     this.bind();
   }
 
   build() {
     const root = this.ctx.root;
-    const mod = moduleTheme();
+    const mod = moduleTheme(), vel = this.vel;
     // --- character card
+    // Worn vellum: "Adventurer" over a rule, the name large with "of the first level", "Hit points 9 of 9"
+    // over a ticked rust bar, "Experience 64 of 200" over an ink bar, then skill / slain / gold.
     // Module cover: name and level on one line, then HIT POINTS and EXPERIENCE as labelled segmented
     // meters, then skill / slain / gold in a row. Every hook update() and bind() reach for is kept.
-    if (mod) this.card = el('div', 'panel hud ornate', corners() + `<div class="flash"></div>${band('Adventurer', 'F1')}
+    if (vel) this.card = el('div', 'panel hud ornate', corners() + `<div class="flash"></div>${band('Adventurer', 'F1')}
+      <div class="vl-who"><div class="name">Warrior</div><div class="medal"><span class="vl-of">of the <span class="lv-word">first</span> level</span><span class="lv num">1</span><span class="lvl"></span><span class="ring"></span></div></div>
+      <div class="gauge hp"><div class="vl-lab"><span>Hit points</span><b><span class="hp-t">12</span> of <span class="hp-m">12</span></b></div>
+        <div class="frame"><div class="track"><div class="trail"></div><div class="fill"></div><div class="segs"></div></div></div></div>
+      <div class="gauge xp"><div class="vl-lab"><span>Experience</span><b><span class="xp-v">0</span> of <span class="xp-next">200</span></b></div>
+        <div class="frame"><div class="track"><div class="fill"></div></div></div></div>
+      <div class="vl-stats"><span title="Battle skill">Skill <b class="skill-v">8</b></span><span title="Monsters slain">Slain <b class="kills">0</b></span>
+        <span class="gold" title="Gold carried — sacrifice it at a temple for experience">Gold <b class="gold-v">0</b></span></div>
+      <span class="next" hidden><b class="xp-togo">200</b><b class="xp-nextlv">2</b></span>`);
+    else if (mod) this.card = el('div', 'panel hud ornate', corners() + `<div class="flash"></div>${band('Adventurer', 'F1')}
       <div class="mc-body">
         <div class="mc-row mc-head"><div class="name">Warrior</div><div class="medal"><span class="lvl">Level</span><span class="lv num">1</span><span class="ring"></span></div></div>
         <div class="gauge hp"><div class="mc-row lab"><span class="mc-lab">Hit points</span><span class="mc-val num"><span class="hp-t">12</span> / <span class="hp-m">12</span></span></div>
@@ -71,7 +84,8 @@ export class Hud {
     // --- status chips
     this.status = el('div', 'hud'); this.status.id = 'hud-status'; root.appendChild(this.status);
     // --- depth + Sword timer
-    this.depth = el('div', 'panel hud ornate', corners() + (mod ? `${band('Dungeon Module')}
+    this.depth = el('div', 'panel hud ornate', corners() + (vel ? `${band('~ Dungeon Module ~')}
+      <div class="depth"><span class="vl-lvl">Level the</span> <span class="n num">First</span></div>` : mod ? `${band('Dungeon Module')}
       <div class="depth"><span>Level</span><span class="n num">1</span></div>` : `
       <div class="depth">${icon('stairs')}<span>Dungeon level</span><span class="n num">1</span></div>`) + `
       <div class="band">The Upper Halls</div><div class="seed"></div>
@@ -79,7 +93,7 @@ export class Hud {
     this.depth.id = 'hud-depth'; root.appendChild(this.depth);
     this.dq = { n: this.depth.querySelector('.n'), band: this.depth.querySelector('.band'), seed: this.depth.querySelector('.seed'), t: this.depth.querySelector('.timer .t'), cap: this.depth.querySelector('.timer .cap'), fuse: this.depth.querySelector('.fuse .f') };
     // --- hotbar
-    this.hotbar = el('div', 'panel hud ornate', band('Spells &amp; Items')); this.hotbar.id = 'hud-hotbar'; root.appendChild(this.hotbar);
+    this.hotbar = el('div', 'panel hud ornate', vel ? band('Spells &amp; Sundries', 'strike the key to use') : band('Spells &amp; Items')); this.hotbar.id = 'hud-hotbar'; root.appendChild(this.hotbar);
     this.slots = {};
     const mk = (id, name, key, color, action, ico) => {
       const s = el('button', 'slot', `<span class="key">${key}</span><span class="glyph">${icon(ico)}</span><span class="nm">${name}</span><span class="cnt"></span>`);
@@ -90,11 +104,13 @@ export class Hud {
       return s;
     };
     for (const [type, sp] of Object.entries(SPELL_TABLE)) { const s = mk(type, SPELL_SHORT[type] || sp.name, SPELL_KEYS[type], `var(--sp-${type})`, { action: 'cast', spell: type }, type); s.title = `${sp.name} — ${sp.desc}`; }
-    this.hotbar.appendChild(el('div', 'sep'));
+    // vellum: one run of spells, potion, beacon and lamp, then a single rule before Bury and Rest
+    if (!vel) this.hotbar.appendChild(el('div', 'sep'));
     mk('potion', 'Potion', 'Q', '#ff6b8a', { action: 'potion' }, 'potion').title = 'Healing Potion — heals 20·rnd + 3·depth hits';
     mk('beacon', 'Beacon', '+', 'var(--mm-beacon)', { action: 'beacon' }, 'beacon').title = 'Beacon — place it: teleports arrive here and monsters cannot see you on it';
-    this.hotbar.appendChild(el('div', 'sep'));
+    if (!vel) this.hotbar.appendChild(el('div', 'sep'));
     mk('toggleLight', 'Lamp', 'O', 'var(--sp-light)', { action: 'toggleLight' }, 'lamp').title = 'Lamp — shutter or open your Light spell';
+    if (vel) this.hotbar.appendChild(el('div', 'sep'));
     mk('bury', 'Bury', '⇧B', 'var(--loot)', { action: 'bury' }, 'bury').title = 'Bury gold here — safe from thieves, dig it up later';
     mk('wait', 'Rest', 'Z', 'var(--info)', { action: 'wait' }, 'wait').title = 'Rest a moment (heals slowly outside a fight)';
     // --- quick buttons
@@ -124,10 +140,10 @@ export class Hud {
     on('item:used', (p) => this.flash(p.item && p.item.type));
     on('level:enter', () => { const g = this.ctx.getGame(); this.levelEnterTime = g ? g.state.time : 0; this.autoPaused = false; retrigger(this.depth, 'enter'); });
     on('monster:seen', (p) => this.onMonsterSeen(p));
-    on('game:paused', (p) => { if (!p.paused && this.autoPaused) { this.autoPaused = false; this.hideBanner(); } }); // e.g. Esc resumes an auto-pause: drop the sticky banner
+    on('game:paused', (p) => { if (!p.paused && this.autoPaused) { this.autoPaused = false; this.hideBanner(); this.bus.emit('hud:autopause-end', {}); } }); // e.g. Esc resumes an auto-pause: drop the sticky banner
     on('game:start', () => { this.autoPaused = false; this.disp.hp = null; this.disp.trail = null; this.refreshStatic(); });
     on('ui:explore', (p) => this.exploreBtn.classList.toggle('on', !!p.on));
-    const resume = () => { if (!this.autoPaused) return; const g = this.ctx.getGame(); this.autoPaused = false; this.hideBanner(); if (this.ctx.isModal && this.ctx.isModal()) return; if (g && g.paused) g.setPaused(false); };
+    const resume = () => { if (!this.autoPaused) return; const g = this.ctx.getGame(); this.autoPaused = false; this.hideBanner(); this.bus.emit('hud:autopause-end', {}); if (this.ctx.isModal && this.ctx.isModal()) return; if (g && g.paused) g.setPaused(false); };
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') return; resume(); });
     window.addEventListener('pointerdown', resume);
   }
@@ -142,9 +158,14 @@ export class Hud {
     if (this.ctx.isModal && this.ctx.isModal()) return;
     if (g.state.time - this.levelEnterTime < 0.35) return;
     if (entity && entity.state !== 'hunt' && Math.max(Math.abs(entity.x - g.player.x), Math.abs(entity.y - g.player.y)) > 7) return;
+    // ONCE PER VILLAIN: the mark lives on the monster itself, so it travels with the level into a save and a monster
+    // that steps out of sight and back does not stop the game a second time.
+    if (entity) { if (entity.announced) return; entity.announced = true; }
     this.autoPaused = true;
     g.setPaused(true);
     this.showBanner(`${cap(description || 'a monster')} comes into view`, 'Paused — any key to continue', 'danger', 0, 'Wandering monster');
+    // ...with its stat card (ui/tooltip.js) pinned beside it while the game waits, in every mode
+    if (entity) this.bus.emit('hud:autopause', { entity });
   }
 
   /**
@@ -199,6 +220,7 @@ export class Hud {
     setText(this.q('.xp-togo'), fmtNum(Math.max(0, hi - p.xp)));
     setText(this.q('.xp-nextlv'), String(p.level + 1));
     setText(this.q('.lv'), String(p.level));
+    if (this.vel) setText(this.q('.lv-word'), ordinalWord(p.level));
     setText(this.q('.skill-v'), String(p.skill));
     setText(this.q('.kills'), String(p.kills));
     // --- gold count-up
@@ -206,8 +228,14 @@ export class Hud {
     setText(this.q('.gold-v'), fmtNum(D.gold));
     // --- depth + timer
     const d = g.depth;
-    setText(this.dq.n, d === 0 ? '—' : String(d));
-    setText(this.dq.band, d === 0 ? 'The Surface' : (BANDS.find((b) => d <= b[0]) || BANDS[3])[1]);
+    if (this.vel) { // "Level the First"; at the surface the plate reads "The Surface"
+      this.depth.classList.toggle('surface', d === 0);
+      setText(this.dq.n, d === 0 ? 'The Surface' : capWord(ordinalWord(d)));
+      setText(this.dq.band, d === 0 ? 'beneath the open sky' : (BANDS.find((b) => d <= b[0]) || BANDS[3])[1]);
+    } else {
+      setText(this.dq.n, d === 0 ? '—' : String(d));
+      setText(this.dq.band, d === 0 ? 'The Surface' : (BANDS.find((b) => d <= b[0]) || BANDS[3])[1]);
+    }
     const q = g.state.quest;
     const showTimer = q.timer !== null && q.timer !== undefined;
     this.depth.classList.toggle('sword', showTimer);
@@ -228,16 +256,21 @@ export class Hud {
     this.setSlot('beacon', p.inventory.beacon || 0, false);
     const light = p.statusEffects.find((e) => e.type === 'light');
     this.setSlot('toggleLight', light ? -1 : 0, !!(light && light.on));
-    this.setSlot('bury', p.gold > 0 ? -1 : 0, false);
+    this.setSlot('bury', p.gold > 0 ? -1 : 0, false, this.vel && p.gold > 0 ? fmtNum(p.gold) : undefined); // vellum: "⇧B · 48"
     // --- status chips
     this.updateStatus(g);
     if (this.bannerTimer > 0) { this.bannerTimer -= dt; if (this.bannerTimer <= 0) this.hideBanner(); }
   }
 
-  /** count: >0 shows a badge, -1 = available without a badge, 0 = empty/greyed. */
-  setSlot(id, count, active) {
+  /**
+   * count: >0 shows a badge, -1 = available without a badge, 0 = empty/greyed.
+   * Vellum writes the count beside the key in lowercase roman numerals, "—" when there is none;
+   * `label` replaces it (Bury shows the gold carried).
+   */
+  setSlot(id, count, active, label) {
     const s = this.slots[id];
-    setText(s.querySelector('.cnt'), count > 0 ? String(count) : '');
+    const text = this.vel ? (label ?? (count > 0 ? roman(count) : count === 0 ? '—' : '')) : (count > 0 ? String(count) : '');
+    setText(s.querySelector('.cnt'), text);
     s.classList.toggle('empty', count === 0);
     s.classList.toggle('active', !!active);
   }

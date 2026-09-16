@@ -76,6 +76,7 @@ class Level { depth, width, height, seed, tiles: Uint8Array, explored: Uint8Arra
 - 'entity:moved' {entity, fromX, fromY, toX, toY}
 - 'entity:attacked' {attacker, defender, damage, killed, crit}
 - 'entity:died' {entity, killer}
+- 'monster:winding' {entity, seconds, until} — a monster has come within reach of the hero and is squaring up: its first blow (or grab, or touch) comes no sooner than game time `until`, `seconds` from now. The wind-up is `AI.engageWindup × monsterPhaseSeconds(depth)` (game/monsterAi.js `engageWindupSeconds`); a bump inside it starts the fight as the hero's. Emitted once per approach, for a telegraph
 - 'player:hp' {hp, maxHp}, 'player:xp' {xp, level, leveledUp}, 'player:gold' {gold, delta}
 - 'item:picked' {item, entity}, 'item:used' {item}, 'spell:cast' {spell, x, y, target}
 - 'trap:triggered' {type, x, y}, 'temple:sacrifice' {gold, xp}, 'sword:found', 'sword:timer' {remaining}

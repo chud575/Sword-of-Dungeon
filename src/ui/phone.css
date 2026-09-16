@@ -1,0 +1,50 @@
+/* ==========================================================================================
+   PHONE — the theme-agnostic half of the mobile profile (html.mobile / body.mobile, set by main.js
+   from core/mobile.js). Every theme gets these: worn vellum, the module cover and classic. Imported
+   after all the theme sheets, so it sits in the cascade exactly where these rules sat when they lived
+   at the end of vellum.css. Nothing here reaches a desktop browser.
+
+   Each theme's own phone layout (panel sizes, chips, title screen) is the block at the end of its
+   sheet: vellum.css under body.mobile.ui-vellum, module.css under body.mobile.ui-module.
+   ========================================================================================== */
+html.mobile, html.mobile body {
+  overscroll-behavior: none; touch-action: manipulation; -webkit-text-size-adjust: 100%; text-size-adjust: 100%;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+html.mobile #ui-root input, html.mobile #ui-root textarea { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+/* no hover on a touch screen: the collapse handle is always there, and big enough for a thumb */
+body.mobile #ui-root .collapse-handle { opacity: .7; width: 30px; height: 30px; top: 0; right: 0; }
+/* the chips no theme positions: keep them off the Dynamic Island and the home indicator */
+body.mobile #ui-root #hud-depth-chip { top: calc(14px + env(safe-area-inset-top, 0px)); }
+body.mobile #ui-root #hud-hotbar-chip { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+
+/* CLASSIC has no phone layout of its own, only enough to be usable: its corner panels clear of the
+   notch and the home indicator (the themed sheets position theirs, so this is scoped away from them) */
+body.mobile:not(.ui-vellum):not(.ui-module) #ui-root #hud-card { top: calc(16px + env(safe-area-inset-top, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); }
+body.mobile:not(.ui-vellum):not(.ui-module) #ui-root #hud-status { left: calc(16px + env(safe-area-inset-left, 0px)); }
+body.mobile:not(.ui-vellum):not(.ui-module) #ui-root #hud-depth { top: calc(14px + env(safe-area-inset-top, 0px)); }
+body.mobile:not(.ui-vellum):not(.ui-module) #ui-root #hud-hotbar { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+body.mobile:not(.ui-vellum):not(.ui-module) #ui-root :is(#hud-quick, #hud-quick-chip) { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); right: calc(16px + env(safe-area-inset-right, 0px)); }
+body.mobile:not(.ui-vellum):not(.ui-module) #ui-root :is(#log, #log-chip) { bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); }
+body.mobile:not(.ui-vellum):not(.ui-module) #ui-root :is(#minimap, #minimap-chip) { top: calc(16px + env(safe-area-inset-top, 0px)); right: calc(16px + env(safe-area-inset-right, 0px)); }
+body.mobile:not(.ui-vellum):not(.ui-module) #ui-root #hud-card-chip { top: calc(16px + env(safe-area-inset-top, 0px)); left: calc(16px + env(safe-area-inset-left, 0px)); }
+
+/* a landscape phone: ~930x430 CSS px (see the phone block in each theme sheet) */
+@media (max-height: 540px) {
+  html.mobile { font-size: calc(10.5px * var(--ui-scale)); }
+
+  /* the touch pad bottom left, the action cluster bottom right, both on the bottom edge */
+  body.mobile .qol-touch .pad { left: calc(.8rem + env(safe-area-inset-left, 0px)); bottom: calc(.6rem + env(safe-area-inset-bottom, 0px)); width: 10.5rem; height: 10.5rem; }
+  body.mobile .qol-touch .cluster { right: calc(.6rem + env(safe-area-inset-right, 0px)); bottom: calc(.5rem + env(safe-area-inset-bottom, 0px)); }
+  body.mobile .qol-touch .tb.rest { width: 3.7rem; height: 3.7rem; }
+  body.mobile .qol-touch .hint { display: none; }
+  /* classic: the Chronicle and Commands chips would sit on the pad and the Rest button, so they ride above them */
+  body.mobile:not(.ui-vellum):not(.ui-module) #ui-root :is(#log, #log-chip) { bottom: calc(12rem + env(safe-area-inset-bottom, 0px)); }
+  body.mobile:not(.ui-vellum):not(.ui-module) #ui-root :is(#hud-quick, #hud-quick-chip) { bottom: calc(12.6rem + env(safe-area-inset-bottom, 0px)); }
+
+  /* dialogs never run off a 430px screen: they scroll inside themselves, and stay clear of the notch */
+  body.mobile #ui-root :is(.modal.mx, #inventory, .qol-sheet .box, .qol-prompt .box) {
+    max-height: calc(100vh - 1rem - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); overflow-y: auto; -webkit-overflow-scrolling: touch;
+    max-width: calc(100vw - 1rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px));
+  }
+}

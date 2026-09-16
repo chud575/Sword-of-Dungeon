@@ -27,6 +27,14 @@ import { PAINTED, DC, DC_CORRIDOR, DC_CIRCLES } from './paintedTiles.js';
 
 /** Texels a tile. Must equal materials.js TEXELS_PER_TILE (import would be circular via tiles.js). */
 export const FIELD_S = 32;
+/**
+ * Texels a tile for the CLEAN stone painter (render/look.js). 64 is the look; the mobile profile
+ * (core/mobile.js) drops it to 32, a quarter of the memory — the field's albedo, normal and roughness
+ * textures and their CPU mirrors are ~300 MB at 64 on a 48x32 level. Set once, before the first level.
+ */
+export let CLEAN_FIELD_S = 64;
+/** @param {32|64} s */
+export function setCleanFieldTexels(s) { CLEAN_FIELD_S = s === 32 ? 32 : 64; return CLEAN_FIELD_S; }
 
 // ------------------------------------------------------------------ deterministic noise
 function hash2(x, y, s) {
@@ -305,7 +313,7 @@ export function streamFords(level) {
 export function paintFloorField(level, opts = {}) {
   // CLEAN STONE IS PAINTED AT 64 TEXELS A TILE (render/look.js). At the play camera 32 texels a tile is two device
   // pixels a texel, so 64 is one: still nearest-sampled on the shader's texel snap (materials.js uFieldScale).
-  const S = LOOK.clean && level.biome !== 'forest' ? 64 : FIELD_S, W = level.width, H = level.height, TW = W * S, TH = H * S;
+  const S = LOOK.clean && level.biome !== 'forest' ? CLEAN_FIELD_S : FIELD_S, W = level.width, H = level.height, TW = W * S, TH = H * S;
   const out = {
     W, H, S, TW, TH,
     alb: new Float32Array(TW * TH * 3), hgt: new Float32Array(TW * TH),

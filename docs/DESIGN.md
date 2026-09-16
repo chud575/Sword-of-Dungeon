@@ -408,9 +408,10 @@ the sword timer keeps ticking in real seconds.
 |---|---|---|
 | Player step | 1 poll while held | **6 tiles/s** max (167 ms per tile), instant response |
 | Monster phase | every `20−L` polls | every `max(0.2, (20 − depth) / 6)` s → 3.2 s at L1, 1.7 s at L10, 0.5 s at L17, 0.2 s at L19+ |
-| Monster movement | once per phase | **[changed, after the iOS port]** `monsterTilesPerSecond(depth)`: 3.7 tiles/s at L1 rising to 5.7 at L15+ (× the monster's speedMul, × AI.pace for its state). The phase above is still the clock for cooldowns, breath charge-ups and staggers |
+| Monster movement | once per phase | **[changed, after the iOS port]** `monsterTilesPerSecond(depth)`: 2.2 tiles/s at L1 (37% of the hero; a ×1.5 dire wolf 3.3), 3.5 at L5, 4.8 at L10, 5.7 at L15+ (× the monster's speedMul, × AI.pace for its state). An ease-in curve that rejoins the first cut's straight line (3.7 → 5.7) at L15 and never runs ahead of it: at 62% of walking pace from L1 every monster reached you and struck first. The phase above is still the clock for cooldowns, breath charge-ups, staggers, flank blows and the wind-up |
 | Idle heal tick | 1 poll | 100 ms |
 | Combat | 1 poll per exchange | **[changed, after the iOS port]** the fight is announced, a 0.8 s standoff, then the two sides alternate one blow each every 0.5 s until one falls or the fight breaks |
+| Wind-up [remake] | — | a monster that comes within reach waits `AI.engageWindup × phase` (0.15 × phase: 0.48 s at L1, 0.25 s at L10, 0.13 s at L15, 0.03 s at L19) before its first blow, grab or touch. The clock starts the tick it is first adjacent (whoever moved), resets when it is not, is not running while it sleeps, and stops with the game when paused (so the auto-pause on sight cannot use it up). It holds the blow, not the monster: the monster keeps moving on its own cadence and strikes on its first act once the wind-up is over (holding its acts instead let a hero who stepped in and out of reach pin a monster in place). Event `monster:winding` |
 | Sword timer | 60 Hz jiffy clock, 2000 s | wall-clock game seconds, 2000 s; **pauses while the game is paused** |
 
 ### 7.2 Initiating combat
@@ -418,6 +419,7 @@ the sword timer keeps ticking in real seconds.
   "AN EXPER WAR LORD"). Keep the joystick pushed to fight; **centre the stick at any moment to
   disengage** ("if you attack, you always have the option to leave the battle") [VIC 264, 279].
   **[remake, after the iOS port]** a bump starts the fight and the blows then trade on their own turns; letting go no longer disengages — step away to leave a fight you started.
+- **The wind-up [remake]**: a monster that reaches you does not strike on the move that brought it; it squares up for `AI.engageWindup × phase` first. Bump it inside that window and the fight is yours — announced as yours, and your blow lands first after the standoff. The same wait holds a thief's grab, the Mage's and the Demon's touch and sword theft, so you can react to them too. A monster already fighting you is not held by it.
 - **Monster-initiated**: a monster stepping onto you starts a fight **you cannot walk out of** —
   "YOU ARE ATTACKED BY <name>": only the panic button (Teleport) ends it early; and if you carry the
   sword it is stolen instead of a fight starting. Being ambushed is therefore the main risk, and
@@ -432,7 +434,7 @@ Let `x = monsterStrength / battleSkill` (the "damage ratio").
 | Player hit | `monsterHP −= int((1/x) × 4 × level × rnd + 1 + enchantments)` |
 | Monster hit | `playerHP −= int(x × 4 × level × rnd + 1)` — **skipped entirely if Shield is up** |
 | Order | Player-initiated: you strike first each round. Monster-initiated: monster strikes first |
-| Pacing [remake] | One blow per turn, alternating, `combatTurnTime` (0.5 s) apart, after a `combatOpening` (0.8 s) standoff under the announcement. A monster joining from the side strikes at most once per exchange |
+| Pacing [remake] | One blow per turn, alternating, `combatTurnTime` (0.5 s) apart, after a `combatOpening` (0.8 s) standoff under the announcement. A monster joining from the side strikes at most once per monster phase (`monsterPhaseSeconds`: 3.2 s at L1, 1.7 s at L10, 0.5 s at L17) — the C64's pace, one blow each time the monsters moved. Gated to once an exchange (1 s), a level-1 pair of werebears beat a standard hero 92% of the time |
 | Feedback | Only *your* HP is shown ("HITS: n" + a random combat word: CRUNCH / SLASH ...); monster HP is hidden |
 | Kill | `monsterHP < 0` → "YOU HAVE SLAIN <name>" (or "YOU VANQUISHED"), XP `(str + initialHP) × level`, skill `+int(5·rnd+1)`, kills+1; Shield and Invisibility end; recover stolen gold if it was the thief |
 | Death | `playerHP < −5` inside a fight → slain. (Between fights HP < 0 auto-drinks a potion.) |

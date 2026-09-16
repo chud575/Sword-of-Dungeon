@@ -1,0 +1,103 @@
+[
+ {
+  "id": "brazier_a",
+  "tris": 552,
+  "glbBytes": 15628,
+  "texBytes": 2792,
+  "source": "PRP_Brazier_01.unitypackage -> Assets/_Freeport/Art/Props/Mesh/PRP_Braziers_01.fbx",
+  "foot": [
+   0.7,
+   0.7
+  ],
+  "height": 0.412,
+  "uvPerTile": 0.67091,
+  "tex": {
+   "desk": 64,
+   "phone": 64
+  },
+  "flame": [
+   0,
+   0.385,
+   0
+  ],
+  "texelsPerTile": 42.9
+ },
+ {
+  "id": "brazier_b",
+  "tris": 6720,
+  "glbBytes": 173196,
+  "texBytes": 2570,
+  "source": "PRP_Brazier_02.unitypackage -> Assets/_Freeport/Art/Props/Mesh/PRP_Braziers_02.fbx",
+  "foot": [
+   0.606,
+   0.68
+  ],
+  "height": 0.739,
+  "uvPerTile": 0.60609,
+  "tex": {
+   "desk": 64,
+   "phone": 64
+  },
+  "flame": [
+   0,
+   0.708,
+   0
+  ],
+  "texelsPerTile": 38.8
+ },
+ {
+  "id": "cupboard",
+  "tris": 2994,
+  "glbBytes": 79776,
+  "texBytes": 2276,
+  "source": "PRP_Cupboard_01.unitypackage -> Assets/_Freeport/Art/Props/Mesh/PRP_Cupboard_01.fbx",
+  "foot": [
+   0.685,
+   0.37
+  ],
+  "height": 1.16,
+  "uvPerTile": 0.53128,
+  "tex": {
+   "desk": 64,
+   "phone": 64
+  },
+  "texelsPerTile": 34
+ },
+ {
+  "id": "table",
+  "tris": 1290,
+  "glbBytes": 45472,
+  "texBytes": 9312,
+  "source": "PRP_Table_01.unitypackage -> Assets/_Freeport/Art/Props/Mesh/PRP_Table_01.fbx",
+  "foot": [
+   1,
+   0.656
+  ],
+  "height": 0.34,
+  "uvPerTile": 0.49286,
+  "tex": {
+   "desk": 128,
+   "phone": 64
+  },
+  "texelsPerTile": 63.1
+ },
+ {
+  "id": "banquet",
+  "tris": 938,
+  "glbBytes": 35272,
+  "texBytes": 6152,
+  "source": "PRP_BanquetTableCloth_01.unitypackage -> Assets/_Freeport/Art/Props/Mesh/PRP_BanquetTableCloth_01.fbx",
+  "foot": [
+   3,
+   0.86
+  ],
+  "height": 0.451,
+  "uvPerTile": 0.3111,
+  "tex": {
+   "desk": 128,
+   "phone": 128
+  },
+  "segment": 1,
+  "texelsPerTile": 39.8
+ }
+]

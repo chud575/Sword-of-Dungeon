@@ -1426,6 +1426,41 @@ export const scenarios = {
   },
 
   /**
+   * THE FREEPORT PLATE: every imported Freeport prop (render/props/freeport.js) in one lit room at the
+   * normal play camera, with the hero standing among them for scale. Along the north wall the cupboard,
+   * both braziers (lit) and both chests; then the cloth table, a three-segment banquet run and the long
+   * chest; then the chests again, opened; and in the hero's row the treasure-chest pickup closed and open.
+   * The entries go into `level.decor`, so the room builds them the way a generated room does — lights,
+   * flames and blocking included — and `?props=kit` photographs the kit pieces in exactly the same places.
+   */
+  async 'freeport-props'(ctx) {
+    const g = ctx.reset();
+    const W = 13, H = 11, depth = 3;
+    const lv = bestiaryHall(g, W, H, depth, { dress: false });
+    lv.rooms[0].lightMood = 'torchlit';
+    const set = [
+      ['cupboard', 2, 1, 0, 'cupboard'], ['brazier', 4, 1, 0, 'brazier_a'], ['brazier', 6, 1, 0, 'brazier_b'],
+      ['strongbox', 8, 1, 0, 'chest_a'], ['strongbox', 10, 1, 0, 'chest_b'],
+      ['table', 2, 3, 0, 'table'], ['tableLong', 5, 3, 0], ['tableLong', 6, 3, 1], ['tableLong', 7, 3, 2], ['footlocker', 10, 3, 0],
+      ['strongbox', 3, 7, 1, 'chest_a'], ['strongbox', 5, 7, 1, 'chest_b'], ['footlocker', 9, 7, 1],
+      // turned pieces, for orientation: a cupboard backed onto the west wall, a chest facing west
+      ['cupboard', 1, 5, 0, 'cupboard', 'e'], ['strongbox', 11, 7, 0, 'chest_b', 'w'],
+    ];
+    lv.decor = set.map(([type, x, y, variant, model, facing = 's']) => ({ type, x, y, variant, facing, blocking: false, ...(model ? { model } : {}) }));
+    // the hero a row below the tables: the camera follows him, and this keeps the north wall's row clear of
+    // the level banner at the top of the screen
+    g.enterLevel(depth, 'teleport', { arrival: { x: 7, y: 5 } });
+    g.player.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    const P = ctx.renderer.props, D = ctx.renderer.dungeon;
+    D.addAt(P.item({ type: 'chest', x: 4, y: 5 }), 4, 5);
+    D.addAt(P.chestOpen(), 10, 5);
+    ctx.step(600);
+  },
+
+  /**
    * THE DRESSING PLATE: every scatter prop, every floor decal and every wall piece `props.decor()`
    * can build, in its three geometries, named.
    *

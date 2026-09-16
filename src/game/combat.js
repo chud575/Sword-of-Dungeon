@@ -1,7 +1,7 @@
 // Combat resolution (DESIGN.md §7.3): no hit rolls — every round both sides deal damage. Top-10% rolls are
 // crits (cosmetic in Classic; in extended rules a player crit staggers the monster and interrupts its
 // breath), bottom-10% rolls are glancing. Every round is a noise other monsters can hear.
-import { COMBAT_WORDS } from '../core/constants.js';
+import { COMBAT_WORDS, monsterPhaseSeconds } from '../core/constants.js';
 import { hasStatus, removeStatus, damagePlayer, addGold, gainXp, drainLevel } from './player.js';
 import { swordStealable, stealSword } from './quest.js';
 import { describeMonster } from './monsters.js';
@@ -252,12 +252,13 @@ export function monsterAttack(game, monster) {
     return true;
   }
   if (combat.monsterId !== monster.id) {
-    // A second attacker joins: it lands a blow of its own, but no more than once an exchange. Monsters
-    // move at close to walking pace now and act several times a second; ungated, a flanker would hit
-    // on every one of those acts.
+    // A second attacker joins: it lands a blow of its own, but no more than once a MONSTER PHASE — the
+    // C64 pace, when a flanker got one blow each time the monsters moved (3.2 s on level 1, shrinking
+    // with depth). Monsters act several times a second now; ungated, a flanker would hit on every one of
+    // those acts, and gated to once an exchange (1 s) two level-1 werebears beat a standard hero 92% of the time.
     const now = game.state.time;
     if ((monster.nextFlankAt ?? -Infinity) > now) return true;
-    monster.nextFlankAt = now + 2 * game.balance.combatTurnTime;
+    monster.nextFlankAt = now + monsterPhaseSeconds(Math.max(1, level.depth));
     const depth = Math.max(1, level.depth);
     const hit = monsterStrikeDamage(game.rngs.combat, monster, p, depth);
     makeNoise(level, p.x, p.y, AI.combatNoise, game.state.time, 'combat');

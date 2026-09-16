@@ -85,16 +85,20 @@ export class Tooltip {
     ctx.root.appendChild(this.el);
     this.tile = null; this.pos = { x: 0, y: 0 }; this.pinned = false;
     this.unsub = [
-      this.bus.on('input:hover', (p) => { this.pinned = false; this.tile = p.tile; this.pos = { x: p.clientX, y: p.clientY }; this.refresh(); }),
+      this.bus.on('input:hover', (p) => { if (this.forced) return; this.pinned = false; this.tile = p.tile; this.pos = { x: p.clientX, y: p.clientY }; this.refresh(); }),
+      // AUTO-PAUSE: a monster that just came into view gets its card pinned for as long as the game waits, even with
+      // tooltips switched off and on touch screens with no hover (ui/hud.js onMonsterSeen)
+      this.bus.on('hud:autopause', (p) => { if (!p.entity) return; this.forced = true; this.showAt({ x: p.entity.x, y: p.entity.y }); }),
+      this.bus.on('hud:autopause-end', () => { if (this.forced) this.hide(); }),
       this.bus.on('game:start', () => this.hide()),
       this.bus.on('level:enter', () => this.hide()),
     ];
     window.addEventListener('mousemove', (e) => { if (this.pinned) return; this.pos = { x: e.clientX, y: e.clientY }; if (this.el.classList.contains('show')) this.place(); });
-    this.ctx.root.addEventListener('mouseleave', () => this.hide());
+    this.ctx.root.addEventListener('mouseleave', () => { if (!this.forced) this.hide(); });
     this.acc = 0;
   }
 
-  hide() { this.el.classList.remove('show'); this.tile = null; this.pinned = false; }
+  hide() { this.el.classList.remove('show'); this.tile = null; this.pinned = false; this.forced = false; }
 
   update(dt) { this.acc += dt; if (this.acc > 0.25) { this.acc = 0; if (this.tile) this.refresh(); } }
 
@@ -114,7 +118,7 @@ export class Tooltip {
   refresh() {
     const g = this.ctx.getGame();
     const t = this.tile;
-    if (!g || !t || !this.ctx.settings.showTooltips || (this.ctx.isModal && this.ctx.isModal())) return this.el.classList.remove('show');
+    if (!g || !t || (!this.ctx.settings.showTooltips && !this.forced) || (this.ctx.isModal && this.ctx.isModal())) return this.el.classList.remove('show');
     const lv = g.level, p = g.player;
     const allLit = this.ctx.renderer && this.ctx.renderer.fog && this.ctx.renderer.fog.override === 'all';
     if (!allLit && !lv.isExplored(t.x, t.y)) return this.el.classList.remove('show');

@@ -98,8 +98,10 @@ export class Renderer {
   /**
    * @param {{canvas:HTMLCanvasElement, bus:import('../core/events.js').EventBus}} opts
    */
-  constructor({ canvas, bus, quality = 'high' }) {
+  constructor({ canvas, bus, quality = 'high', bloomScale = 1 }) {
     this.canvas = canvas; this.bus = bus;
+    /** Bloom render-target scale: 1 on desktop; the mobile profile (core/mobile.js) halves it. */
+    this.bloomScale = bloomScale > 0 && bloomScale < 1 ? bloomScale : 1;
     this.game = null;
     /** 'high': 4x MSAA half-float target, soft 1024 shadows. 'low' (QA bots, weak GPUs): no MSAA, 512 hard shadows — ~2x cheaper fill. */
     this.quality = quality === 'low' ? 'low' : 'high';
@@ -237,11 +239,35 @@ export class Renderer {
     this.sizeW = w; this.sizeH = h;
     this.gl.setSize(w, h, false);
     this.composer.setSize(w, h);
-    this.bloom.setSize(w, h);
+    if (this.bloomScale === 1) this.bloom.setSize(w, h);
+    else this.bloom.setSize(Math.max(1, Math.round(w * this.bloomScale)), Math.max(1, Math.round(h * this.bloomScale)));
     this.grading.uniforms.uRes.value.set(w * this.gl.getPixelRatio(), h * this.gl.getPixelRatio());
     // resize() also runs during construction, before the WebGL renderer exists
     if (this.renderer) this.cameraRig.setViewportHeight(this.renderer.getDrawingBufferSize(new THREE.Vector2()).y);
+    // The rig's scroll lattice needs the REAL buffer height (the line above has never run — `this.renderer`
+    // is not a field — and adopting it now would reframe the game from 14 tiles tall to 16.5).
+    this.cameraRig.setDevicePxHeight(this.gl.getDrawingBufferSize(new THREE.Vector2()).y);
     this.cameraRig.setAspect(w / h);
+  }
+
+  /**
+   * RENDER RESOLUTION (Settings → Display). The 3D frame is drawn at a pixel ratio under the screen's own to
+   * save memory: 1.5x on desktop, 1x on phones (quality 'low'). 'high' draws at 2x, 'native' at the display's
+   * full ratio (up to 3x). The HTML interface is unaffected — the browser always draws it at full sharpness.
+   * The camera re-derives its whole-texel size from the new drawing-buffer height (resize → setViewportHeight),
+   * so the framing stays the same and each art texel simply covers more real pixels.
+   * @param {'standard'|'high'|'native'} mode @returns {number} the pixel ratio now in use
+   */
+  setResolution(mode = 'standard') {
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    const cap = mode === 'native' ? 3 : mode === 'high' ? 2 : this.quality === 'low' ? 1 : 1.5;
+    const pr = Math.min(dpr, cap);
+    this.resolutionMode = mode;
+    if (Math.abs(pr - this.gl.getPixelRatio()) < 1e-3) return pr;
+    this.gl.setPixelRatio(pr);
+    if (this.composer && this.composer.setPixelRatio) this.composer.setPixelRatio(pr);
+    this.resize();
+    return pr;
   }
 
   bind() {

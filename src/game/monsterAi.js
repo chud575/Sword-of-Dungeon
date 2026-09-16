@@ -14,6 +14,7 @@
 //   monster:flee {entity, reason:'coward'|'escape'|'morale'} monster:cornered {entity}
 //   monster:telegraph {entity, kind, dx, dy, length}       monster:cast {entity, kind, x, y, target}
 //   monster:blink {entity, from, to}                       monster:escaped {entity}
+//   monster:winding {entity, seconds, until}               (came within reach; first blow no sooner than `until`)
 //   fx:breath {entity, x, y, dx, dy, length, tiles, kind, color, hit}
 //   fx:projectile {entity, from, to, kind, color, hit}     fx:stagger {entity}
 //   spell:lost {spell, by}                                 sfx:howl {family, type}  sfx:breath {kind}  sfx:cast {kind}  sfx:arrow {hit}
@@ -63,7 +64,18 @@ export const AI = {
   blinkCooldown: 3, vanishHp: 0.6, vanishCooldown: 6,
   goldLureRange: 5,
   logCooldown: 2.5,
+  // THE WIND-UP. A monster that comes within reach of the hero does not strike on the act that brought
+  // it there: it squares up for this share of a monster phase first (engageWindupSeconds: ~0.48 s on
+  // level 1, ~0.13 s by level 15, ~0.03 s at 19). Bump it inside that window and the fight is yours, and
+  // your blow lands first. Without it, whoever moved last struck first, and with monsters closing at
+  // walking pace that was always the monster.
+  engageWindup: 0.15,
 };
+
+/** Seconds a monster newly within reach of the hero waits before its first blow (AI.engageWindup). */
+export function engageWindupSeconds(depth) {
+  return AI.engageWindup * monsterPhaseSeconds(Math.max(1, depth));
+}
 
 /** Non-classic difficulties use the extended behaviours (ranged attacks, lurking, kiting, morale). */
 export function extendedRules(game) {
@@ -570,8 +582,13 @@ function huntAct(game, m, per, ext) {
   if (m.flags.blink && per.sees && dist <= B.spiderBlinkRange && dist > 1 && ready(m, 'blink') && spiderBlink(game, m)) return;
   if (ext && m.special === 'mage' && m.hp < m.maxHp * AI.vanishHp && ready(m, 'vanish') && dist <= 2 && mageVanish(game, m)) return;
   if (ext && m.ranged && per.sees && rangedAct(game, m, per)) return;
-  // Melee reach
-  if (dist <= 1 && !per.hidden && level.canStep(m.x, m.y, p.x - m.x, p.y - m.y)) { game.monsterAttack(m); return; }
+  // Melee reach — after the wind-up (AI.engageWindup). This gates everything monsterAttack does, not
+  // just a fight: a thief's grab, the Mage's and the Demon's touch and sword theft all wait for it too.
+  if (dist <= 1 && !per.hidden && level.canStep(m.x, m.y, p.x - m.x, p.y - m.y)) {
+    if (engageReady(game, m)) game.monsterAttack(m);
+    else m.facing = { dx: sgn(p.x - m.x), dy: sgn(p.y - m.y) };
+    return;
+  }
   // Close in: surround when the prey is in sight, else march on the last known position.
   if ((per.sees || playerThere) && dist <= 4) {
     const goal = surroundTile(game, m, target.x, target.y);
@@ -662,7 +679,7 @@ function fleeAct(game, m, per) {
       m.state = 'hunt'; m.fleeing = null; m.lastSeen = { x: p.x, y: p.y }; m.target = m.lastSeen;
       say(game, m, `Cornered, the ${lower(m)} turns at bay!`, 'danger', 'bay');
       game.emit('monster:cornered', { entity: m });
-      if (level.canStep(m.x, m.y, p.x - m.x, p.y - m.y)) game.monsterAttack(m);
+      if (level.canStep(m.x, m.y, p.x - m.x, p.y - m.y) && engageReady(game, m)) game.monsterAttack(m);
       return;
     }
     // Nowhere better to go: sidestep if possible so it does not freeze in place.
@@ -677,6 +694,50 @@ function fleeAct(game, m, per) {
   } else if (m.fleeing !== 'escape' && d2 > B.aggroRange) {
     m.state = 'wander'; m.fleeing = null; m.hadPrey = false;
   }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The wind-up before a first blow
+
+/**
+ * Start the wind-up clock for a monster that has just come within reach of the hero. The clock gates
+ * the blow only, never the monster's acts: it keeps its own cadence and strikes on its first act at or
+ * after `engageAt`. (Putting the next act back to the end of the wind-up was tried, and a hero stepping
+ * out of reach and back every 0.4 s froze a hunting monster in place forever — it restarted the clock,
+ * and so postponed its own act, faster than the act could come.)
+ */
+function startWindup(game, m) {
+  m.engageAt = game.state.time + engageWindupSeconds(game.level.depth);
+  m.windupTold = false;
+  if (m.state === 'hunt') tellWindup(game, m);
+}
+
+function tellWindup(game, m) {
+  if (m.windupTold) return;
+  m.windupTold = true;
+  const now = game.state.time;
+  game.emit('monster:winding', { entity: m, seconds: Math.max(0, m.engageAt - now), until: m.engageAt });
+}
+
+/**
+ * Per tick: is this monster within striking reach of the hero? The clock starts the tick it first is —
+ * whether it stepped up or the hero did — and resets the moment it is not. A sleeper's clock does not
+ * run (it starts when it wakes), and the monster already in the fight has no clock: it is fighting.
+ */
+function trackReach(game, m, fight) {
+  const p = game.player, level = game.level;
+  const inReach = m.state !== 'asleep' && m.state !== 'dead' && !(fight && fight.monsterId === m.id)
+    && cheb(m.x, m.y, p.x, p.y) <= 1 && level.canStep(m.x, m.y, p.x - m.x, p.y - m.y) && !game.isPlayerHiddenFrom(m);
+  if (!inReach) { m.engageAt = null; m.windupTold = false; return; }
+  if (m.engageAt == null) startWindup(game, m);
+}
+
+/** May a monster within reach strike (or grab, or touch) yet? Starts the wind-up if nothing has. */
+export function engageReady(game, m) {
+  if (m.engageAt == null) startWindup(game, m);
+  if (game.state.time >= m.engageAt - 1e-9) return true;
+  tellWindup(game, m);
+  return false;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -696,12 +757,13 @@ export function updateMonsters(game, dt) {
     // counted per act, a breath or a blink would come round every few tenths of a second.
     m.phaseClock = (m.phaseClock || 0) + dt / phase;
     while (m.phaseClock >= 1) { m.phaseClock -= 1; tickCooldowns(m); }
+    const fight = game.state.combat;
+    trackReach(game, m, fight);
     if (m.stunUntil && game.state.time < m.stunUntil) continue;
     // HELD BY THE FIGHT. The monster you are trading blows with stands and trades them: fights have a
     // standoff and turns now, and a monster this quick would otherwise wander out of one between blows
     // (an invisible hero stops being hunted, so its AI would simply walk off). Only a monster that has
     // turned to flee breaks away — and that ends the fight, as it always did.
-    const fight = game.state.combat;
     if (fight && fight.monsterId === m.id && m.state !== 'flee') { m.moveTimer = Math.min(m.moveTimer, 0); continue; }
     const pace = (AI.pace[m.state] ?? 1) * (m.pace || 1);
     m.moveTimer += dt * m.speed * pace;

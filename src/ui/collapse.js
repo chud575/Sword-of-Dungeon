@@ -6,6 +6,7 @@
 // (buttons, kbd hints, inputs, links) never collapse it, so the hotbar and quick-action bar keep
 // working normally. State is per-panel and persisted, so a player who hides the log keeps it hidden.
 import './collapse.css';
+import { MOBILE } from '../core/mobile.js';
 
 const KEY = 'fargoal.collapsed.v1';
 
@@ -27,8 +28,15 @@ function isControl(node, panel) {
   return false;
 }
 
+/** On a phone (core/mobile.js) the Chronicle and Commands start folded: at full size they cover the dungeon. */
+const MOBILE_DEFAULT = ['log', 'hud-quick'];
+
 function load() {
-  try { return new Set(JSON.parse(localStorage.getItem(KEY) || '[]')); } catch { return new Set(); }
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw === null && MOBILE.mobile) return new Set(MOBILE_DEFAULT);
+    return new Set(JSON.parse(raw || '[]'));
+  } catch { return new Set(MOBILE.mobile ? MOBILE_DEFAULT : []); }
 }
 
 function save(set) {

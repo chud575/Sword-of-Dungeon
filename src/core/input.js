@@ -22,6 +22,7 @@ import { PathPreview } from './pathPreview.js';
 import { ControlsSheet } from './controlsPanel.js';
 import { StatsSheet } from './statsPanel.js';
 import { Lifecycle } from './lifecycle.js';
+import { MOBILE } from './mobile.js';
 import { DEFAULT_SETTINGS } from './save.js';
 import { TILE } from './constants.js';
 import { el, uiRoot, otherModalOpen } from './qolDom.js';
@@ -312,6 +313,9 @@ export class Input {
       if (t.x === p.x && t.y === p.y) { this.action({ action: 'interact', source: 'click', cx: e.clientX, cy: e.clientY }); return; }
       const m = g.level.monsterAt(t.x, t.y);
       const adjacent = m && Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) <= 1;
+      // NO TAP-TO-TRAVEL ON PHONES: the thumb pad walks, and a tap on the dungeon that set the hero pathing across the
+      // room fought it. A tap still acts on your own tile and still attacks a monster standing next to you.
+      if (MOBILE.mobile && e.pointerType === 'touch' && !adjacent) { this.preview.clearCommitted(); return; }
       if (!adjacent && this.preview.enabled) {
         const path = g.pathTo(t.x, t.y);
         if (path && path.length) this.preview.commit(path, g.level.isTemple(path[path.length - 1].x, path[path.length - 1].y) ? 'temple' : 'path');

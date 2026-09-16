@@ -7,6 +7,7 @@
 import './panels.css';
 import { TILE } from '../core/constants.js';
 import { icon } from './icons.js';
+import { isVellum } from './theme.js';
 
 const VARS = ['floor', 'wall', 'stairs-down', 'stairs-up', 'temple', 'pit', 'water', 'player', 'monster', 'gold', 'trap', 'beacon'];
 const SMALL = 3.4, BIG = 7.6;
@@ -31,16 +32,24 @@ export class Minimap {
     this.visible = this.size !== 'off';
     this.el = document.createElement('div');
     this.el.className = 'panel hud px'; this.el.id = 'minimap';
-    this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div>
-      <div class="mc-band"><span class="mc-title">Map</span><span class="mc-meta"></span><span class="mc-code">L1</span></div>
-      <div class="cap"><span class="label">${icon('maps')}Map</span><span class="meta"></span><span class="hint">M</span></div>
-      <div class="wrap"><canvas></canvas><div class="toast"></div></div>
-      <div class="legend">
-        <span><i class="tri" style="--c:var(--mm-stairs-down)"></i>Down</span><span><i class="ring" style="--c:var(--mm-stairs-up)"></i>Up</span>
+    // Worn vellum (the default theme): "The Map" with "53 parts in 100 charted", the small map fitted to the
+    // panel's width, and an italic legend that keeps the swatch shapes the canvas really draws.
+    this.vel = isVellum();
+    const legend = this.vel
+      ? `<span><i style="--c:var(--mm-player)"></i>thou</span><span><i class="tri" style="--c:var(--mm-stairs-down)"></i>stair down</span>
+        <span><i class="sq" style="--c:var(--mm-temple)"></i>temple</span><span><i style="--c:var(--mm-gold)"></i>gold</span>
+        <span><i style="--c:var(--mm-monster)"></i>beast</span><span><i class="sq" style="--c:var(--mm-trap)"></i>hidden</span>`
+      : `<span><i class="tri" style="--c:var(--mm-stairs-down)"></i>Down</span><span><i class="ring" style="--c:var(--mm-stairs-up)"></i>Up</span>
         <span><i class="sq" style="--c:var(--mm-temple)"></i>Temple</span><span><i style="--c:var(--mm-gold)"></i>Gold</span>
         <span><i class="sq" style="--c:var(--mm-trap)"></i>Hidden</span><span><i style="--c:var(--mm-monster)"></i>Monster</span>
-        <span><i style="--c:var(--mm-beacon)"></i>Beacon</span><span><i class="ring" style="--c:var(--mm-player)"></i>You</span>
-      </div>`;
+        <span><i style="--c:var(--mm-beacon)"></i>Beacon</span><span><i class="ring" style="--c:var(--mm-player)"></i>You</span>`;
+    this.el.innerHTML = `<div class="corners"><i></i><i></i><i></i><i></i></div><div class="filet"></div>
+      <div class="mc-band"><span class="mc-title">${this.vel ? 'The Map' : 'Map'}</span><span class="mc-meta"></span><span class="mc-code">L1</span></div>
+      <div class="cap"><span class="label">${icon('maps')}Map</span><span class="meta"></span><span class="hint">M</span></div>
+      <div class="wrap"><canvas></canvas><div class="toast"></div></div>
+      <div class="legend">${legend}</div>`;
+    this.wrapEl = this.el.querySelector('.wrap');
+    this.fitPx = 0; // vellum: the small map's width in CSS px, measured from the panel (0 = measure again)
     this.canvas = this.el.querySelector('canvas');
     this.meta = this.el.querySelector('.meta');
     this.bandMeta = this.el.querySelector('.mc-meta'); this.bandCode = this.el.querySelector('.mc-code');
@@ -62,8 +71,10 @@ export class Minimap {
     this.time = 0; this.acc = 0; this.dirty = true; this.toastT = 0;
     this.seen = new Map(); // monster id -> {x, y, t}
     this.dpr = 1;
+    this.onResize = () => { this.fitPx = 0; this.dirty = true; };
+    if (this.vel && typeof window !== 'undefined') window.addEventListener('resize', this.onResize);
     this.unsub = [
-      this.bus.on('settings:changed', () => { this.readColors(); this.layerKey = ''; this.dirty = true; }),
+      this.bus.on('settings:changed', () => { this.readColors(); this.fitPx = 0; this.layerKey = ''; this.dirty = true; }),
       this.bus.on('level:enter', () => { this.seen.clear(); this.layerKey = ''; this.dirty = true; }),
       this.bus.on('game:start', () => { this.seen.clear(); this.layerKey = ''; this.dirty = true; }),
     ];
@@ -84,6 +95,10 @@ export class Minimap {
     this.colors.dither = opt('dither') || 'rgba(208,220,113,.09)';
     this.colors.ink = opt('ink') || 'rgba(232,193,90,.55)';
     this.vignette = opt('vignette') !== '0';
+    this.colors.memory = opt('memory') || 'rgba(4, 3, 2, .5)'; // the veil over explored-but-unseen tiles
+    // A theme on a light ground (vellum) fades remembered tiles instead: a full-canvas veil would tint the
+    // unexplored ground too and hide the paper under it.
+    const ma = parseFloat(opt('memory-alpha')); this.memoryAlpha = Number.isFinite(ma) ? ma : null;
     const gk = parseFloat(opt('glow')); this.glowK = Number.isFinite(gk) ? gk : 1;
     this.dither = null; this.layerKey = '';
   }
@@ -122,6 +137,16 @@ export class Minimap {
     return this.visible;
   }
 
+  /** The small size's scale: fixed, or in the vellum theme whatever fills the panel's width. */
+  smallScale() {
+    if (!this.vel) return this.scale;
+    const g = this.ctx.getGame();
+    const w = g && g.level ? g.level.width : 0;
+    if (!w) return this.scale;
+    if (!this.fitPx && !this.big && this.visible) { const cw = this.wrapEl.clientWidth; if (cw > 40) this.fitPx = cw; }
+    return this.fitPx ? Math.max(2, this.fitPx / w) : this.scale;
+  }
+
   toast(text) { this.toastEl.textContent = text; this.toastEl.classList.add('show'); this.toastT = 1.1; }
 
   update(dt) {
@@ -129,7 +154,7 @@ export class Minimap {
     if (this.toastT > 0) { this.toastT -= dt; if (this.toastT <= 0) this.toastEl.classList.remove('show'); }
     if (!this.visible) return;
     // smooth zoom toward the target scale (critically damped-ish lerp)
-    const target = (this.big ? this.bigScale : this.scale) * (this.big ? this.userZoom : 1);
+    const target = this.big ? this.bigScale * this.userZoom : this.smallScale();
     const zooming = Math.abs(this.cur - target) > 0.02;
     if (zooming) { this.cur += (target - this.cur) * Math.min(1, dt * 14); if (Math.abs(this.cur - target) <= 0.02) this.cur = target; }
     if (!zooming && this.acc < 0.08 && !this.dirty) return; // ~12 Hz is plenty; pulses read fine
@@ -222,9 +247,12 @@ export class Minimap {
       c.fillStyle = grad; c.fillRect(0, 0, W, H);
     }
     // cached tiles, dimmed to "memory" except where the player currently sees
+    const fade = !allLit && this.memoryAlpha !== null;
+    if (fade) c.globalAlpha = this.memoryAlpha;
     c.drawImage(this.layer, 0, 0, W, H);
+    c.globalAlpha = 1;
     if (!allLit) {
-      c.fillStyle = 'rgba(4, 3, 2, .5)'; c.fillRect(0, 0, W, H);
+      if (!fade) { c.fillStyle = C.memory; c.fillRect(0, 0, W, H); }
       const sx = this.layer.width / W, sy = this.layer.height / H;
       for (let y = 0; y < lv.height; y++) for (let x = 0; x < lv.width; x++) {
         if (!lv.isVisible(x, y)) continue;
@@ -283,12 +311,14 @@ export class Minimap {
     const meta = `Lv <b>${lv.depth}</b> · <b>${pct}%</b>${this.big && this.userZoom !== 1 ? ` · <b>${Math.round(this.userZoom * 100)}%</b>` : ''}`;
     if (this.metaHtml !== meta) {
       this.metaHtml = meta; this.meta.innerHTML = meta;
-      this.bandMeta.textContent = `${pct}%${this.big && this.userZoom !== 1 ? ` · ${Math.round(this.userZoom * 100)}%` : ''}`;
+      this.bandMeta.textContent = this.vel
+        ? `${pct} parts in 100 charted${this.big && this.userZoom !== 1 ? ` · ${Math.round(this.userZoom * 100)}%` : ''}`
+        : `${pct}%${this.big && this.userZoom !== 1 ? ` · ${Math.round(this.userZoom * 100)}%` : ''}`;
       this.bandCode.textContent = `L${lv.depth}`;
     }
   }
 
-  dispose() { for (const u of this.unsub) u(); this.el.remove(); }
+  dispose() { for (const u of this.unsub) u(); if (typeof window !== 'undefined') window.removeEventListener('resize', this.onResize); this.el.remove(); }
 }
 
 function dot(c, x, y, r, col) { c.fillStyle = col; c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill(); }

@@ -576,6 +576,58 @@ export class Lighting {
     return out;
   }
 
+  /**
+   * HAND A FIXED POOL OF LIGHTS TO THE NEAREST SPOTS WITHOUT THE ROOM CHANGING BRIGHTNESS AS YOU WALK.
+   *
+   * There are five torch lights for a level that has seventeen torches, so slots are reassigned as the
+   * player moves. That was done by index — slot i lit the i-th nearest torch, at full strength, and any
+   * torch past 17 units was set to intensity 0 outright. Both halves popped: stepping one tile could
+   * hand slot 3 from the torch behind you (6,25) to one across the level (35,24), so the room you just
+   * left went dark and a far one lit up between two frames. That is the "why does the room brighten up
+   * like that" the owner filmed — and it is the same cut the mood crossfade above exists to avoid.
+   *
+   * Two rules fix it. A slot FADES OUT before it changes torch and fades in on the new one (0.35s, the
+   * mood's half-second felt sluggish on a light this local), and a torch DIMS over the last few units
+   * before the cutoff instead of vanishing at full strength. Assignment is by identity rather than by
+   * index, so a light keeps its torch while it stays in the set and no torch is ever held by two slots
+   * (which would double its brightness for the length of a crossfade).
+   *
+   * Sets `poolSpot` (the spot this light is on, or null) and `poolGain` (0..1) on each light's userData.
+   * @param {THREE.Light[]} lights the pool
+   * @param {{d:number}[]} sorted every candidate spot, nearest first (see `nearest`)
+   * @param {number} dt seconds
+   * @param {{cut:number, allLit?:boolean, enabled?:boolean, fadeSeconds?:number, rampUnits?:number}} o
+   */
+  assignPool(lights, sorted, dt, { cut, allLit = false, enabled = true, fadeSeconds = 0.35, rampUnits = 4 }) {
+    const want = [];
+    for (const sp of sorted) { if (want.length >= lights.length) break; if (enabled && (allLit || sp.d <= cut)) want.push(sp); }
+    // a slot that already holds a wanted spot keeps it; the rest queue up for the slots that are free
+    for (const l of lights) { const u = l.userData; if (u.poolSpot && !want.includes(u.poolSpot)) u.wantsRelease = true; else u.wantsRelease = false; }
+    const held = new Set(lights.map((l) => (l.userData.wantsRelease ? null : l.userData.poolSpot)).filter(Boolean));
+    const queue = want.filter((sp) => !held.has(sp));
+    const step = dt / Math.max(0.01, fadeSeconds);
+    for (const l of lights) {
+      const u = l.userData;
+      if (u.poolFade === undefined) u.poolFade = 0;
+      if (u.wantsRelease || !u.poolSpot) {
+        u.poolFade = Math.max(0, u.poolFade - step);
+        if (u.poolFade <= 0) {
+          const next = queue.shift() || null;
+          // the first assignment of a level is not a change of light: come up already lit, or every
+          // torch would fade in from black each time the player takes the stairs
+          if (next && !u.poolEverSet) { u.poolFade = 1; u.poolEverSet = true; }
+          u.poolSpot = next;
+        }
+      } else {
+        u.poolFade = Math.min(1, u.poolFade + step);
+        u.poolEverSet = true;
+      }
+      const sp = u.poolSpot;
+      const near = !sp ? 0 : allLit ? 1 : Math.max(0, Math.min(1, (cut - sp.d) / Math.max(0.01, rampUnits)));
+      u.poolGain = u.poolFade * near;
+    }
+  }
+
   /** Choose torch spots for a level (wall faces looking into rooms) and apply the depth look. */
   setLevel(level) {
     const rng = createRng(level.seed * 31 + 7);
@@ -803,10 +855,12 @@ export class Lighting {
     put(player.x, 1.5, player.z, this.point.color, this.point.intensity * 0.9);
     // Nearest torches get the real lights.
     const sorted = this.nearest(this.torchSpots, player.x, player.z);
+    this.assignPool(this.torches, sorted, dt, { cut: 17, allLit: state.allLit, enabled: !!G.torches });
     for (let i = 0; i < TORCH_POOL; i++) {
       const l = this.torches[i];
-      const sp = sorted[i];
-      if (!sp || !G.torches || (sp.d > 17 && !state.allLit)) { l.intensity = 0; continue; }
+      const sp = l.userData.poolSpot;
+      const gain = l.userData.poolGain;
+      if (!sp || gain <= 0.001) { l.intensity = 0; continue; }
       const f = torchFlicker(t, sp.phase);
       l.position.set(sp.x + sp.nx * 0.32, 0.95, sp.z + sp.nz * 0.32);
       // THE BOARD LOOK (render/look.js): the torch's point light sat 0.95 up with a 10-unit reach, so it flooded the whole floor in
@@ -815,7 +869,7 @@ export class Lighting {
       if (LOOK.base) l.position.set(sp.x + sp.nx * 0.6, 0.45, sp.z + sp.nz * 0.6);
       // a revealed map multiplies the room light several times over; in the warm bands the torches keep pace, or
       // their pools vanish (in the cold bands a stronger fire only turned the pale rooms warm, review-03 F1d)
-      l.intensity = TORCH_TUNE.i * f * (1 + lit * TORCH_TUNE.revealBoost * (this.depth <= 5 ? 1 : 0));
+      l.intensity = TORCH_TUNE.i * f * (1 + lit * TORCH_TUNE.revealBoost * (this.depth <= 5 ? 1 : 0)) * gain;
       // a boosted fire on a revealed map throws a tighter pool, or its orange spills over the cool side
       l.distance = TORCH_TUNE.dist * (lit && this.depth <= 5 ? TORCH_TUNE.revealDist : 1);
       if (LOOK.base) { l.distance = 3.6; l.intensity *= 0.45; }
@@ -836,9 +890,10 @@ export class Lighting {
     } else this.torchSpot.intensity = 0;
     // The fires standing in the rooms: nearest four get the pool, each on its own beat.
     const near = this.nearest(this.moodSources, player.x, player.z);
+    this.assignPool(this.moodLights, near, dt, { cut: 15, allLit: state.allLit, enabled: !!G.decor, rampUnits: 3.5 });
     for (let i = 0; i < MOOD_POOL; i++) {
-      const l = this.moodLights[i], sp = near[i];
-      if (!sp || !G.decor || (sp.d > 15 && !state.allLit)) { l.intensity = 0; continue; }
+      const l = this.moodLights[i], sp = l.userData.poolSpot, gain = l.userData.poolGain;
+      if (!sp || gain <= 0.001) { l.intensity = 0; continue; }
       const f = moodFlicker(sp.kind, t, sp.phase);
       l.position.set(sp.x, sp.y, sp.z);
       l.color.setHex(sp.color);

@@ -1093,12 +1093,12 @@ function rimMaterials() {
   const m = new THREE.MeshBasicMaterial({ color: 0x120c10, depthWrite: false });
   const fog = getFog();
   if (fog) { patchFog(m, fog); m.customProgramCacheKey = () => 'fogofwar-v2|kitrim'; }
-  pixelSnap(m);
+  pixelSnap(m, { rigid: true });
   rimMats = [m, m];
   return rimMats;
 }
 function materials() {
-  if (!snapped) snapped = kitMaterials().map((m) => pixelSnap(m));
+  if (!snapped) snapped = kitMaterials().map((m) => pixelSnap(m, { rigid: true }));
   return snapped;
 }
 

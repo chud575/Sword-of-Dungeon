@@ -13,9 +13,14 @@ export class Lifecycle {
     this.bus = bus; this.getGame = getGame; this.getSettings = getSettings; this.debugMode = debugMode; this.onSaved = onSaved;
     this.playClock = 0; this.lastSave = { reason: '', at: 0, ok: null };
     this.saves = 0;
-    this.onVisibility = () => { if (typeof document !== 'undefined' && document.hidden) this.hidden(); };
-    this.onPageHide = () => this.autoSave('pagehide');
-    this.onBeforeUnload = () => this.autoSave('unload');
+    // Only a page that is REALLY hidden pauses and saves. WebKit on iOS can deliver a visibilitychange while the page
+    // stays visible (the app switcher peeked and let go, a system sheet over the web view); acting on the event alone
+    // paused the game and wrote a save mid-play. And one hide fires several of these handlers (visibilitychange,
+    // then pagehide) — one save covers them all.
+    this.lastHideSave = 0;
+    this.onVisibility = () => { if (typeof document !== 'undefined' && document.visibilityState === 'hidden') this.hidden(); };
+    this.onPageHide = () => this.hideSave('pagehide');
+    this.onBeforeUnload = () => this.hideSave('unload');
     this.unsub = [
       bus.on('game:paused', (p) => { if (p.paused) this.autoSave('pause'); }),
       bus.on('game:start', () => { this.playClock = 0; }),
@@ -40,7 +45,15 @@ export class Lifecycle {
     const g = this.getGame();
     if (!g || g.over || g.placeholder || this.debugMode) return;
     g.setPaused(true);
-    this.autoSave('hidden');
+    this.hideSave('hidden');
+  }
+
+  /** A save for the page going away; several events report one departure, so they share one save. */
+  hideSave(reason) {
+    const now = Date.now();
+    if (now - this.lastHideSave < 2000) return false;
+    this.lastHideSave = now;
+    return this.autoSave(reason);
   }
 
   /** Called once per frame with unpaused-play seconds; drives the periodic autosave. */

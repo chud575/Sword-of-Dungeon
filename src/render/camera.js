@@ -29,6 +29,20 @@ const BASE_YAW = 0;
 // this lands on 2 device pixels per texel: the wider, zoomed-out view the game opens on, which
 // shows enough of the room around you to plan a route. Zooming in steps to 3 and beyond.
 const BASE_TILES_TALL = 14.0; // world tiles visible top-to-bottom at zoom 1
+/**
+ * WHOLE-TEXEL SCROLLING, OFF BY DEFAULT (`?camsnap=1` to try it).
+ *
+ * The camera can land on the screen's texel lattice instead of gliding: round the followed point to
+ * whole texels before placing the camera, and the whole frame steps together in 2px units — nothing
+ * resamples and nothing can stutter against anything else. That was the fix for props rounding to the
+ * lattice while the unsnapped floor slid smoothly under them (render/props.js `pixelSnap`), and it
+ * works, but it makes every scroll 2px-granular. With solid props no longer snapped there is nothing
+ * left to reconcile, and the owner chose smooth scrolling ("Straight 3d", 2026-09-16).
+ *
+ * Only the plan view can do it at all (see applyFrustum), and only square to the grid: a yawed or
+ * perspective camera glides regardless.
+ */
+const CAM_SNAP = (() => { try { return new URLSearchParams(location.search).get('camsnap') === '1'; } catch { return false; } })();
 /** Zoom stops: each wheel notch moves to the neighbouring stop. */
 export const ZOOM_STOPS = [0.72, 0.85, 1, 1.18, 1.4];
 /**
@@ -62,6 +76,7 @@ export class CameraRig {
   constructor(aspect = 16 / 9, { bus = globalBus } = {}) {
     this.aspect = aspect || 1;
     this.viewportPx = 900;      // drawing-buffer height; renderer keeps this current
+    this.devicePxH = 0;         // the REAL drawing-buffer height, for the scroll lattice only (see CAM_SNAP)
     this.texelSize = 3;         // device pixels per sprite texel - always an integer
     // Near/far span the whole rig: the camera sits ~13 units out and must never clip the dungeon.
     this.orthoCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -60, 200);
@@ -233,6 +248,12 @@ export class CameraRig {
 
   /** Renderer tells the rig the drawing-buffer height so the texel size can stay exact. */
   setViewportHeight(px) { if (px > 0 && px !== this.viewportPx) { this.viewportPx = px; this.applyFrustum(); } }
+
+  /**
+   * The drawing buffer's real height in device pixels, used ONLY to size the scroll lattice — it must
+   * not touch the frustum, which derives its own whole-texel size from `viewportPx` and owns the framing.
+   */
+  setDevicePxHeight(px) { if (px > 0) this.devicePxH = px; }
 
   /** Follow a world position with a look-ahead direction (world-space, scaled). */
   follow(pos, dir = null) {
@@ -467,7 +488,16 @@ export class CameraRig {
     const dist = this.currentDistance * (this._trDistMul || 1);
     const yaw = this.currentYaw;
     const y = Math.sin(elev) * dist, r = Math.cos(elev) * dist;
-    const tx = this.smoothTarget.x, tz = this.smoothTarget.z;
+    let tx = this.smoothTarget.x, tz = this.smoothTarget.z;
+    // Round the followed point onto the screen's texel lattice (see CAM_SNAP). A step north is
+    // foreshortened by sin(elevation), so depth needs the larger world step to cover the same pixels.
+    if (CAM_SNAP && c.isOrthographicCamera && !this.overview && Math.abs(yaw) < 1e-6 && this.devicePxH > 0) {
+      const S = Math.max(1, this.texelSize);
+      const pxPerWorld = this.devicePxH / Math.max(1e-6, this.viewHeight);
+      const stepX = S / pxPerWorld, stepZ = S / Math.max(1e-6, pxPerWorld * Math.abs(Math.sin(elev)));
+      tx = Math.round(tx / stepX) * stepX;
+      tz = Math.round(tz / stepZ) * stepZ;
+    }
     c.position.set(tx + Math.sin(yaw) * r, y + this.dive, tz + Math.cos(yaw) * r);
     this._tmp.set(tx, this.lookHeight + this.dive * 0.4, tz);
     c.lookAt(this._tmp);

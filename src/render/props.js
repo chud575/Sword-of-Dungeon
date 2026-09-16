@@ -18,6 +18,7 @@ import { PX_PER_TILE, frameTexelSize, texelGrid, SPRITE_MASK_ALPHA } from './spr
 // is being evaluated: furniture.js only declares painters and a registry at module scope, and this
 // file only calls `buildFurniture` from a method.
 import { buildFurniture, isFurniture, FURNITURE_TYPES } from './props/furniture.js';
+import { buildFreeportChest } from './props/freeport.js';
 // ...and the same for the other half of the catalogue: the scatter, the floor decals and the wall
 // dressing that make a furnished room a lived-in one (docs/AMBIENCE.md §5.1-§5.3).
 import { buildDressing, isDressing, DRESSING_TYPES } from './props/dressing.js';
@@ -150,24 +151,63 @@ export function syncSpriteSnap(renderer, camera) {
  * up to half a texel, which is the price of the grid and is what the cast pays too.
  *
  * The injection rides on whatever `litMaterial` already installed (the fog patch), never replaces it.
+ *
+ * RIGID, FOR SOLID MESHES (`{ rigid: true }`). Rounding every vertex on its own is only safe for a flat
+ * quad, whose corners are an exact multiple of S apart. A modelled prop — a kit crate, a Freeport table —
+ * has hundreds of vertices at arbitrary sub-texel offsets, and as the follow camera glides each one
+ * crosses its rounding boundary on a different frame: the silhouette wobbled and melted every time the
+ * hero took a step. The rigid path still rounds every vertex to the lattice, but it rounds the vertex's
+ * OFFSET FROM THE WORLD ORIGIN'S snapped projection, not its raw screen position. Under the orthographic
+ * camera a pan, a shake or the stairs dive is a pure translation, so that offset never changes while the
+ * camera moves: each vertex rounds the same way every frame, the prop keeps its exact shape and steps
+ * across the screen in whole texels, and its edges still land on the one lattice the pickups and the cast
+ * use. (Only snapping the origin and dragging the vertices along kept the shape too, but left the prop's
+ * own edges between grid lines: audit PROPS onGrid 0.74 → 0.47.) A zoom or tilt change re-rounds the
+ * shape once, which reads as a resize, not a wobble. `?snap=vertex` restores the old per-vertex rounding.
  */
-function pixelSnap(mat) {
-  if (mat.userData.pixelSnapped) return mat;
+const SNAP_MODE = (() => { try { return new URLSearchParams(location.search).get('snap'); } catch { return null; } })();
+const SNAP_VERTEX_ONLY = SNAP_MODE === 'vertex';
+/**
+ * SOLID MESHES ARE NOT SNAPPED (the owner's call, 2026-09-16: "Straight 3d").
+ *
+ * The lattice is right for art that IS pixel art — the cast, the pickup sprites, the wall plates: flat
+ * quads carrying a painted bitmap, whose texels should land on whole pixels. It was wrong for MODELLED
+ * geometry. A kit crate or a Freeport table is 3D, and rounding it to the grid bought crispness those
+ * meshes cannot use while costing stability the eye catches at once: the floor is not snapped, so it
+ * slid smoothly while every snapped prop held still for two or three frames and then jumped a whole
+ * texel. Measured at the play camera, walking a hundredth of a tile a step — floor 0.21px EVERY step,
+ * the prop beside it 0, 0, 0.6, 0, 0, 0.6 — and on screen that read as props wobbling and melting.
+ * Solid props now simply sit in 3D space and slide with the floor. `?snap=rigid` (whole-body rounding)
+ * and `?snap=vertex` (the original per-vertex rounding) put the lattice back for comparison.
+ */
+const SOLID_SNAP = SNAP_MODE === 'rigid' || SNAP_MODE === 'vertex';
+function pixelSnap(mat, { rigid = false } = {}) {
+  if ((rigid && !SOLID_SNAP) || mat.userData.pixelSnapped) return mat;
   mat.userData.pixelSnapped = true;
+  if (rigid) mat.userData.pixelSnapRigid = true;
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = function (shader, renderer) {
     if (prev) prev.call(this, shader, renderer);
     shader.uniforms.uSnapViewport = _snapVp;
     shader.uniforms.uSnapTexel = _snapTexel;
-    shader.vertexShader = 'uniform vec2 uSnapViewport; uniform float uSnapTexel;\n' + shader.vertexShader.replace(
+    shader.uniforms.uSnapRigid = { value: rigid && !SNAP_VERTEX_ONLY ? 1 : 0 };
+    shader.vertexShader = 'uniform vec2 uSnapViewport; uniform float uSnapTexel; uniform float uSnapRigid;\n' + shader.vertexShader.replace(
       '#include <project_vertex>',
       `#include <project_vertex>
       {
         if (gl_Position.w > 0.0001) {
           float S = max(1.0, uSnapTexel);
-          vec2 vPx = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * uSnapViewport;
-          vec2 outPx = floor(vPx / S + 0.5) * S;
-          gl_Position.xy = (outPx / uSnapViewport * 2.0 - 1.0) * gl_Position.w;
+          if (uSnapRigid > 0.5) {
+            vec4 o = projectionMatrix * viewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+            vec2 oPx = (o.xy / o.w * 0.5 + 0.5) * uSnapViewport;
+            vec2 vPx = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * uSnapViewport;
+            vec2 outPx = floor(oPx / S + 0.5) * S + floor((vPx - oPx) / S + 0.5) * S;
+            gl_Position.xy = (outPx / uSnapViewport * 2.0 - 1.0) * gl_Position.w;
+          } else {
+            vec2 vPx = (gl_Position.xy / gl_Position.w * 0.5 + 0.5) * uSnapViewport;
+            vec2 outPx = floor(vPx / S + 0.5) * S;
+            gl_Position.xy = (outPx / uSnapViewport * 2.0 - 1.0) * gl_Position.w;
+          }
         }
       }`);
   };
@@ -1037,7 +1077,8 @@ export class PropFactory {
    * pool are unchanged: they are what says "loot" rather than "furniture".
    */
   chest(g) {
-    const { mesh, glints } = buildKitChest(false);
+    // the imported Freeport chest when it is on (props/freeport.js), the kit's otherwise
+    const { mesh, glints } = buildFreeportChest(false) || buildKitChest(false);
     g.add(mesh);
     g.add(pickupPool(0xffb340, 0.7, { opacity: 0.12 }));
     const sh = contactShadow(1, { strength: 0.62 });
@@ -1050,7 +1091,7 @@ export class PropFactory {
   /** Open chest for the loot moment: lid thrown back, gold heaped inside, light spilling out. */
   chestOpen() {
     const g = new THREE.Group();
-    const { mesh, glints } = buildKitChest(true);
+    const { mesh, glints } = buildFreeportChest(true) || buildKitChest(true);
     g.add(mesh);
     const sh = contactShadow(1, { strength: 0.62 });
     sh.scale.set(0.98, 0.68, 1); sh.position.set(0.03, 0.013, 0.05);
@@ -1228,7 +1269,7 @@ export class PropFactory {
    */
   decor(d) {
     if (!d) return null;
-    const o = { variant: d.variant | 0, facing: d.facing || 's', blocking: !!d.blocking, x: d.x | 0, y: d.y | 0, span: d.span | 0 };
+    const o = { variant: d.variant | 0, facing: d.facing || 's', blocking: !!d.blocking, x: d.x | 0, y: d.y | 0, span: d.span | 0, model: d.model };
     if (isFurniture(d.type)) return buildFurniture(d.type, o);
     if (isDressing(d.type)) return buildDressing(d.type, o);
     return null;
