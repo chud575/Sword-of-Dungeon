@@ -174,7 +174,16 @@ export function patchFog(material, fog) {
 const WHITE = new THREE.Color(0xffffff);
 const SWORD_VIOLET = new THREE.Color(0xc9b0ff);
 
-const TORCH_POOL = 5;
+// A WALL TORCH IS PART OF THE WORLD, SO IT MUST NOT BE A FUNCTION OF WHERE YOU STAND
+// (owner, 2026-09-18: "These flickers, changes, etc should not be happening"). The pool is only a
+// hardware budget — forward rendering pays per light per fragment — and the budget is only invisible
+// while every torch that can reach a VISIBLE pixel holds a slot. Measured on seed 42 depth 1: 17
+// torches on the level, 2-5 of them inside the frame at once, 4-7 once you include the ones just
+// off-frame whose pool still falls on floor you can see. Five slots could not cover that, so the
+// pool was denying slots to torches in shot and the ramp was dimming others by hero distance.
+// Eight covers the measured worst case with one to spare; `low` keeps five for the phone.
+const TORCH_POOL = 8;
+const TORCH_POOL_LOW = 5;
 const TEMPLE_POOL = 2;
 const MOOD_POOL = 4;
 
@@ -421,6 +430,64 @@ export function depthTint(depth) {
  */
 export const TORCH_TUNE = { g: 0.31, gF: 0.08, b: 0.10, bF: 0.05, i: 20, dist: 10, spot: 12, revealBoost: 2.0, revealDist: 0.75, boostG: 0.04 };
 export const COOL_TUNE = { key: 0.56, sky: 0.3, ground: 0.2, hex: 0x88aad8 };
+/**
+ * THE REST OF THE LIVE KNOBS, for `debug/lightPanel.js` (`?lights=1`). Every light's intensity,
+ * colour and reach is recomputed in `update()` every frame — from the pool assignment, the flicker
+ * and the depth band — so poking a THREE.Light does nothing that survives the next frame. These are
+ * the values the frame is built FROM, which is why the panel edits these and not the lights.
+ * `BASE_TUNE` multiplies the depth band's own ambient/key (`baseHemi`/`baseMoon`, set per level).
+ */
+/**
+ * The carried lantern is TWO lights: `point` (the glow at the player's own centre, which is what
+ * tints the stone around them) and `spot` (the raked throw that models the cast and lays the long
+ * shadow across the flagstones — the frame's main shadow caster). Both are here.
+ */
+export const LANTERN_TUNE = {
+  on: 3.6, off: 1.3, dist: 6, sword: 0.6, decay: 2, height: 2.6, breatheAmp: 0.04, breatheHz: 1.7, litScale: 1.7,
+  spotI: 10, spotILit: 6, spotDist: 26, spotAngle: 0.66, spotPenumbra: 0.55, spotH: 6.8, spotX: 4.2, spotZ: 3.2, spotWhite: 0.18,
+};
+// THE KEY'S DIRECTION IS DELIBERATELY NOT A KNOB. It is set once in the constructor, raked in from
+// the left at 29°, and the reasons are measured: every sprite's fake normal peaks in the MIDDLE of
+// the body, so a key climbing toward straight down lights bodies down their centre line (pillow
+// shading, already at `screenTruth.test.js`'s ceiling), and the whole cast is PAINTED for a
+// top-left key (`spriteStyle.test.js`: `LIT = {x:-1,y:-1}`), so swinging it right would light the
+// art against its own painted shadows. Strength and colour are tunable; the angle is not.
+export const DECOR_TUNE = { i: 1, dist: 1 };
+export const POOL_TUNE = { torchCut: 17, torchRamp: 4, decorCut: 15, decorRamp: 3.5, fade: 0.35, ramp: false };
+/**
+ * WHERE SHADOWS COME FROM. Until 2026-09-18 the answer was "the player", and that was the bug the
+ * owner caught: the only two lights in the scene that cast were the lantern spot, parked at the
+ * hero plus a fixed offset, and a torch spot that re-seated itself on whichever torch was nearest
+ * him. A spot is a POINT, so the direction a prop's shadow falls is the vector from that point to
+ * the prop — walk past a stool and the stool is lit from the other side, so its shadow swings
+ * around it and changes length. Measured: hero 16->22 moved the caster 20.2->26.2, and walking one
+ * corridor west to east the torch caster hopped between six different torches, each hop a one-frame
+ * jump with nothing to smooth it (the 0.35s crossfade is on INTENSITY only). Meanwhile `moon`, the
+ * one light whose direction is fixed for the whole level, was not casting at all.
+ *
+ * It is now the other way round. `sun` is a directional light with a CONSTANT direction: a prop's
+ * shadow is a property of the prop and the level, identical wherever you stand or look. Its shadow
+ * camera follows the view so the map keeps its resolution, but a frustum moving does not move a
+ * shadow — only what is inside it changes.
+ *
+ * `share` is the fraction of the key's intensity moved onto the caster, so shadows darken part of
+ * the key rather than the whole frame, and total light does not move (the rest stays on `moon`).
+ * The direction stays in the top-left quadrant every sprite is painted for (rule 2 of the header
+ * above: the key's ANGLE is not a knob) but climbs steeper than the key's rake, because at the
+ * key's own 28.9 degrees a 0.82 wall throws a shadow 1.49 tiles long and CLAUDE.md is explicit that
+ * long raking shadows are not this art direction. The sun sits at 52.0 degrees and azimuth 32.1
+ * (the key's is 24.7, the same quadrant the whole cast is painted for), so a wall throws 0.64.
+ *
+ * `source`: 'world' the sun only (default), 'lantern' the old player-relative spots, 'both', 'off'.
+ */
+const SHADOW_SRC = (() => {
+  try {
+    const v = new URLSearchParams(location.search).get('shadows');
+    return ['world', 'lantern', 'both', 'off'].includes(v) ? v : 'world';
+  } catch { return 'world'; }
+})();
+export const SHADOW_TUNE = { source: SHADOW_SRC, share: 0.55, x: -8.6, y: 13, z: -5.4, size: 26, map: 2048, bias: -0.0011, radius: 3.5, near: 1, far: 46 };
+export const BASE_TUNE = { hemi: 1, key: 1 };
 import { LOOK } from './look.js';
 const COOL_KEY = new THREE.Color(COOL_TUNE.hex);
 /** Lean a light colour toward cool blue by k, keeping its luminance (so exposure does not move). */
@@ -432,6 +499,21 @@ function coolLean(c, k) {
 
 /** Scratch colour for the mood crossfade (no per-frame allocation). */
 const _moodTarget = new THREE.Color();
+/**
+ * `?moodkey=1` puts the per-room mood back onto the global key light, the way it shipped until
+ * 2026-09-16. It is off because a room's mood was lighting the WHOLE FRAME: measured on seed 42
+ * depth 1, the key ran ×1.00 at #958c81 under `torchlit` (1476 tiles) and ×2.25 at #8abe96 under
+ * `fungal` (25 tiles) or ×2.31 at #8d9db3 under `cold` (9 tiles). Stepping one tile through a
+ * doorway therefore more than doubled the key and turned it green-grey across the entire dungeon,
+ * corridors behind the player included, in a 0.45s sweep — the owner filmed the same floor reading
+ * warm amber in one frame and cool grey-green in the next.
+ *
+ * A ROOM IS NOW TOLD BY ITS OWN STONE AND ITS OWN FIRES (owner's decision, "No global tone change
+ * at all"): the floor field's per-room Dungeon Crawlers material, and the decor lights actually
+ * burning in it (`moodLights`, which are local point lights and stay). The key light is the same
+ * everywhere on a level. Mood still drives the torch BUDGET and the dust, which are not tone.
+ */
+const MOOD_ON_KEY = (() => { try { return new URLSearchParams(location.search).get('moodkey') === '1'; } catch { return false; } })();
 
 /** Layered, deterministic torch flicker (8 Hz body + 0.5 Hz drift + gusts) in 0..1. */
 export function torchFlicker(t, phase) {
@@ -464,6 +546,18 @@ export class Lighting {
     // is what gives a lit board its relief.
     this.moon.position.set(-13.5, 8.2, -6.2);
     scene.add(this.moon);
+    // THE ONLY SHADOW CASTER THE WORLD OWNS (see SHADOW_TUNE). Fixed direction, so a prop's shadow
+    // never answers to where the hero is standing or where the camera is pointed.
+    this.sun = new THREE.DirectionalLight(0x9fb4d8, 0);
+    // The billboards take exactly one key direction and it must be `moon`, the angle the art is
+    // painted for — see collectLights in sprites/spriteBillboard.js.
+    this.sun.userData.shadowOnly = true;
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(quality === 'low' ? 1024 : SHADOW_TUNE.map, quality === 'low' ? 1024 : SHADOW_TUNE.map);
+    this.sun.shadow.bias = SHADOW_TUNE.bias; this.sun.shadow.radius = SHADOW_TUNE.radius;
+    this.sun.target = new THREE.Object3D();
+    this._sunSize = 0;
+    scene.add(this.sun); scene.add(this.sun.target);
     // Player lantern: a cool shadow-casting spot from above (soft penumbra) plus a local point glow.
     this.spot = new THREE.SpotLight(0xd6e4ff, 24, 26, 0.62, 0.55, 1.5);
     this.spot.castShadow = true;
@@ -475,7 +569,7 @@ export class Lighting {
     this.point = new THREE.PointLight(0xbfd8ff, 2.0, 6, 2);
     scene.add(this.point);
     this.torches = [];
-    for (let i = 0; i < TORCH_POOL; i++) {
+    for (let i = 0; i < (quality === 'low' ? TORCH_POOL_LOW : TORCH_POOL); i++) {
       const l = new THREE.PointLight(0xff6a20, 0, 8, 2);
       l.userData.phase = this.rng.float(0, 100);
       scene.add(l); this.torches.push(l);
@@ -561,10 +655,32 @@ export class Lighting {
   setGroups(g) {
     if (!g) return this.groups;
     for (const k of Object.keys(this.groups)) if (k in g) this.groups[k] = g[k] ? 1 : 0;
-    // The two shadow casters are switched at the source: an intensity multiplier would still pay
-    // for the shadow map every frame, and the point of the toggle is to SEE the cost come off.
-    this.spot.castShadow = !!this.groups.shadows && !!this.groups.lantern;
-    this.torchSpot.castShadow = !!this.groups.shadows && !!this.groups.torches && this.quality !== 'low';
+    return this.applyShadowSource();
+  }
+
+  /**
+   * The LIVE `SHADOW_TUNE`, reachable from the instance. A `debug` session that reaches the tunables
+   * with a dynamic `import()` after Vite has hot-reloaded this file gets a SEPARATE module copy and
+   * mutates an object nobody reads — that has now cost three wrong measurements. Go through here.
+   */
+  get shadowTune() { return SHADOW_TUNE; }
+
+  /** The live `POOL_TUNE`, for the same reason. */
+  get poolTune() { return POOL_TUNE; }
+
+  /**
+   * Wire `castShadow` to the shadow source and the `shadows` group. The casters are switched at the
+   * source rather than dimmed: an intensity multiplier would still pay for the shadow map every
+   * frame, and the point of the toggle is to SEE the cost come off.
+   */
+  applyShadowSource() {
+    const on = !!this.groups.shadows;
+    const src = SHADOW_TUNE.source;
+    const world = on && (src === 'world' || src === 'both');
+    const player = on && (src === 'lantern' || src === 'both');
+    this.sun.castShadow = world;
+    this.spot.castShadow = player && !!this.groups.lantern;
+    this.torchSpot.castShadow = player && !!this.groups.torches && this.quality !== 'low';
     return this.groups;
   }
 
@@ -623,7 +739,15 @@ export class Lighting {
         u.poolEverSet = true;
       }
       const sp = u.poolSpot;
-      const near = !sp ? 0 : allLit ? 1 : Math.max(0, Math.min(1, (cut - sp.d) / Math.max(0.01, rampUnits)));
+      // DISTANCE RAMP (`POOL_TUNE.ramp`, toggleable in debug/lightPanel.js). On, a torch fades in over
+      // the last `rampUnits` before the cut, which is what stops a light appearing abruptly when the
+      // pool hands it a slot. The cost is that a torch's brightness then depends on how far the PLAYER
+      // is from it rather than on the room: a torch reads full inside 13 units, half at 15, gone at 17,
+      // so a hall brightens as you walk into it. Off, anything inside the cut burns at full strength and
+      // only the slot crossfade (`fade`) smooths a hand-over — the room lights itself, and the pop comes
+      // back for any torch that enters the pool already close to you.
+      const ramped = Math.max(0, Math.min(1, (cut - sp?.d) / Math.max(0.01, rampUnits)));
+      const near = !sp ? 0 : allLit ? 1 : POOL_TUNE.ramp ? ramped : 1;
       u.poolGain = u.poolFade * near;
     }
   }
@@ -732,7 +856,7 @@ export class Lighting {
     };
     for (const d of level.decor || []) {
       const spec = DECOR_LIGHTS[d.type];
-      if (!spec) continue;
+      if (!spec || d.hidden) continue;
       const v = d.variant | 0;
       if (spec.maxV !== undefined && v > spec.maxV) continue;
       if (spec.minV !== undefined && v < spec.minV) continue;
@@ -742,7 +866,9 @@ export class Lighting {
       // (render/props/models.js), and the light has to go out with the flame. Fungus and
       // alchemy keep their glow: neither of those needs a match.
       if (FIRE_KINDS.has(spec.kind) && FIRELESS_MOODS.has(moodOf(d.x, d.y))) continue;
-      src.push({ x: d.x, y: spec.y, z: d.y, color: spec.color, intensity: spec.intensity, radius: spec.radius, kind: spec.kind, phase: rng.float(0, 100) });
+      // a builder footprint stretches the piece from its NW tile; its fire burns in the middle of it
+      const cx = d.x + (Math.max(1, d.tilesX | 0) - 1) / 2, cz = d.y + (Math.max(1, d.tilesY | 0) - 1) / 2;
+      src.push({ x: cx, y: spec.y + (typeof d.lift === 'number' ? d.lift : 0), z: cz, color: spec.color, intensity: spec.intensity, radius: spec.radius, kind: spec.kind, phase: rng.float(0, 100) });
     }
     // A flooded room throws its own reflected light: one rippling source over the water it holds.
     for (const r of level.rooms) {
@@ -779,10 +905,16 @@ export class Lighting {
    * @param {number} dt
    * @param {{x:number,z:number}} player world position
    * @param {{lightOn:boolean, sword:boolean, allLit:boolean}} state
+   * @param {{x:number,z:number}} [view] the point the CAMERA is framing (cameraRig.smoothTarget).
+   *   The light pools are a budget for what is on screen, so they are ranked from here and not from
+   *   the hero — "the hero is not the camera" (owner, 2026-09-18). It lags the hero through the
+   *   dead zone and the stairs transitions, which is exactly the frame the player is looking at.
+   *   Falls back to the hero when a caller has no camera (tests, the bestiary).
    */
-  update(dt, player, state) {
+  update(dt, player, state, view) {
     this.time += dt;
     const t = this.time;
+    if (this._shadowSrc !== SHADOW_TUNE.source) { this._shadowSrc = SHADOW_TUNE.source; this.applyShadowSource(); }
     // a revealed WOOD is daylight already: the reveal boost that lifts a dungeon overview turned the forest overview
     // into one lime sheet (review-03 G1c, 57% of the frame above 0.6)
     const lit = state.allLit ? (this.forest ? 0.3 : 1) : 0;
@@ -815,14 +947,57 @@ export class Lighting {
     // (-6, 14, -4) — top-left, the direction every sprite in the game is painted for — so a cold
     // room is a room whose key light has gone blue, which is what cold light actually is. The
     // hemisphere keeps the depth band's own colour and the modelling on the cast survives it.
-    const amb = Math.max(1, this.mood.ambient);
+    //
+    // ...and that is exactly what the mood no longer does, because it was doing it to the whole
+    // level at once rather than to the room (see MOOD_ON_KEY). The lesson above still stands for
+    // anyone tempted to put room colour back: it does not belong on a point light or the hemisphere
+    // either. It belongs in the room's own stone and its own fires.
+    const amb = MOOD_ON_KEY ? Math.max(1, this.mood.ambient) : 1;
+    const fill = MOOD_ON_KEY ? this.mood.fill : 0;
     const G = this.groups;
-    this.hemi.intensity = G.ambient * this.baseHemi * (1 + lit * 2.4) * (state.lightOn ? 1.25 : 1) * amb * (1 + this.mood.fill * 0.12);
-    this.moon.intensity = G.key * this.baseMoon * (1 + lit * 3.0) * amb * (1 + this.mood.fill * 1.25);
-    if (this.moonBase) this.moon.color.copy(this.moonBase).lerp(this.moodColor, Math.min(0.55, this.mood.fill * 0.5));
+    this.hemi.intensity = G.ambient * BASE_TUNE.hemi * this.baseHemi * (1 + lit * 2.4) * (state.lightOn ? 1.25 : 1) * amb * (1 + fill * 0.12);
+    const keyI = G.key * BASE_TUNE.key * this.baseMoon * (1 + lit * 3.0) * amb * (1 + fill * 1.25);
+    if (this.moonBase) {
+      if (MOOD_ON_KEY) this.moon.color.copy(this.moonBase).lerp(this.moodColor, Math.min(0.55, fill * 0.5));
+      else this.moon.color.copy(this.moonBase);
+    }
+    // THE KEY IS SPLIT, NOT ADDED TO (see SHADOW_TUNE). `sun` takes `share` of the key's intensity
+    // and `moon` keeps the rest, so switching the shadow source cannot change the exposure — only
+    // whether that share of the key is occluded.
+    const sunShare = this.sun.castShadow ? Math.max(0, Math.min(1, SHADOW_TUNE.share)) : 0;
+    this.moon.intensity = keyI * (1 - sunShare);
+    this.sun.intensity = keyI * sunShare;
+    this.moon.userData.keyTotal = keyI;   // what the sprites should see: the key before the split
+    this.sun.color.copy(this.moon.color);
+    // The frustum follows the frame; the DIRECTION never moves, which is the whole point.
+    //
+    // BUT A SLIDING FRUSTUM IS NOT A STILL SHADOW. A shadow map is a grid, and moving the grid
+    // continuously re-samples every silhouette against different texels, so edges crawl and fizz as
+    // you walk even though the light has not turned at all. Measured with the camera PINNED and only
+    // the hero moving two tiles: 1.24% of the frame changed by more than 8/255 with the frustum free,
+    // against 0.77% for the old player-relative spot — the fix was worse than the bug. So the centre
+    // is quantised to whole shadow-map texels (0.0127 world units at size 26 over a 2048 map): the
+    // frustum moves in discrete jumps that land the grid back on itself instead of sliding under it.
+    // This snaps in world XZ, not in the light's own basis, so with the sun off-axis it is an
+    // APPROXIMATION rather than a proof — it leaves sub-texel drift. Measured with the camera pinned
+    // and only the hero moving six tiles: 0.46% of the frame changes by more than 8/255, against
+    // 0.89% with shadows off altogether and 2.75% with the old player-relative caster.
+    const vx = view ? view.x : player.x, vz = view ? view.z : player.z;
+    const texel = SHADOW_TUNE.size / Math.max(1, this.sun.shadow.mapSize.x);
+    const qx = Math.round(vx / texel) * texel, qz = Math.round(vz / texel) * texel;
+    this.sun.position.set(qx + SHADOW_TUNE.x, SHADOW_TUNE.y, qz + SHADOW_TUNE.z);
+    this.sun.target.position.set(qx, 0, qz);
+    this.sun.target.updateMatrixWorld();
+    if (this._sunSize !== SHADOW_TUNE.size) {
+      this._sunSize = SHADOW_TUNE.size;
+      const h = SHADOW_TUNE.size / 2, c = this.sun.shadow.camera;
+      c.left = -h; c.right = h; c.top = h; c.bottom = -h;
+      c.near = SHADOW_TUNE.near; c.far = SHADOW_TUNE.far;
+      c.updateProjectionMatrix();
+    }
     // The carried lantern breathes slowly (a lantern, not a torch: no fast flicker).
-    const breathe = 0.94 + 0.04 * Math.sin(t * 1.7 + this.flickerPhase) + 0.02 * Math.sin(t * 5.3);
-    const target = state.lightOn ? 1.7 : 1;
+    const breathe = 0.94 + LANTERN_TUNE.breatheAmp * Math.sin(t * LANTERN_TUNE.breatheHz + this.flickerPhase) + 0.02 * Math.sin(t * 5.3);
+    const target = state.lightOn ? LANTERN_TUNE.litScale : 1;
     this.lightScale += (target - this.lightScale) * Math.min(1, dt * 4);
     const s = this.lightScale;
     const sword = state.sword ? 1 : 0;
@@ -830,21 +1005,22 @@ export class Lighting {
     // 22 degrees off vertical, which is an overhead light, which is a centre light. Pushed out and
     // down it arrives at about 40 degrees — it models a body instead of flooding it, and it throws
     // a longer shadow across the flagstones, which is what a lit board looks like.
-    this.spot.position.set(player.x + 4.2, 6.8, player.z + 3.2);
+    this.spot.position.set(player.x + LANTERN_TUNE.spotX, LANTERN_TUNE.spotH, player.z + LANTERN_TUNE.spotZ);
     this.spot.target.position.set(player.x, 0, player.z);
     // THE LANTERN IS RELIEF, NOT THE EXPOSURE. A spot 8 units directly overhead is a centre light
     // for every sprite under it; at 26 it was carrying the frame, so the frame was pillow-lit and
     // the room's own colour field only existed inside its pool. With the ambient tripled it can
     // come down to a third and still be the thing that says where the player is standing.
-    this.spot.intensity = G.lantern * (state.allLit ? 6 : 10) * breathe * (0.75 + 0.25 * s);
-    this.spot.distance = 26;
-    this.spot.angle = Math.min(1.0, 0.66 * (0.6 + 0.4 * s));
-    this.spot.penumbra = 0.55;
+    this.spot.intensity = G.lantern * (state.allLit ? LANTERN_TUNE.spotILit : LANTERN_TUNE.spotI) * breathe * (0.75 + 0.25 * s);
+    this.spot.distance = LANTERN_TUNE.spotDist;
+    this.spot.angle = Math.min(1.0, LANTERN_TUNE.spotAngle * (0.6 + 0.4 * s));
+    this.spot.penumbra = LANTERN_TUNE.spotPenumbra;
     // The Light spell brightens the lantern; it does not change what colour it is.
-    this.spot.color.copy(this._lanternSpot).lerp(WHITE, state.lightOn ? 0.18 : 0);
-    this.point.position.set(player.x, 2.6, player.z);
-    this.point.intensity = G.lantern * (state.lightOn ? 3.6 : 1.3) * breathe * (1 + sword * 0.6);   // ditto: a glow at the player's own centre
-    this.point.distance = 6 * s;
+    this.spot.color.copy(this._lanternSpot).lerp(WHITE, state.lightOn ? LANTERN_TUNE.spotWhite : 0);
+    this.point.position.set(player.x, LANTERN_TUNE.height, player.z);
+    this.point.decay = LANTERN_TUNE.decay;
+    this.point.intensity = G.lantern * (state.lightOn ? LANTERN_TUNE.on : LANTERN_TUNE.off) * breathe * (1 + sword * LANTERN_TUNE.sword);   // ditto: a glow at the player's own centre
+    this.point.distance = LANTERN_TUNE.dist * s;
     // Carrying the Sword still shifts the light toward its violet — that tell is worth keeping —
     // but only HALF way, so a lantern colour the player chose is never simply overwritten.
     this.point.color.copy(this.lanternColor).lerp(WHITE, state.lightOn ? 0.12 : 0);
@@ -854,9 +1030,10 @@ export class Lighting {
     const put = (x, y, z, col, i) => { const a = al[n++]; a.x = x; a.y = y; a.z = z; a.r = col.r; a.g = col.g; a.b = col.b; a.i = i; };
     put(player.x, 1.5, player.z, this.point.color, this.point.intensity * 0.9);
     // Nearest torches get the real lights.
-    const sorted = this.nearest(this.torchSpots, player.x, player.z);
-    this.assignPool(this.torches, sorted, dt, { cut: 17, allLit: state.allLit, enabled: !!G.torches });
-    for (let i = 0; i < TORCH_POOL; i++) {
+    const px = view ? view.x : player.x, pz = view ? view.z : player.z;
+    const sorted = this.nearest(this.torchSpots, px, pz);
+    this.assignPool(this.torches, sorted, dt, { cut: POOL_TUNE.torchCut, allLit: state.allLit, enabled: !!G.torches, fadeSeconds: POOL_TUNE.fade, rampUnits: POOL_TUNE.torchRamp });
+    for (let i = 0; i < this.torches.length; i++) {
       const l = this.torches[i];
       const sp = l.userData.poolSpot;
       const gain = l.userData.poolGain;
@@ -879,9 +1056,12 @@ export class Lighting {
       l.color.setRGB(1.0, TORCH_TUNE.g + boosted + TORCH_TUNE.gF * f, TORCH_TUNE.b + TORCH_TUNE.bF * f);
       put(l.position.x, l.position.y, l.position.z, l.color, l.intensity);
     }
-    // Torch shadow spot follows the nearest torch, throwing into its room.
+    // The torch shadow spot follows the nearest torch. It exists ONLY to cast, so when the world
+    // sun is the caster it is switched off entirely rather than left burning: its brightness was
+    // the other half of the artefact the owner caught — one torch in a room lit harder than its
+    // neighbours because the hero happened to be standing closer to it.
     const nearestTorch = sorted[0];
-    if (nearestTorch && nearestTorch.d < 12 && G.torches) {
+    if (nearestTorch && nearestTorch.d < 12 && G.torches && this.torchSpot.castShadow) {
       const f = torchFlicker(t, nearestTorch.phase);
       const ts = this.torchSpot;
       ts.position.set(nearestTorch.x + nearestTorch.nx * 0.28, 1.05, nearestTorch.z + nearestTorch.nz * 0.28);
@@ -889,19 +1069,19 @@ export class Lighting {
       ts.intensity = TORCH_TUNE.spot * f;
     } else this.torchSpot.intensity = 0;
     // The fires standing in the rooms: nearest four get the pool, each on its own beat.
-    const near = this.nearest(this.moodSources, player.x, player.z);
-    this.assignPool(this.moodLights, near, dt, { cut: 15, allLit: state.allLit, enabled: !!G.decor, rampUnits: 3.5 });
+    const near = this.nearest(this.moodSources, px, pz);
+    this.assignPool(this.moodLights, near, dt, { cut: POOL_TUNE.decorCut, allLit: state.allLit, enabled: !!G.decor, fadeSeconds: POOL_TUNE.fade, rampUnits: POOL_TUNE.decorRamp });
     for (let i = 0; i < MOOD_POOL; i++) {
       const l = this.moodLights[i], sp = l.userData.poolSpot, gain = l.userData.poolGain;
       if (!sp || gain <= 0.001) { l.intensity = 0; continue; }
       const f = moodFlicker(sp.kind, t, sp.phase);
       l.position.set(sp.x, sp.y, sp.z);
       l.color.setHex(sp.color);
-      l.intensity = sp.intensity * f;
-      l.distance = sp.radius;
+      l.intensity = sp.intensity * f * DECOR_TUNE.i;
+      l.distance = sp.radius * DECOR_TUNE.dist;
       put(l.position.x, l.position.y, l.position.z, l.color, l.intensity);
     }
-    const temples = this.nearest(this.templeSpots, player.x, player.z);
+    const temples = this.nearest(this.templeSpots, px, pz);
     for (let i = 0; i < TEMPLE_POOL; i++) {
       const l = this.temples[i];
       const sp = temples[i];

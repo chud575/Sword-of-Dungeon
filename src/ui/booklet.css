@@ -1,0 +1,213 @@
+/* ==========================================================================================
+   "MODULE BOOKLET" — option 2c from the owner's design board ("Fargoal UI Explorations.dc.html").
+   The inside of a late-70s module rather than its cover: cream paper panels ruled in heavy ink,
+   ink tab headers in geometric caps, every number set in typewriter, a rust HP bar ticked in paper,
+   a printer's-blue XP bar, and the map drawn as TSR-blue graph paper with a scale bar.
+
+   IT RIDES ON THE MODULE COVER'S MARKUP. `body.ui-booklet` is set alongside `body.ui-module`
+   (main.js), so `ui/hud.js` builds the same bands, gauges and slots the cover uses and this sheet
+   only restyles them — 2c is the board's "closest to your current layout" option, so reusing that
+   structure is what makes it a restyle instead of a third HUD.
+
+   HOW IT REPAINTS EVERYTHING WITHOUT CHASING SELECTORS. The first cut of this sheet overrode rule
+   by rule and came out cream-on-cream: the module cover paints panels in `--mc-ink` (near-black)
+   and text in `--mc-paper` (cream), and every rule not overridden kept writing cream text onto the
+   new cream paper. So the tokens are simply INVERTED below — `--mc-ink` becomes the paper and
+   `--mc-paper` the ink — and all 700-odd of the cover's rules land in the booklet's palette on
+   their own. Only the things 2c draws differently (bar fills, the graph-paper map, the numbered
+   chronicle, the cell dividers) need rules of their own.
+
+   FONTS, bundled (SIL OFL, see assets/fonts/FONTS.md): Jost for the caps — the open-licence Futura
+   stand-in module.css already names — and Courier Prime for every numeral.
+   ========================================================================================== */
+
+@font-face { font-family: 'Jost'; src: url('../assets/fonts/Jost-Variable.woff2') format('woff2-variations'); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Courier Prime'; src: url('../assets/fonts/CourierPrime-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Courier Prime'; src: url('../assets/fonts/CourierPrime-Bold.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+
+body.ui-booklet {
+  --bk-paper: #ece1c6;
+  --bk-paper-hi: #f3ead6;
+  /* HOW MUCH PAPER THE HUD PANELS KEEP (owner, 2026-09-19: "make the background menu elements
+     semi-transparent... i need to see it"). 1 is the solid booklet page, 0 is bare ink on the scene.
+     Only the HUD panels over play read this; the dialogs (.modal.mx) stay solid paper, because a
+     settings page you have to read against a moving dungeon is not a better settings page. */
+  --bk-panel-alpha: .55;
+  --bk-ink: #201b16;
+  --bk-rust: #9c3b22;
+  --bk-blue: #3b6b9b;
+  --bk-gold: #8a6a1a;
+  --bk-mute: #8c8272;
+  --bk-mid: #5b5346;
+
+  /* the cover's fonts become the booklet's: caps in Jost, every numeral in typewriter */
+  --font-display: 'Jost', 'Futura', 'Century Gothic', sans-serif;
+  --font-cond: 'Jost', 'Futura', 'Century Gothic', sans-serif;
+  --font-body: 'Courier Prime', 'Courier New', monospace;
+  --font-mono: 'Courier Prime', 'Courier New', monospace;
+
+  /* THE INVERSION (see the header): paper where the cover put ink, ink where it put cream */
+  --mc-ink: #ece1c6;
+  --mc-paper: #201b16;
+  --mc-band: #201b16;
+  --mc-band-hi: #201b16;
+  --mc-muted: #5b5346;
+  --mc-faint: #8c8272;
+  --mc-red: #9c3b22;
+  --mc-cool: #3b6b9b;
+  --mc-rule: rgba(32, 27, 22, .34);
+  --mc-rule-soft: rgba(32, 27, 22, .16);
+  --mc-shadow: 0 10px 30px rgba(0, 0, 0, .6);
+
+  /* and the classic tokens the cover re-points, so anything neither sheet restyles still lands right */
+  --gold: #8a6a1a; --gold-bright: #201b16; --gold-dim: #8c8272; --brass: #8a6a1a; --gold-glow: transparent;
+  --parchment: #201b16; --parchment-dim: #5b5346; --parchment-faint: #8c8272;
+  --hp: #9c3b22; --hp-trail: #ece1c6; --xp: #3b6b9b; --xp-glow: transparent;
+  --panel-bg: #ece1c6; --panel-border: #201b16; --panel-shadow: 0 10px 30px rgba(0, 0, 0, .6); --radius: 0;
+
+  /* the minimap reads these (ui/minimap.js): graph paper, not a lit dungeon */
+  --mm-bg: #eef2f5; --mm-floor: #dbe6f1; --mm-corridor: #eef2f5; --mm-wall: #b9c9d9; --mm-edge: #3b6b9b;
+  --mm-dither: rgba(0, 0, 0, 0); --mm-vignette: 0; --mm-ink: rgba(59, 107, 155, .75); --mm-glow: 0;
+  --mm-memory: rgba(238, 242, 245, .5);
+  --mm-player: #9c3b22; --mm-monster: #9c3b22; --mm-gold: #8a6a1a; --mm-trap: #9c3b22;
+  --mm-stairs-down: #201b16; --mm-stairs-up: #3b6b9b; --mm-temple: #3b6b9b; --mm-beacon: #2f7d4f;
+  --mm-water: #6f9ec4; --mm-pit: #201b16;
+}
+
+/* ---------------------------------------------------------------- panels: paper, heavy ink, hard edges */
+body.ui-booklet #ui-root .panel,
+body.ui-booklet #ui-root .hud.ornate,
+body.ui-booklet #ui-root .panel.px,
+body.ui-booklet #ui-root .modal.mx {
+  background: rgb(236 225 198 / var(--bk-panel-alpha));   /* --bk-paper, see --bk-panel-alpha */
+  border: 3px solid var(--bk-ink);
+  outline: none;
+  color: var(--bk-ink);
+  text-shadow: none;
+}
+/* the dialogs keep the whole page (see --bk-panel-alpha) */
+body.ui-booklet #ui-root .modal.mx { background: var(--bk-paper); }
+body.ui-booklet #ui-root .mc-band {
+  letter-spacing: .24em;
+  font-weight: 700;
+  font-size: .68rem;
+  padding: .3rem .7rem .26rem;
+}
+body.ui-booklet #ui-root .mc-band .mc-code {
+  font-family: var(--font-mono); font-weight: 700; border-width: 1px; font-size: .58rem; letter-spacing: .06em;
+}
+
+/* ---------------------------------------------------------------- the adventurer card */
+body.ui-booklet #ui-root .hud .name { letter-spacing: .06em; }
+body.ui-booklet #ui-root .hud .medal .ring { display: none; }
+body.ui-booklet #ui-root .mc-lab, body.ui-booklet #ui-root .mc-val { letter-spacing: .08em; }
+body.ui-booklet #ui-root .mc-stats { border-top: 1px solid var(--bk-ink); padding-top: .35rem; }
+body.ui-booklet #ui-root .mc-stats .gold b, body.ui-booklet #ui-root .gold-v { color: var(--bk-gold); }
+
+/* the bars: a ruled frame, a rust HP fill ticked in paper every 27px, a printer's-blue XP fill */
+body.ui-booklet #ui-root .gauge .frame,
+body.ui-booklet #ui-root #hud-card .gauge .frame {
+  border: 2px solid var(--bk-ink); border-radius: 0; background: rgb(243 234 214 / var(--bk-panel-alpha));   /* --bk-paper-hi */
+  padding: 1px; height: 12px; box-shadow: none;
+}
+body.ui-booklet #ui-root .gauge .track { background: none; border-radius: 0; height: 100%; }
+/* `#hud-card` is in these selectors because the cover's own `#hud-card .gauge .fill` rules carry an id
+   and would otherwise outrank a class-only override — the ticks came out as a flat rust bar. */
+body.ui-booklet #ui-root #hud-card .gauge.hp .fill {
+  background-color: var(--bk-rust);
+  background-image: repeating-linear-gradient(90deg, transparent 0 27px, var(--bk-paper) 27px 29px);
+  border-radius: 0; box-shadow: none; filter: none;
+}
+body.ui-booklet #ui-root #hud-card .gauge.xp .fill { background: var(--bk-blue); background-image: none; border-radius: 0; box-shadow: none; }
+body.ui-booklet #ui-root .gauge .segs,
+body.ui-booklet #ui-root .gauge .trail,
+body.ui-booklet #ui-root .gauge .ticks { display: none; }
+body.ui-booklet #ui-root .hud.low .gauge.hp .fill { animation: none; }
+
+/* ---------------------------------------------------------------- the level plate: "LEVEL 1" on one line */
+body.ui-booklet #ui-root #hud-depth .depth { flex-direction: row; justify-content: center; align-items: baseline; gap: .4rem; padding: .35rem 1.2rem .5rem; }
+body.ui-booklet #ui-root #hud-depth .depth .lvl,
+body.ui-booklet #ui-root #hud-depth .depth .n {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.7rem; line-height: 1; letter-spacing: .08em; text-transform: uppercase; color: var(--bk-ink);
+}
+body.ui-booklet #ui-root #hud-depth .band, body.ui-booklet #ui-root #hud-depth .depth .band {
+  font-family: var(--font-mono); font-size: .64rem; letter-spacing: .14em; text-transform: uppercase; color: var(--bk-ink);
+}
+
+/* ---------------------------------------------------------------- the map as TSR graph paper */
+body.ui-booklet #ui-root #minimap .wrap {
+  position: relative; border: 1.5px solid var(--bk-blue); background: #eef2f5;
+}
+/* NO RULED GRID (owner, 2026-09-19: "the grid lines simply interfere too much with the visibility").
+   The board drew a blue ruled sheet over the canvas here; it sat ON TOP of the map at z-index 2, so
+   every corridor edge, stair and marker was crossed by a line. The sheet colour and the blue ink
+   still say graph paper. The scale the board prints in its corner stays. */
+body.ui-booklet #ui-root #minimap .wrap::after {
+  content: '1 SQ = 10 FT'; position: absolute; right: 4px; bottom: 2px; z-index: 3; pointer-events: none;
+  font-family: var(--font-mono); font-size: .5rem; letter-spacing: .06em; color: var(--bk-blue);
+}
+body.ui-booklet #ui-root #minimap .legend {
+  font-family: var(--font-mono); font-size: .56rem; font-style: normal; text-transform: uppercase; letter-spacing: .06em; color: var(--bk-blue);
+}
+body.ui-booklet #ui-root #minimap .legend b { color: var(--bk-rust); }
+
+/* ---------------------------------------------------------------- the chronicle, numbered like a play log */
+body.ui-booklet #ui-root #log .lines { font-family: var(--font-mono); font-size: .74rem; line-height: 1.35; }
+body.ui-booklet #ui-root #log .line {
+  display: grid; grid-template-columns: 2.6em 1fr; gap: .1rem .5rem; align-items: baseline;
+  color: var(--bk-ink); text-shadow: none;
+}
+body.ui-booklet #ui-root #log { width: 17rem; }
+/* THE ENTRY NUMBER IN THE MARGIN (ui/log.js stamps data-n on every line). The cover draws this same
+   pseudo-element as an absolutely-positioned 5px bullet, so every one of its properties has to be
+   undone here or the number renders as a dot. */
+body.ui-booklet #ui-root #log .line::before {
+  content: attr(data-n);
+  position: static; width: auto; height: auto; inset: auto; transform: none;
+  background: none; box-shadow: none; border-radius: 0;
+  color: var(--bk-mid); font-variant-numeric: tabular-nums;
+}
+body.ui-booklet #ui-root #log .line.old, body.ui-booklet #ui-root #log .line.old::before { color: var(--bk-mute); }
+body.ui-booklet #ui-root #log .line.shout { font-weight: 700; color: var(--bk-rust); }
+body.ui-booklet #ui-root #log .line .t { display: none; }
+body.ui-booklet #ui-root #log .foot { font-family: var(--font-mono); font-size: .56rem; color: var(--bk-mid); text-transform: uppercase; letter-spacing: .06em; }
+
+/* ---------------------------------------------------------------- spells & items: booklet cells */
+body.ui-booklet #ui-root #hud-hotbar .slot {
+  border: 0; border-right: 1px solid var(--bk-ink); border-radius: 0; background: none; box-shadow: none;
+}
+body.ui-booklet #ui-root #hud-hotbar .slot:last-child { border-right: 0; }
+body.ui-booklet #ui-root #hud-hotbar .slot.on { background: var(--bk-paper-hi); }
+/* the slot's own markup (ui/hud.js): `.key` the boxed hotkey, `.glyph` the icon, `.nm` the caption */
+body.ui-booklet #ui-root #hud-hotbar .slot .key {
+  font-family: var(--font-mono); font-weight: 700; font-size: .55rem;
+  border: 1px solid currentColor; border-radius: 0; padding: 0 .2rem; background: none; color: inherit; box-shadow: none;
+}
+body.ui-booklet #ui-root #hud-hotbar .slot .cnt {
+  font-family: var(--font-mono); font-weight: 700; font-size: .55rem; background: none; border: 0; color: inherit; box-shadow: none;
+}
+body.ui-booklet #ui-root #hud-hotbar .slot .nm {
+  font-family: var(--font-display); font-weight: 700; font-size: .5rem; letter-spacing: .12em; text-transform: uppercase;
+}
+body.ui-booklet #ui-root #hud-hotbar .sep { border-left: 3px double var(--bk-ink); background: none; width: 0; }
+
+/* ---------------------------------------------------------------- commands */
+body.ui-booklet #ui-root #hud-quick .k, body.ui-booklet #ui-root #hud-quick kbd {
+  font-family: var(--font-mono); font-weight: 700; font-size: .55rem;
+  border: 1px solid var(--bk-ink); border-radius: 0; padding: 0 .25rem; background: none; color: var(--bk-ink); box-shadow: none;
+}
+
+/* ---------------------------------------------------------------- sheets, menus, buttons */
+body.ui-booklet #ui-root .btn, body.ui-booklet #ui-root .menu-item {
+  background: var(--bk-paper-hi); border: 2px solid var(--bk-ink); border-radius: 0; color: var(--bk-ink);
+  box-shadow: none; text-shadow: none;
+}
+body.ui-booklet #ui-root .btn:hover, body.ui-booklet #ui-root .menu-item.selected { background: var(--bk-ink); color: var(--bk-paper); }
+
+/* ---------------------------------------------------------------- the phone layout (ui/phone.css) */
+body.ui-booklet.mobile #ui-root .mc-band { padding: .2rem .45rem; font-size: .54rem; letter-spacing: .16em; }
+body.ui-booklet.mobile #ui-root .gauge .frame { height: 9px; }
+body.ui-booklet.mobile #ui-root #log .lines { font-size: .62rem; }
+body.ui-booklet.mobile #ui-root #log .line { grid-template-columns: 2.2em 1fr; }
+body.ui-booklet.mobile #ui-root #hud-depth .depth .lvl,
+body.ui-booklet.mobile #ui-root #hud-depth .depth .n { font-size: 1.15rem; }

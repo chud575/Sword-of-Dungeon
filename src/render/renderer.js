@@ -466,7 +466,7 @@ export class Renderer {
     for (const v of this.dungeon.itemViews.values()) { const it = v.userData.item; if (it && it.type === 'gold' && !it.hidden && (this.fog.override === 'all' || g.level.isVisible(it.x, it.y))) goldViews.push(v); }
     this.effects.update(dt, { player: g.player, playerPos: ppos, statuses, hasSword: !!g.player.hasSword, goldViews });
     this.effects.numbers.syncSleep(this._sleepers || []);
-    this.lighting.update(dt, { x: ppos.x, z: ppos.z }, { lightOn: g.lightOn(), sword: !!g.player.hasSword, allLit: this.fog.override === 'all' });
+    this.lighting.update(dt, { x: ppos.x, z: ppos.z }, { lightOn: g.lightOn(), sword: !!g.player.hasSword, allLit: this.fog.override === 'all' }, this.cameraRig.smoothTarget);
     syncFieldTone(this.fog.override === 'all');
     this.atmosphere.update(dt, { x: ppos.x, z: ppos.z }, this.lighting.activeLights);
     this.dungeon.syncWater(ppos, this.lighting.activeLights);

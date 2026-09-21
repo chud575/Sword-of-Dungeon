@@ -8,6 +8,7 @@ import { drawSheet, packSheet } from '../render/sprites/spriteSheet.js';
 import { MONSTER_SPRITES } from '../render/sprites/monsters/index.js';
 import { FURNITURE_TYPES, furnitureVariants } from '../render/props/furniture.js';
 import { DRESSING_TYPES, dressingClass, dressingVariants } from '../render/props/dressing.js';
+import { setPropsMode } from '../render/props/mode.js';
 
 /** Walkable tiles adjacent to (x,y) (8-way), nearest-first order as given by DIRS8. */
 function neighbours(level, x, y, { empty = true } = {}) {
@@ -1302,6 +1303,26 @@ export const scenarios = {
    * plates here need their labels read to be told apart, the art has failed, whatever the room shot
    * looks like.
    */
+  /**
+   * THE PROP CATALOGUE'S ROOM (tools/propsheet.mjs). A bare, lit, warm level-1 hall with nothing in it
+   * and the hero out of shot; the tool then stands ONE decor entry at a time on (4,3) — or hangs it on
+   * the north wall at (4,0) — through `level.setDecor` and `DungeonView.rebuildDecor`, which is the
+   * exact path a generated level takes. That matters: the `furniture` plate above calls
+   * `props.decor()` directly and so skips `DungeonView.modelFor`, which means it can never show a
+   * Dungeon Crawlers model and cannot say where a piece's art came from. This room can.
+   */
+  async 'prop-catalogue'(ctx) {
+    const g = ctx.reset();
+    const W = 9, H = 7, depth = 1;
+    const lv = bestiaryHall(g, W, H, depth, { dress: false });
+    Object.assign(lv.rooms[0], { archetype: 'guardroom', lightMood: 'torchlit', decay: 0 });
+    g.enterLevel(depth, 'teleport', { arrival: { x: 1, y: H - 2 } });
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    if (ctx.renderer.playerView) ctx.renderer.playerView.visible = false;
+    ctx.step(300);
+  },
+
   async 'furniture'(ctx) {
     const g = ctx.reset();
     const types = FURNITURE_TYPES;
@@ -1457,6 +1478,72 @@ export const scenarios = {
     const P = ctx.renderer.props, D = ctx.renderer.dungeon;
     D.addAt(P.item({ type: 'chest', x: 4, y: 5 }), 4, 5);
     D.addAt(P.chestOpen(), 10, 5);
+    ctx.step(600);
+  },
+
+  /**
+   * THE SUPPLIED-ART PLATE: every decor type `props/supplied.js` maps to the owner's Top-Down packs,
+   * laid out in a hall so the whole vocabulary can be judged at the play camera in one frame.
+   *
+   * ONLY MEANINGFUL WITH `?props=supplied` — that is the switch the module reads, so shoot it with
+   *   node tools/shot.mjs --scenario supplied-props --params "props=supplied" --out shots/supplied.png
+   * Without the parameter the hall comes up empty, which is itself the check that the mode is doing
+   * what it claims: in supplied mode nothing in the room is my art, and out of it this module draws
+   * nothing at all.
+   */
+  /**
+   * THE OWNER'S SPRITE SHEET, IN A ROOM (`?props=sheet`, render/props/props2d.js). Here so that
+   * `npm run smoke` builds one of every mapped piece: the mode is a URL switch, and smoke runs with no
+   * query, so nothing else in this file ever asks the sheet for a prop.
+   */
+  async 'sheet-props'(ctx) {
+    const g = ctx.reset();
+    const W = 21, H = 13, depth = 2;
+    const lv = bestiaryHall(g, W, H, depth, { dress: false });
+    lv.rooms[0].lightMood = 'torchlit';
+    setPropsMode('sheet');
+    const types = [
+      'table', 'tableLong', 'stool', 'bench', 'throne', 'lectern', 'strongbox', 'footlocker', 'crate', 'barrel',
+      'urn', 'sackPile', 'bookcase', 'cupboard', 'sarcophagus', 'tombSlab', 'brazier', 'hearth', 'candlestick',
+      'candelabra', 'bunk', 'rack', 'cage', 'chainPost', 'wellHead', 'alchemyBench', 'retortStand', 'scales',
+      'pillarBroken', 'fallenColumn', 'rubbleMound', 'stalagmite', 'dripstone', 'mushroomCluster', 'cobweb',
+    ];
+    lv.setDecor(types.map((type, i) => ({
+      type, x: 1 + (i % 10) * 2, y: 3 + (Math.floor(i / 10) * 2.5 | 0), variant: 0, facing: 's', blocking: false,
+    })));
+    g.enterLevel(depth, 'teleport', { arrival: { x: 10, y: 9 } });
+    g.player.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.step(600);
+    setPropsMode(null);        // the pieces already built stay; the next plate is back on the default
+  },
+
+  async 'supplied-props'(ctx) {
+    const g = ctx.reset();
+    // TEN A ROW, FOUR ROWS, AND THE HERO IN THE MIDDLE OF THEM. The camera frames about 14 tiles of
+    // depth around him: the first cut of this plate put him in the far corner at (18,15) and the frame
+    // came back BLACK with 129 meshes rendering happily off the top of the screen.
+    const W = 21, H = 13, depth = 3;
+    const lv = bestiaryHall(g, W, H, depth, { dress: false });
+    lv.rooms[0].lightMood = 'torchlit';
+    const types = [
+      'strongbox', 'footlocker', 'barrel', 'crate', 'sackPile', 'urn', 'bottles', 'cauldron',
+      'table', 'tableLong', 'bench', 'stool', 'throne', 'cupboard', 'bookcase', 'bunk',
+      'lectern', 'alchemyBench', 'weaponRack', 'rack', 'brazier', 'hearth', 'forge', 'candlestick',
+      'candelabra', 'sconce', 'wellHead', 'pillarBroken', 'fallenColumn', 'rubbleMound',
+      'stalagmite', 'dripstone', 'skull', 'skullPile', 'bonePile', 'scree', 'rug', 'runner',
+    ];
+    // every other tile across, so nothing overlaps its neighbour's footprint (the widest piece is 1.6)
+    lv.decor = types.map((type, i) => ({
+      type, x: 1 + (i % 10) * 2, y: 3 + Math.floor(i / 10) * 2.5 | 0, variant: 0, facing: 's', blocking: false,
+    }));
+    g.enterLevel(depth, 'teleport', { arrival: { x: 10, y: 9 } });
+    g.player.facing = { dx: 0, dy: 1 };
+    g.give('light', 1); g.castSpell('light');
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
     ctx.step(600);
   },
 

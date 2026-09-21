@@ -1,0 +1,210 @@
+/* ==========================================================================================
+   "INK ON GLASS" — option 2b from the owner's design board ("Fargoal UI Explorations.dc.html").
+   Smoked-dark panels that recede into the dungeon, cream type, hairline tan rules, a double inset
+   rule inside a single-pixel frame, and rust kept for danger alone. The quietest of the boards:
+   where 2c prints the HUD on paper, 2b lays it on glass over the scene.
+
+   IT RIDES ON THE MODULE COVER'S MARKUP, as 2c does — `body.ui-glass` is set alongside
+   `body.ui-module` (main.js) — but it needs NO token inversion: the cover is already dark panels
+   with cream type, so the tokens are merely re-pointed to 2b's palette. What 2b does differently is
+   the frame (hairline + inset double rule instead of a solid band), the serif body, the hairline
+   header rules in place of the solid ink tabs, the boxed spell cells, and the dark graph-paper map.
+
+   FONTS, bundled (SIL OFL, see assets/fonts/FONTS.md): Alegreya for the body and its italics — the
+   flavour line, the log — Jost for the caps, Courier Prime for every numeral.
+   ========================================================================================== */
+
+@font-face { font-family: 'Alegreya'; src: url('../assets/fonts/Alegreya-Variable.woff2') format('woff2-variations'); font-weight: 400 700; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Alegreya'; src: url('../assets/fonts/Alegreya-Italic.woff2') format('woff2-variations'); font-weight: 400 700; font-style: italic; font-display: swap; }
+@font-face { font-family: 'Jost'; src: url('../assets/fonts/Jost-Variable.woff2') format('woff2-variations'); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Courier Prime'; src: url('../assets/fonts/CourierPrime-Regular.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Courier Prime'; src: url('../assets/fonts/CourierPrime-Bold.woff2') format('woff2'); font-weight: 700; font-style: normal; font-display: swap; }
+
+body.ui-glass {
+  /* 90% TRANSPARENT (owner, 2026-09-17). The board drew the panels at 90% OPAQUE — nearly solid smoked
+     glass; these are the same ink at a tenth of that, so the dungeon reads straight through them and the
+     HUD is type and rules floating over the scene. The frame keeps its opacity: the hairline and the
+     inset double rule are what hold a panel together once its ground is gone. */
+  --gl-glass: rgba(22, 16, 11, .1);
+  --gl-ink: #16100b;
+  --gl-cream: #ece1c6;
+  --gl-tan: #c9b88a;
+  --gl-rule: rgba(201, 184, 138, .35);
+  --gl-mute: #8f8468;
+  --gl-gold: #e0b64a;
+  --gl-rust: #d9623f;
+
+  --font-display: 'Jost', 'Futura', 'Century Gothic', sans-serif;
+  --font-cond: 'Jost', 'Futura', 'Century Gothic', sans-serif;
+  --font-body: 'Alegreya', Georgia, 'Times New Roman', serif;
+  --font-mono: 'Courier Prime', 'Courier New', monospace;
+
+  /* the cover's tokens, re-pointed (no inversion: both are dark panels with cream type) */
+  --mc-ink: #16100b;
+  --mc-paper: #ece1c6;
+  --mc-band: transparent;
+  --mc-band-hi: transparent;
+  --mc-muted: #8f8468;
+  --mc-faint: #8f8468;
+  --mc-red: #d9623f;
+  --mc-cool: #c9b88a;
+  --mc-rule: rgba(201, 184, 138, .35);
+  --mc-rule-soft: rgba(201, 184, 138, .18);
+  --mc-shadow: 0 10px 30px rgba(0, 0, 0, .6);
+
+  --gold: #e0b64a; --gold-bright: #ece1c6; --gold-dim: #8f8468; --brass: #c9b88a; --gold-glow: transparent;
+  --parchment: #ece1c6; --parchment-dim: #c9b88a; --parchment-faint: #8f8468;
+  --hp: #d9623f; --hp-trail: #ece1c6; --xp: #ece1c6; --xp-glow: transparent;
+  --panel-bg: rgba(22, 16, 11, .1); --panel-border: #c9b88a; --radius: 0;
+
+  /* the minimap (ui/minimap.js): the dark graph paper 2b draws, ruled in the panel's own tan */
+  --mm-bg: #231c14; --mm-floor: #2f2619; --mm-corridor: #3a2f22; --mm-wall: #1a140e; --mm-edge: rgba(201, 184, 138, .5);
+  --mm-dither: rgba(0, 0, 0, 0); --mm-vignette: 0; --mm-ink: rgba(201, 184, 138, .55); --mm-glow: .2;
+  --mm-memory: rgba(22, 16, 11, .55);
+  --mm-player: #d9623f; --mm-monster: #ece1c6; --mm-gold: #e0b64a; --mm-trap: #d9623f;
+  --mm-stairs-down: #ece1c6; --mm-stairs-up: #c9b88a; --mm-temple: #ece1c6; --mm-beacon: #8fc07a;
+  --mm-water: #5d8ea8; --mm-pit: #0d0906;
+}
+
+/* ---------------------------------------------------------------- the glass: one hairline, two inset rules */
+body.ui-glass #ui-root .panel,
+body.ui-glass #ui-root .hud.ornate,
+body.ui-glass #ui-root .panel.px,
+body.ui-glass #ui-root .modal.mx {
+  background: var(--gl-glass);
+  border: 1px solid var(--gl-tan);
+  outline: none;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 3px var(--gl-ink), inset 0 0 0 4px var(--gl-rule), 0 10px 30px rgba(0, 0, 0, .6);
+  color: var(--gl-cream);
+  font-family: var(--font-body);
+  text-shadow: none;
+}
+
+/* ---------------------------------------------------------------- headers: a hairline rule, not an ink tab */
+body.ui-glass #ui-root .mc-band {
+  background: none;
+  color: var(--gl-tan);
+  border-bottom: 1px solid var(--gl-rule);
+  margin: 0 .35rem;
+  padding: .45rem .5rem .3rem;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: .62rem;
+  letter-spacing: .24em;
+  text-transform: uppercase;
+}
+body.ui-glass #ui-root .mc-band .mc-code {
+  font-family: var(--font-mono); font-weight: 400; font-size: .58rem; letter-spacing: .04em;
+  border: 0; padding: 0; color: var(--gl-tan);
+}
+
+/* ---------------------------------------------------------------- the adventurer card */
+body.ui-glass #ui-root .mc-body { padding: .5rem .8rem .7rem; gap: .35rem; }
+body.ui-glass #ui-root .hud .name { font-family: var(--font-display); font-weight: 700; letter-spacing: .06em; color: var(--gl-cream); }
+body.ui-glass #ui-root .hud .medal { background: none; border: 0; box-shadow: none; }
+body.ui-glass #ui-root .hud .medal .ring { display: none; }
+/* 2b writes the level as a serif italic aside ("1st level"), not as a boxed numeral */
+body.ui-glass #ui-root .hud .medal .lvl, body.ui-glass #ui-root .hud .medal .lv {
+  font-family: var(--font-body); font-style: italic; font-weight: 400; font-size: .9rem; letter-spacing: 0; color: var(--gl-tan);
+}
+body.ui-glass #ui-root .mc-lab {
+  font-family: var(--font-display); font-weight: 700; font-size: .6rem; letter-spacing: .2em; text-transform: uppercase; color: var(--gl-tan);
+}
+body.ui-glass #ui-root .mc-val { font-family: var(--font-mono); font-weight: 700; font-size: .95rem; color: var(--gl-cream); }
+body.ui-glass #ui-root .mc-stats {
+  border-top: 1px solid var(--gl-rule); padding-top: .4rem;
+  font-family: var(--font-mono); font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--gl-tan);
+}
+body.ui-glass #ui-root .mc-stats b { color: var(--gl-cream); }
+body.ui-glass #ui-root .mc-stats .gold b, body.ui-glass #ui-root .gold-v { color: var(--gl-gold); }
+
+/* the bars: a hairline frame, rust HP ticked in the panel's own dark, a cream XP fill */
+body.ui-glass #ui-root #hud-card .gauge .frame {
+  border: 1px solid var(--gl-tan); border-radius: 0; background: none; padding: 1px; height: 10px; box-shadow: none;
+}
+body.ui-glass #ui-root #hud-card .gauge .track { background: none; border-radius: 0; height: 100%; }
+body.ui-glass #ui-root #hud-card .gauge.hp .fill {
+  background-color: var(--gl-rust);
+  background-image: repeating-linear-gradient(90deg, transparent 0 27px, var(--gl-ink) 27px 29px);
+  border-radius: 0; box-shadow: none; filter: none;
+}
+body.ui-glass #ui-root #hud-card .gauge.xp .fill { background: var(--gl-cream); background-image: none; border-radius: 0; box-shadow: none; }
+body.ui-glass #ui-root .gauge .segs, body.ui-glass #ui-root .gauge .trail, body.ui-glass #ui-root .gauge .ticks { display: none; }
+body.ui-glass #ui-root .hud.low .gauge.hp .fill { animation: none; }
+
+/* ---------------------------------------------------------------- the level plate */
+body.ui-glass #ui-root #hud-depth .depth { flex-direction: row; justify-content: center; align-items: baseline; gap: .4rem; padding: .3rem 1.4rem .5rem; }
+body.ui-glass #ui-root #hud-depth .depth .lvl,
+body.ui-glass #ui-root #hud-depth .depth .n {
+  font-family: var(--font-display); font-weight: 700; font-size: 1.7rem; line-height: 1; letter-spacing: .08em; text-transform: uppercase; color: var(--gl-cream);
+}
+body.ui-glass #ui-root #hud-depth .band, body.ui-glass #ui-root #hud-depth .depth .band {
+  font-family: var(--font-body); font-style: italic; font-size: .8rem; letter-spacing: .02em; text-transform: none; color: var(--gl-tan);
+}
+
+/* ---------------------------------------------------------------- the map: dark graph paper */
+body.ui-glass #ui-root #minimap .wrap { position: relative; border: 1px solid var(--gl-rule); background: #231c14; }
+body.ui-glass #ui-root #minimap .wrap::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background-image: repeating-linear-gradient(0deg, transparent 0 13px, #33291f 13px 14px),
+    repeating-linear-gradient(90deg, transparent 0 13px, #33291f 13px 14px);
+}
+body.ui-glass #ui-root #minimap .wrap::after {
+  content: 'N ↑'; position: absolute; left: 5px; top: 3px; z-index: 3; pointer-events: none;
+  font-family: var(--font-display); font-weight: 700; font-size: .5rem; letter-spacing: .14em; color: var(--gl-tan);
+}
+body.ui-glass #ui-root #minimap .legend {
+  font-family: var(--font-mono); font-style: normal; font-size: .56rem; text-transform: uppercase; letter-spacing: .06em; color: var(--gl-tan);
+}
+body.ui-glass #ui-root #minimap .legend b { color: var(--gl-cream); }
+
+/* ---------------------------------------------------------------- the chronicle: serif, quiet, rust for danger */
+body.ui-glass #ui-root #log .lines { font-family: var(--font-body); font-size: .84rem; line-height: 1.3; }
+body.ui-glass #ui-root #log .line { color: var(--gl-cream); text-shadow: none; }
+/* the cover draws a bullet here; 2b has none */
+body.ui-glass #ui-root #log .line::before { content: none; }
+body.ui-glass #ui-root #log .line.old { color: var(--gl-mute); }
+body.ui-glass #ui-root #log .line.shout { font-weight: 700; color: var(--gl-rust); text-transform: none; }
+body.ui-glass #ui-root #log .line .t { font-family: var(--font-mono); font-size: .62rem; color: var(--gl-mute); }
+body.ui-glass #ui-root #log .foot { font-family: var(--font-mono); font-size: .56rem; color: var(--gl-tan); text-transform: uppercase; letter-spacing: .06em; }
+
+/* ---------------------------------------------------------------- spells & items: boxed cells, inverted keys */
+body.ui-glass #ui-root #hud-hotbar .slot {
+  border: 1px solid var(--gl-rule); border-radius: 0; background: none; box-shadow: none; margin: 0 2px;
+}
+body.ui-glass #ui-root #hud-hotbar .slot.on { border-color: var(--gl-cream); }
+body.ui-glass #ui-root #hud-hotbar .slot.empty { color: var(--gl-mute); }
+/* the hotkey is knocked out of its own block of cream, as the board draws it */
+body.ui-glass #ui-root #hud-hotbar .slot .key {
+  font-family: var(--font-mono); font-weight: 700; font-size: .55rem; border: 0; border-radius: 0;
+  padding: 0 .2rem; background: var(--gl-cream); color: var(--gl-ink); box-shadow: none;
+}
+body.ui-glass #ui-root #hud-hotbar .slot.empty .key { background: var(--gl-mute); color: var(--gl-ink); }
+body.ui-glass #ui-root #hud-hotbar .slot .cnt { font-family: var(--font-mono); font-weight: 700; font-size: .55rem; background: none; border: 0; color: inherit; box-shadow: none; }
+body.ui-glass #ui-root #hud-hotbar .slot .nm { font-family: var(--font-display); font-weight: 700; font-size: .5rem; letter-spacing: .12em; text-transform: uppercase; }
+body.ui-glass #ui-root #hud-hotbar .slot.bury { border-color: var(--gl-gold); color: var(--gl-gold); }
+body.ui-glass #ui-root #hud-hotbar .slot.bury .key { background: var(--gl-gold); }
+body.ui-glass #ui-root #hud-hotbar .sep { border-left: 0; width: 6px; background: none; }
+
+/* ---------------------------------------------------------------- commands */
+body.ui-glass #ui-root #hud-quick .k, body.ui-glass #ui-root #hud-quick kbd {
+  font-family: var(--font-mono); font-weight: 700; font-size: .55rem;
+  border: 1px solid var(--gl-tan); border-radius: 0; padding: 0 .25rem; background: none; color: var(--gl-tan); box-shadow: none;
+}
+
+/* ---------------------------------------------------------------- sheets, menus, buttons */
+body.ui-glass #ui-root .btn, body.ui-glass #ui-root .menu-item {
+  background: none; border: 1px solid var(--gl-tan); border-radius: 0; color: var(--gl-cream);
+  font-family: var(--font-display); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; box-shadow: none; text-shadow: none;
+}
+body.ui-glass #ui-root .btn:hover, body.ui-glass #ui-root .menu-item.selected { background: var(--gl-cream); color: var(--gl-ink); }
+body.ui-glass #ui-root .setting .v, body.ui-glass #ui-root .detail { font-family: var(--font-body); color: var(--gl-tan); }
+
+/* ---------------------------------------------------------------- the phone layout (ui/phone.css) */
+body.ui-glass.mobile #ui-root .mc-band { padding: .3rem .4rem .22rem; font-size: .52rem; letter-spacing: .16em; }
+body.ui-glass.mobile #ui-root .mc-body { padding: .35rem .5rem .45rem; gap: .22rem; }
+body.ui-glass.mobile #ui-root #hud-card .gauge .frame { height: 8px; }
+body.ui-glass.mobile #ui-root #log .lines { font-size: .72rem; }
+body.ui-glass.mobile #ui-root #hud-depth .depth .lvl,
+body.ui-glass.mobile #ui-root #hud-depth .depth .n { font-size: 1.15rem; }

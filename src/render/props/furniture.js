@@ -52,6 +52,11 @@ import {
 import { makePropModel, modelBounds } from './models.js';
 import { buildKitProp, isKitProp } from './kitProps.js';
 import { buildFreeportProp } from './freeport.js';
+import { buildSuppliedProp, suppliedEnabled } from './supplied.js';
+import { flatProps } from './mode.js';
+import { flatProp } from './flatArt.js';
+import { buildSheetProp } from './props2d.js';
+import { sheetProps } from './mode.js';
 
 // ------------------------------------------------------------------------------- the materials
 // One base colour per material in the dungeon, shared by every piece that is made of it, so the
@@ -985,15 +990,32 @@ export function buildFurniture(type, o = {}) {
   // and tests read and as the fallback for a type the kit does not cut yet.
   // THE OWNER'S OWN MODELS FIRST (props/freeport.js): the imported Freeport chests, braziers, cupboard
   // and tables, unless `?props=kit` asks for the kit pieces they replace.
+  // THE SUPPLIED-ART TEST (`?props=supplied`, props/supplied.js): the owner's Top-Down packs stand in
+  // for everything they can, and a type they cannot cover draws NOTHING — never my kit piece or my
+  // painted billboard, because the whole point of the test is the owner's own set standing alone.
+  // `?props=sheet`: the owner's sprite sheet for the furniture; a type it does not name falls straight
+  // through to the solid pieces below, which is how the 3D floor clutter is kept (props/props2d.js).
+  if (sheetProps()) { const sheet = buildSheetProp(type, o); if (sheet) return sheet; }
+  // `?props=flat`: no mesh of any kind — straight to the painted billboard below (props/mode.js)
+  if (!flatProps()) {
+  const supplied = buildSuppliedProp(type, o, f);
+  if (supplied) return supplied;
+  if (suppliedEnabled()) return null;
   const imported = buildFreeportProp(type, o, f);
   if (imported) return imported;
   const solid = buildKitProp(type, o, f);
   if (solid) return solid;
+  }
   const v = Math.max(0, Math.min(f.v - 1, o.variant | 0));
   const key = `furn:${type}:${v}`;
   const pal = palOf(type, f.pal);
   const g = new THREE.Group();
-  const s = pixelSprite(key, () => f.art(v), pal, { glow: f.glow ?? 0.05, emissive: f.emissive ?? 0xffffff });
+  // `?props=flat`: the board-piece set (props/flatArt.js) where it draws this type, the old painted
+  // billboard where it does not yet.
+  const flat = flatProps() ? flatProp(type, v) : null;
+  const s = flat
+    ? pixelSprite(`flat:${type}:${v}`, () => flat.pix, flat.pal, { glow: f.glow ?? 0.04, emissive: f.emissive ?? 0xffffff })
+    : pixelSprite(key, () => f.art(v), pal, { glow: f.glow ?? 0.05, emissive: f.emissive ?? 0xffffff });
   g.add(s);
   if (f.pool && v === 0) {
     const [colour, radius, opacity] = f.pool;

@@ -24,6 +24,8 @@ import { Menus } from './ui/menus.js';
 import { Tooltip } from './ui/tooltip.js';
 import './ui/module.css'; // after the panel sheets, so the module-cover theme wins the cascade over them
 import './ui/vellum.css'; // last: the default "worn vellum" theme
+import './ui/booklet.css'; // after module.css, which it restyles: option 2c, the "module booklet"
+import './ui/glass.css'; // and option 2b, "ink on glass" — the same cover markup, smoked dark
 import './ui/phone.css'; // after every theme: the theme-agnostic phone rules (body.mobile / html.mobile)
 
 const params = new URLSearchParams(location.search);
@@ -32,12 +34,16 @@ const params = new URLSearchParams(location.search);
 // construction (ui/theme.js).
 // The saved Settings choice (Display → Interface style) applies when the URL does not name one — which is how the
 // native iOS app, which cannot pass a query string, gets the other themes.
-const UI_THEMES = ['vellum', 'module', 'classic'];
+const UI_THEMES = ['vellum', 'booklet', 'glass', 'module', 'classic'];
 const uiParam = params.get('ui');
 const uiSaved = loadSettings().uiTheme;
 const uiThemeName = UI_THEMES.includes(uiParam) ? uiParam : UI_THEMES.includes(uiSaved) ? uiSaved : 'vellum';
 document.body.classList.toggle('ui-vellum', uiThemeName === 'vellum');
-document.body.classList.toggle('ui-module', uiThemeName === 'module');
+// `booklet` (option 2c) is a RESTYLE of the module cover, so it carries `ui-module` too: hud.js builds
+// the cover's bands, gauges and slots and ui/booklet.css repaints them in cream paper and typewriter.
+document.body.classList.toggle('ui-module', uiThemeName === 'module' || uiThemeName === 'booklet' || uiThemeName === 'glass');
+document.body.classList.toggle('ui-booklet', uiThemeName === 'booklet');
+document.body.classList.toggle('ui-glass', uiThemeName === 'glass');
 // THE MOBILE PROFILE (core/mobile.js): phones and the Capacitor shell get the low render quality, a 32-texel floor
 // field, half-resolution bloom, touch controls and the compact HUD (body.mobile: ui/phone.css, plus the phone blocks at the end of vellum.css and module.css). Desktop is unchanged.
 document.documentElement.classList.toggle('mobile', MOBILE.mobile);
@@ -296,6 +302,7 @@ for (const ev of ['monster:seen', 'entity:attacked', 'item:picked', 'trap:trigge
 if (!debugMode) window.addEventListener('blur', () => { if (game && !game.over) game.setPaused(true); });
 // autosave on level change (deferred to the next frame so the whole transition is captured); permadeath erases the save on death
 bus.on('level:enter', (p) => { if (p.via !== 'new' && !debugMode) saveRequested = true; });
+
 bus.on('game:over', (p) => { if (!game || debugMode) return; if (p.victory || game.balance.permadeath) deleteSave(game.balance.name); });
 
 /** Drive click-to-move / auto-explore one step when the player is ready. */
@@ -397,6 +404,39 @@ const debug = {
 registerScenarios(debug);
 
 window.__game = { get game() { return game; }, renderer, ui, debug, bus, mobile: MOBILE, fieldTexels };
+
+/**
+ * THE BUILD STAMP, ON SCREEN. A hash of every source file's mtime plus the newest of them, put on
+ * `window.__BUILD` by the dev server (vite.config.js `buildStamp`), so "am I actually running your fix?"
+ * is answerable by reading the corner of the screen instead of by trust. It sits on <body>, not in `#ui-root`, so no theme moves it
+ * and no panel layout has to make room; `window.__game.build` has the same values.
+ */
+const BUILD = (typeof window !== 'undefined' && window.__BUILD) || { hash: 'dev', time: 'unbuilt', epoch: 0 };
+const buildTag = document.createElement('div');
+buildTag.id = 'build-stamp';
+// the TIME first: it is the part that can be compared. The hash only says "same or not the same".
+buildTag.textContent = `build ${BUILD.time} · ${BUILD.hash}`;
+buildTag.title = 'the time the newest source file changed, and a fingerprint of them all — reload to refresh';
+buildTag.style.cssText = 'position:fixed;right:6px;bottom:2px;z-index:99997;pointer-events:none;'
+  + 'font:10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;color:rgba(255,207,138,.75);'
+  + 'text-shadow:0 1px 2px #000,0 0 6px #000;letter-spacing:.04em';
+document.body.append(buildTag);
+debug.build = BUILD;
+
+// The light panel (debug/lightPanel.js): every light knob, live, with the values in a pasteable form.
+// Loaded on demand so it costs the shipped bundle nothing — `?lights=1` opens it, Shift+L toggles it.
+import('./debug/lightPanel.js').then(({ LightPanel }) => {
+  const panel = new LightPanel({ renderer, bus });
+  debug.lightPanel = panel;
+  if (params.get('lights') === '1') panel.open();
+}).catch((e) => console.warn('light panel unavailable', e));
+
+// The level builder (debug/levelBuilder.js): Settings -> Developer -> Level builder, then Shift+B. It is
+// loaded whether or not dev mode is on, because a level you built is part of that level now — it comes
+// back on entering it with the builder closed.
+import('./debug/levelBuilder.js').then(({ LevelBuilder }) => {
+  debug.levelBuilder = new LevelBuilder({ renderer, bus, getGame: () => game, setModal, isModal: () => modalCount > 0, settings });
+}).catch((e) => console.warn('level builder unavailable', e));
 
 // ------------------------------------------------------------------ start
 // the hand-painted tiles are decoded before the first level is built; on any failure the floor falls back

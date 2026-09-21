@@ -213,6 +213,23 @@ level.decor = [];   // Decor[]  — always an array, never null, empty on depth 
 those. No `undefined`, no optional-by-omission. Entries are plain JSON-safe data (numbers, strings,
 booleans) — nothing else, ever. No extra fields without an edit to this document.
 
+**The level builder's optional fields** (2026-09-19, `src/debug/levelBuilder.js`, Settings → Developer).
+The GENERATOR never sets any of these; only the builder does, so every rule above still holds for a
+generated level and every test that compares generated arrays is unaffected.
+
+| field | type | meaning |
+|---|---|---|
+| `placed` | `true` | a piece the builder put down |
+| `hidden` | `true` | a generated piece the builder took out. It stays in the array (a save keeps it, Revert restores it) but `DungeonView.addDecor` skips it, `Level.setDecor` leaves it out of the movement mask and `Lighting.setMoods` gives it no light |
+| `tilesX`, `tilesY` | `number` | footprint in tiles, default 1 × 1: the piece is stretched over that rectangle with `(x,y)` as its NORTH-WEST tile, in world axes, and `decorTiles()` returns every tile of it — so a blocking 2 × 3 table blocks six tiles. Turning the piece (R) swaps the two. Wall pieces take none |
+| `scale` | `number` | size multiplier on the whole piece, default 1 (`applyDecorTransform`, render/dungeon.js) |
+| `lift` | `number` | tiles above the floor, default 0 — a candlestick at 0.45 stands on a table; a lit piece's light rises with it |
+| `art` | `'dc'` | draw the owner's Dungeon Crawlers model for this type even where the kit would win (`DungeonView.modelFor`) |
+| `model` | `string` | an asset id, as the Freeport and supplied builders already accepted |
+
+A placed piece may also carry `blocking: true` on ANY type — the builder hands that choice to the owner,
+and §4.3's blockable list and budget bind the generator, not the person building the room.
+
 **Coordinate law**
 
 - `facing` is the direction the piece's front looks, in level coordinates:

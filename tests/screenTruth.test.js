@@ -31,6 +31,7 @@ import test, { before } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { auditScenarios, formatReport } from '../tools/audit.mjs';
+import { WORLD_QUADS } from '../src/render/sprites/spriteBillboard.js';
 import { buildHero } from '../src/render/sprites/heroSprite.js';
 import { packSheet } from '../src/render/sprites/spriteSheet.js';
 import { Palette, paint, outline } from '../src/render/sprites/pixelPainter.js';
@@ -273,7 +274,15 @@ test('SABOTAGE dark-cast: dropping the cast\'s albedo fails the screen value flo
   assert.match(sabotageAdds('litFloor', 'default#dark-cast')[0], /litMedian/);
 });
 
-test('SABOTAGE off-grid: a per-sprite texel size fails the grid gate', () => {
+/**
+ * THIS SABOTAGE HAS NOTHING LEFT TO BREAK (2026-09-20). It gave one sprite its own texel size, which
+ * used to put that sprite off the frame's shared pixel grid and turn the grid gate red. The cast is now
+ * drawn as quads lying on the floor, sized in TILES from the art itself (spriteBillboard WORLD_QUADS) —
+ * there is no per-sprite texel size to corrupt, so the sabotage changes nothing and the gate is right
+ * not to fire: "produced 0 grid failures and the untouched frame produces 0". It is skipped while the
+ * quads are on rather than deleted, because `?quads=0` still renders the path it was written for.
+ */
+test('SABOTAGE off-grid: a per-sprite texel size fails the grid gate', { skip: WORLD_QUADS ? 'the cast is drawn as world quads: there is no per-sprite texel size to sabotage' : false }, () => {
   assert.match(sabotageAdds('grid', 'default#off-grid')[0], /texel/);
 });
 

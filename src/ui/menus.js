@@ -339,7 +339,7 @@ export class Menus {
       { id: 'flatDecor', name: '2D decor', desc: 'off draws only the 3D props — no painted billboards, stains or cobwebs', type: 'toggle' },
       { id: 'screenShake', name: 'Screen shake', type: 'toggle' },
       { id: 'reduceFlash', name: 'Reduce flashes', desc: 'softer explosion and trap flashes', type: 'toggle' },
-      { id: 'uiTheme', name: 'Interface style', desc: 'worn vellum, TSR module cover or the classic HUD — the game saves and reloads to switch', type: 'choice', options: [['vellum', 'Worn vellum'], ['module', 'TSR module'], ['classic', 'Classic']] },
+      { id: 'uiTheme', name: 'Interface style', desc: 'worn vellum, the module booklet, ink on glass, the TSR module cover or the classic HUD — the game saves and reloads to switch', type: 'choice', options: [['vellum', 'Worn vellum'], ['booklet', 'Module booklet'], ['glass', 'Ink on glass'], ['module', 'TSR module'], ['classic', 'Classic']] },
       { id: 'renderScale', name: 'Render resolution', desc: 'sharper 3D edges, props and shadows at High or Native — uses more memory; step back down if the game reloads', type: 'choice', options: [['standard', 'Standard'], ['high', 'High'], ['native', 'Native']] },
       { id: 'fontScale', name: 'Interface scale', type: 'range', min: 0.8, max: 2, step: 0.1 },
       { id: 'colorblind', name: 'Colour-blind palette', desc: 'Okabe–Ito accents for log, map and spells', type: 'toggle' },
@@ -347,15 +347,17 @@ export class Menus {
       { id: 'lightAmbient', name: 'Ambient fill', desc: 'the hemisphere light — omnidirectional, models nothing, lifts everything', type: 'toggle' },
       { id: 'lightKey', name: 'Key light', desc: 'the raked directional — this is the one that gives bodies and wall blocks their form', type: 'toggle' },
       { id: 'lightLantern', name: "Player's lantern", desc: 'the spot and glow that follow you', type: 'toggle' },
-      { id: 'lightTorches', name: 'Wall torches', desc: 'the five nearest torch spots, flickering', type: 'toggle' },
+      { id: 'lightTorches', name: 'Wall torches', desc: 'every torch in view, flickering (five on a phone)', type: 'toggle' },
       { id: 'lightDecor', name: 'Fires in the rooms', desc: 'braziers, hearths, candles — the nearest four', type: 'toggle' },
       { id: 'lightTemple', name: 'Temple light', type: 'toggle' },
-      { id: 'lightShadows', name: 'Shadows', desc: 'both casters: your lantern and the nearest torch', type: 'toggle' },
+      { id: 'lightShadows', name: 'Shadows', desc: 'cast by a fixed light, so a shadow stays put wherever you walk', type: 'toggle' },
       { id: 'lightGrade', name: 'Depth grade', desc: 'the band tint, split tone, saturation and vignette applied after lighting', type: 'toggle' },
       { group: 'Gameplay' },
       { id: 'autoPauseOnSight', name: 'Auto-pause on sight', desc: 'pause when a new monster comes into view', type: 'toggle' },
       { id: 'minimap', name: 'Minimap', desc: 'M toggles it any time', type: 'toggle' },
       { id: 'showTooltips', name: 'Tooltips', type: 'toggle' },
+      { group: 'Developer' },
+      { id: 'devMode', name: 'Level builder', desc: 'place, size, raise and remove props in any level — Shift+B, or the BUILD tab on the left edge', type: 'toggle' },
       { group: 'Profile' },
       { id: 'playerName', name: 'Your name', desc: 'as the hall of fame will remember you', type: 'text' },
       { id: 'reset', name: 'Restore defaults', type: 'button' },
@@ -384,7 +386,10 @@ export class Menus {
       const same = mode !== 'standard' && ratio('high') === ratio('native') ? ' · High = Native here' : '';
       return ` · ${px}${same}`;
     };
-    const cycleChoice = (r, d) => { const k = r.options.findIndex((o) => o[0] === S[r.id]); S[r.id] = r.options[((k < 0 ? 0 : k) + d + r.options.length) % r.options.length][0]; apply(); render(); this.bus.emit('sfx:ui', { kind: 'click' }); if (r.id === 'uiTheme') reloadForTheme(); };
+    // A THEME CHANGE DOES NOT RELOAD WHILE YOU ARE STILL CHOOSING. It used to reload on the spot,
+    // which threw the player out of Settings mid-decision; now the row says what will happen and the
+    // reload waits for the panel to close (`onClose` below).
+    const cycleChoice = (r, d) => { const k = r.options.findIndex((o) => o[0] === S[r.id]); S[r.id] = r.options[((k < 0 ? 0 : k) + d + r.options.length) % r.options.length][0]; apply(); render(); this.bus.emit('sfx:ui', { kind: 'click' }); };
     const pct = (r) => Math.round(((S[r.id] - r.min) / (r.max - r.min)) * 100) + '%';
     const num = (r) => (r.id === 'fontScale' ? Math.round(S[r.id] * 100) + '%' : r.id === 'cameraTilt' ? `${S[r.id]}\u00b0` : String(Math.round(S[r.id] * 100)));
     const render = () => {
@@ -397,13 +402,16 @@ export class Menus {
         else if (r.type === 'text') v = `<input type="text" maxlength="16" value="${esc(S[r.id])}" data-id="${r.id}" autocomplete="off">`;
         else if (r.type === 'choice') v = `<button class="btn choice" data-choice="${r.id}">‹ ${esc((r.options.find((o) => o[0] === S[r.id]) || r.options[0])[1])}${r.id === 'renderScale' ? esc(renderScaleNote(S[r.id])) : ''} ›</button>`;
         else v = `<button class="btn" data-id="${r.id}">Reset</button>`;
-        return `<div class="setting${i === opts[sel] ? ' selected' : ''}" data-i="${i}"><div class="sn">${r.name}${r.desc ? `<small>${r.desc}</small>` : ''}</div><div class="sv">${v}</div></div>`;
+        // the one row that cannot take effect where it stands: say so, in place, instead of reloading
+        const warn = r.id === 'uiTheme' && S.uiTheme !== bootTheme
+          ? '<small class="warn" style="color:var(--danger,#9c3b22)">The game restarts to change style — your quest is saved and reloads when you close Settings.</small>' : '';
+        return `<div class="setting${i === opts[sel] ? ' selected' : ''}" data-i="${i}"><div class="sn">${r.name}${r.desc ? `<small>${r.desc}</small>` : ''}${warn}</div><div class="sv">${v}</div></div>`;
       }).join('');
       box.querySelectorAll('input[type=range]').forEach((inp) => inp.addEventListener('input', () => { const r = rows.find((x) => x.id === inp.dataset.id); S[r.id] = Number(inp.value); apply(); inp.style.setProperty('--v', pct(r)); inp.nextElementSibling.textContent = num(r); }));
       box.querySelectorAll('.toggle').forEach((b) => b.addEventListener('click', () => { S[b.dataset.id] = !S[b.dataset.id]; apply(); render(); this.bus.emit('sfx:ui', { kind: 'click' }); }));
       box.querySelectorAll('input[type=text]').forEach((inp) => inp.addEventListener('change', () => { S[inp.dataset.id] = inp.value.trim() || 'Warrior'; apply(); }));
       box.querySelectorAll('.btn[data-choice]').forEach((b) => b.addEventListener('click', () => cycleChoice(rows.find((x) => x.id === b.dataset.choice), 1)));
-      box.querySelectorAll('.btn[data-id=reset]').forEach((b) => b.addEventListener('click', () => { Object.assign(S, DEFAULT_SETTINGS); apply(); render(); reloadForTheme(); }));
+      box.querySelectorAll('.btn[data-id=reset]').forEach((b) => b.addEventListener('click', () => { Object.assign(S, DEFAULT_SETTINGS); apply(); render(); }));
       box.querySelectorAll('.setting').forEach((row) => row.addEventListener('mouseenter', () => { const k = opts.indexOf(Number(row.dataset.i)); if (k >= 0) sel = k; box.querySelectorAll('.setting').forEach((x) => x.classList.toggle('selected', x === row)); }));
     };
     const adjust = (d) => {
@@ -411,11 +419,13 @@ export class Menus {
       if (r.type === 'range') { S[r.id] = Math.round(Math.max(r.min, Math.min(r.max, S[r.id] + d * r.step)) * 100) / 100; apply(); render(); this.bus.emit('sfx:ui', { kind: 'hover' }); }
       else if (r.type === 'toggle') { S[r.id] = !S[r.id]; apply(); render(); this.bus.emit('sfx:ui', { kind: 'click' }); }
       else if (r.type === 'choice') cycleChoice(r, d);
-      else if (r.type === 'button') { Object.assign(S, DEFAULT_SETTINGS); apply(); render(); reloadForTheme(); }
+      else if (r.type === 'button') { Object.assign(S, DEFAULT_SETTINGS); apply(); render(); }
       else if (r.type === 'text') { const inp = entry.panel.querySelector('input[type=text]'); if (inp) inp.focus(); }
     };
     const entry = this.openModal({
       name: 'settings', cls: 'settings', html, wide: false,
+      // the deferred reload: leaving Settings is what applies a new interface style
+      onClose: () => reloadForTheme(),
       onKey: (e) => {
         const k = e.key;
         if (k === 'ArrowUp' || k === 'w' || k === 'k' || (k === 'Tab' && e.shiftKey)) { sel = (sel - 1 + opts.length) % opts.length; render(); this.bus.emit('sfx:ui', { kind: 'hover' }); return true; }

@@ -196,6 +196,32 @@ function inPageAudit(K) {
    */
   const gridOf = (v) => {
     const sp = v.sprite, fr = sp.frame, sq = sp.squash;
+    // THE QUAD PATH (render/sprites/spriteBillboard.js WORLD_QUADS): the sprite is no longer placed in
+    // device pixels at all — it is a quad lying on the floor, sized in tiles from its own texels. So the
+    // grid is read off the ART'S OWN CORNERS, projected. The play camera is orthographic, so that
+    // projection is affine and two opposite corners define every texel between them exactly.
+    const uq = sp.material && sp.material.uniforms && sp.material.uniforms.uWorldQuad;
+    if (uq && uq.value > 0.5) {
+      const base = sp.mesh.getWorldPosition(v.root.position.clone());
+      const TPT = 32;                                        // texels to a tile (core/constants TEXELS_PER_TILE)
+      const tilesX = fr.w * sq.x / TPT, tilesY = fr.h * sq.y / TPT;
+      const pivU = fr.px / fr.w, pivV = 1 - fr.py / fr.h;
+      const scratch = v.root.position.clone();
+      const at = (uu, vv) => {
+        scratch.set(base.x + (uu - pivU) * tilesX, base.y + 0.05, base.z - ((vv - pivV) * tilesY - 0.5));
+        const q = scratch.project(R.camera);
+        return { x: (q.x * 0.5 + 0.5) * W, y: H - (q.y * 0.5 + 0.5) * H };
+      };
+      const topLeft = at(0, 1), bottomRight = at(1, 0);      // v = 1 is the TOP row of the art
+      const sx = (bottomRight.x - topLeft.x) / fr.w, sy = (bottomRight.y - topLeft.y) / fr.h;
+      return {
+        fr, S: Math.abs(sx), sx, sy, flip: !!sp.flip, pivotX: topLeft.x, pivotY: topLeft.y,
+        xOf: (j) => Math.round(topLeft.x + j * sx),
+        yOf: (ty) => Math.round(topLeft.y + ty * sy),
+        snapped: Math.abs(sq.x - 1) < 0.01 && Math.abs(sq.y - 1) < 0.01,
+        quad: true,
+      };
+    }
     // the shader's anchor is the QUAD's own world position, which `sync` pulls `depthBias` toward
     // the camera so a figure reads in front of the stairs it stands on — not the view's root
     const p = sp.mesh.getWorldPosition(v.root.position.clone()).project(R.camera);

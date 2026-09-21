@@ -1171,6 +1171,11 @@ const DRESSING = {
 /** Every dressing id this module can build. */
 export const DRESSING_TYPES = Object.keys(DRESSING);
 import { buildKitProp, buildKitWall, UNDRAWN_DECAL_TYPES } from './kitProps.js';
+import { buildSuppliedProp, suppliedEnabled } from './supplied.js';
+import { flatProps } from './mode.js';
+import { flatProp } from './flatArt.js';
+import { buildSheetProp } from './props2d.js';
+import { sheetProps } from './mode.js';
 /** Is `type` a piece of dressing this module paints? */
 export function isDressing(type) { return Object.prototype.hasOwnProperty.call(DRESSING, type); }
 /** 'prop' | 'decal' | 'wall' for a dressing type, or null. */
@@ -1315,11 +1320,32 @@ function ratIdle(g, sprite, phase) {
 export function buildDressing(type, o = {}) {
   const d = DRESSING[type];
   if (!d) return null;
+  // THE SUPPLIED-ART TEST (`?props=supplied`, props/supplied.js): the packs' own debris stands in for
+  // the painted scree and their carpets for the rugs; a skull is their skull. Anything they do not
+  // cover — every other decal, every wall piece — is drawn as an EMPTY group in this mode, the same
+  // shape `UNDRAWN_DECAL_TYPES` returns, so the level is dressed entirely in the owner's own art.
+  {
+    const supplied = buildSuppliedProp(type, o, d);
+    if (supplied) { supplied.userData.decor.cls = d.cls; return supplied; }
+    if (suppliedEnabled()) {
+      const g = new THREE.Group();
+      g.userData.decor = { type, variant: Math.max(0, Math.min(d.v - 1, o.variant | 0)), facing: o.facing || 's', cls: d.cls, kit: true, drawn: false };
+      g.userData.blocking = false;
+      return g;
+    }
+  }
   // THE SOLID PIECE FIRST (props/kitProps.js). A wall entry always gets the kit's answer — a leaning
   // banner, a bracket, or an empty group for the plates that only ever read as rugs on the wall top.
   // A scatter prop or a decal gets its solid version where one is cut; a directionless decal is turned
   // by its tile's hash so no two bone scatters in a room lie the same way.
-  if (d.cls === 'wall') return buildKitWall(type, o, d);
+  // `?props=sheet`: the owner's own art for the wall hangings and the big scatter pieces
+  if (sheetProps()) {
+    const sheet = buildSheetProp(type, o);
+    if (sheet) { sheet.userData.decor.cls = d.cls === 'wall' ? 'wall' : sheet.userData.decor.cls; if (d.cls === 'wall') sheet.userData.mountY = d.mount; return sheet; }
+  }
+  // `?props=flat` (props/mode.js): no solid piece — the painted decal, wall plate or billboard below
+  const flat = flatProps();
+  if (d.cls === 'wall' && !flat) return buildKitWall(type, o, d);
   if (UNDRAWN_DECAL_TYPES.includes(type)) {
     const g = new THREE.Group();
     g.userData.decor = { type, variant: Math.max(0, Math.min(d.v - 1, o.variant | 0)), facing: o.facing || 's', cls: d.cls, kit: true, drawn: false };
@@ -1330,7 +1356,7 @@ export function buildDressing(type, o = {}) {
   // shows the side of its head — so it always faces south, like the billboard it replaces.
   const turn = d.cls === 'decal' && d.turn ? ['s', 'e', 'n', 'w'][(((o.x | 0) * 73856093) ^ ((o.y | 0) * 19349663)) & 3]
     : d.cls === 'prop' ? 's' : o.facing;
-  const solid = buildKitProp(type, { ...o, facing: turn }, d);
+  const solid = flat ? null : buildKitProp(type, { ...o, facing: turn }, d);
   if (solid) { solid.userData.decor.cls = d.cls; return solid; }
   const v = Math.max(0, Math.min(d.v - 1, o.variant | 0));
   const facing = o.facing || 's';
@@ -1357,7 +1383,10 @@ export function buildDressing(type, o = {}) {
       g.add(m);
       g.userData.mountY = d.mount;
     } else {
-      const s = pixelSprite(key, () => d.art(v), pal, { glow: d.glow ?? 0.05, emissive: d.emissive ?? 0xffffff });
+      const fa = flat ? flatProp(type, v) : null;      // the board-piece set, where it draws this type
+      const s = fa
+        ? pixelSprite(`flat:${type}:${v}`, () => fa.pix, fa.pal, { glow: d.glow ?? 0.04, emissive: d.emissive ?? 0xffffff })
+        : pixelSprite(key, () => d.art(v), pal, { glow: d.glow ?? 0.05, emissive: d.emissive ?? 0xffffff });
       g.add(s);
       if (d.pool && v === 0) { const [c, r, op] = d.pool; g.add(groundGlow(c, r, { opacity: op })); }
       if (type === 'mushroomCluster' && v >= 2) g.add(groundGlow(0x7fe3a8, 0.4, { opacity: 0.09 }));

@@ -23,6 +23,13 @@ import * as THREE from 'three';
 import { TILE } from '../core/constants.js';
 import { TILE_STYLES, FOREST_STYLES } from './tiles.js';
 import { LOOK } from './look.js';
+
+/**
+ * The shade the floor carries at a wall's foot. `contact` is the tight ambient-occlusion line where the
+ * two surfaces meet, which is real at any camera; `cast` was a wide painted shadow thrown south and east
+ * of every wall and is OFF (see the note in `paintDungeon` — the walls cast a real one now).
+ */
+export const FOOT_SHADE = { contact: 0.3, cast: 0 };
 import { PAINTED, DC, DC_CORRIDOR, DC_CIRCLES } from './paintedTiles.js';
 
 /** Texels a tile. Must equal materials.js TEXELS_PER_TILE (import would be circular via tiles.js). */
@@ -607,13 +614,19 @@ function paintDungeon(level, out, opts) {
       if (walls.length) {
         const d = dist(walls);
         if (LOOK.base) {
-          // THE WALL CASTS A SHADOW (the top-down map benchmark): a soft contact shade on every side, and a
-          // wide dark band thrown south and east of the wall — the key light is from the north-west
-          k *= 1 - 0.3 * Math.exp(-d / (S * 0.07));
-          const cast = walls.filter(([dx, dy]) => dy < 0 || dx < 0);
+          // A TIGHT CONTACT SHADE AND NOTHING MORE. There used to be a second, much wider band PAINTED
+          // INTO THE FLOOR south and east of every wall — a cast shadow, because the key light comes
+          // from the north-west. Two things are wrong with it now. The owner sees it from straight above
+          // as a dark stripe ruled along every wall (2026-09-20: "those tiles are not wall blocks, they
+          // are the floor. get rid of it"), measured at 57% of the same tile's own middle. And it is a
+          // DUPLICATE: since 2026-09-18 the walls cast a real shadow from `sun` (render/lighting.js),
+          // so the floor was carrying a baked copy of a shadow the renderer already draws.
+          // `FOOT_SHADE.cast` puts it back for comparison; the level's field is repainted on a rebuild.
+          k *= 1 - FOOT_SHADE.contact * Math.exp(-d / (S * 0.07));
+          const cast = FOOT_SHADE.cast > 0 ? walls.filter(([dx, dy]) => dy < 0 || dx < 0) : [];
           if (cast.length) {
             const dc = dist(cast), edge = S * 0.3;
-            k *= 1 - 0.6 * (dc <= edge ? 1 : Math.exp(-(dc - edge) / (S * 0.07)));
+            k *= 1 - FOOT_SHADE.cast * (dc <= edge ? 1 : Math.exp(-(dc - edge) / (S * 0.07)));
           }
         } else k *= 1 - 0.36 * Math.exp(-d / 3.2) - 0.07 * Math.exp(-d / 12);
       }

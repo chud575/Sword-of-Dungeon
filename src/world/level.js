@@ -44,6 +44,14 @@ export function rleDecode(str, length) {
  * @returns {{x:number, y:number}[]} one entry for span 1, in run order otherwise
  */
 export function decorTiles(d) {
+  // A FOOTPRINT from the level builder (AMBIENCE §4.1 `tilesX`/`tilesY`): the piece covers a rectangle
+  // with (x,y) as its north-west tile, in world axes, and blocks every tile of it.
+  const tx = Math.max(1, d.tilesX | 0), ty = Math.max(1, d.tilesY | 0);
+  if (tx > 1 || ty > 1) {
+    const out = [];
+    for (let j = 0; j < ty; j++) for (let i = 0; i < tx; i++) out.push({ x: d.x + i, y: d.y + j });
+    return out;
+  }
   const n = Math.max(1, d.span | 0);
   if (n === 1) return [{ x: d.x, y: d.y }];
   // `facing` names the direction the piece looks; it runs across that, along the wall behind it.
@@ -164,7 +172,7 @@ export class Level {
     this.decor = list;
     let mask = null;
     for (const d of list) {
-      if (!d.blocking) continue;
+      if (!d.blocking || d.hidden) continue;
       if (!mask) mask = new Uint8Array(this.width * this.height);
       for (const t of decorTiles(d)) if (this.inBounds(t.x, t.y)) mask[t.y * this.width + t.x] = 1;
     }

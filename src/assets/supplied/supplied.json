@@ -1,0 +1,5935 @@
+[
+ {
+  "id": "chest2a",
+  "job": "D_Chest2A",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Chest2A.prefab"
+  },
+  "foot": [
+   0.755,
+   0.7452
+  ],
+  "height": 0.7857,
+  "scale": 1,
+  "uvPerTile": 0.2897,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.755,
+   0.7857,
+   0.7452
+  ],
+  "triangles": 421,
+  "parts": [
+   "chest2a"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.755,
+   0.786,
+   0.745
+  ],
+  "buried": -0.003,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0054,
+     0.221,
+     0.22,
+     0.6744
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 43,
+     "h": 128
+    },
+    "want": {
+     "w": 38,
+     "h": 114
+    },
+    "tpt": 37.1
+   }
+  ],
+  "texelsPerTile": 37.1,
+  "glbBytes": 22100,
+  "texBytes": 1642,
+  "smallBytes": 966,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "chest2b",
+  "job": "D_Chest2B",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Chest2B.prefab"
+  },
+  "foot": [
+   0.755,
+   0.6919
+  ],
+  "height": 0.5014,
+  "scale": 1,
+  "uvPerTile": 0.32343,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.755,
+   0.5014,
+   0.6919
+  ],
+  "triangles": 385,
+  "parts": [
+   "chest2b"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.755,
+   0.501,
+   0.692
+  ],
+  "buried": -0.003,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0054,
+     0.221,
+     0.195,
+     0.6744
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 37,
+     "h": 128
+    },
+    "want": {
+     "w": 29,
+     "h": 99
+    },
+    "tpt": 41.4
+   }
+  ],
+  "texelsPerTile": 41.4,
+  "glbBytes": 19772,
+  "texBytes": 1576,
+  "smallBytes": 938,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "chest1b",
+  "job": "D_Chest1B",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Chest1B.prefab"
+  },
+  "foot": [
+   0.8427,
+   0.624
+  ],
+  "height": 0.3663,
+  "scale": 1,
+  "uvPerTile": 0.59348,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.8427,
+   0.3663,
+   0.624
+  ],
+  "triangles": 140,
+  "parts": [
+   "chest1b"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.843,
+   0.366,
+   0.624
+  ],
+  "buried": -0.003,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.1483,
+     0.2067,
+     0.4029,
+     0.308
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 64,
+     "h": 50
+    },
+    "want": {
+     "w": 54,
+     "h": 42
+    },
+    "tpt": 38
+   }
+  ],
+  "texelsPerTile": 38,
+  "glbBytes": 10756,
+  "texBytes": 1300,
+  "smallBytes": 786,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "barrel1",
+  "job": "D_Barrel1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Barrel1.prefab"
+  },
+  "foot": [
+   0.7206,
+   0.7206
+  ],
+  "height": 0.7808,
+  "scale": 1,
+  "uvPerTile": 0.48707,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.7206,
+   0.7808,
+   0.7206
+  ],
+  "triangles": 60,
+  "parts": [
+   "barrel1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.721,
+   0.781,
+   0.721
+  ],
+  "buried": 0.39,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5623,
+     0.1724,
+     0.4378,
+     0.3232
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 95
+    },
+    "want": {
+     "w": 66,
+     "h": 49
+    },
+    "tpt": 62.3
+   }
+  ],
+  "texelsPerTile": 62.3,
+  "glbBytes": 3416,
+  "texBytes": 3372,
+  "smallBytes": 1566,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "barrel2",
+  "job": "D_Barrel2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Barrel2.prefab"
+  },
+  "foot": [
+   0.7182,
+   0.7182
+  ],
+  "height": 0.7808,
+  "scale": 1,
+  "uvPerTile": 0.43011,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.7182,
+   0.7808,
+   0.7182
+  ],
+  "triangles": 60,
+  "parts": [
+   "barrel2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.718,
+   0.781,
+   0.718
+  ],
+  "buried": 0.39,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5623,
+     0.0007,
+     0.4378,
+     0.4952
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 113,
+     "h": 128
+    },
+    "want": {
+     "w": 66,
+     "h": 75
+    },
+    "tpt": 55.1
+   }
+  ],
+  "texelsPerTile": 55.1,
+  "glbBytes": 3412,
+  "texBytes": 4388,
+  "smallBytes": 1908,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "barrels1",
+  "job": "D_Barrels1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Barrels1.prefab"
+  },
+  "foot": [
+   1.3576,
+   1.2891
+  ],
+  "height": 1.5378,
+  "scale": 1,
+  "uvPerTile": 0.43005,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.3576,
+   1.5378,
+   1.2891
+  ],
+  "triangles": 240,
+  "parts": [
+   "barrels1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   1.358,
+   1.538,
+   1.289
+  ],
+  "buried": 0.023,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5623,
+     0.0007,
+     0.4378,
+     0.4952
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 113,
+     "h": 128
+    },
+    "want": {
+     "w": 66,
+     "h": 75
+    },
+    "tpt": 55
+   }
+  ],
+  "texelsPerTile": 55,
+  "glbBytes": 9492,
+  "texBytes": 4550,
+  "smallBytes": 1930,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "barrels2",
+  "job": "D_Barrels2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Barrels2.prefab"
+  },
+  "foot": [
+   1.4189,
+   1.3993
+  ],
+  "height": 0.8045,
+  "scale": 1,
+  "uvPerTile": 0.43003,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.4189,
+   0.8045,
+   1.3993
+  ],
+  "triangles": 180,
+  "parts": [
+   "barrels2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   1.419,
+   0.804,
+   1.399
+  ],
+  "buried": 0.047,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5623,
+     0.0007,
+     0.4378,
+     0.4952
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 113,
+     "h": 128
+    },
+    "want": {
+     "w": 66,
+     "h": 75
+    },
+    "tpt": 55
+   }
+  ],
+  "texelsPerTile": 55,
+  "glbBytes": 7468,
+  "texBytes": 4626,
+  "smallBytes": 1902,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "box1",
+  "job": "D_Box1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Box1.prefab"
+  },
+  "foot": [
+   0.7338,
+   0.7338
+  ],
+  "height": 0.7231,
+  "scale": 1,
+  "uvPerTile": 0.66151,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.7338,
+   0.7231,
+   0.7338
+  ],
+  "triangles": 194,
+  "parts": [
+   "box1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.734,
+   0.723,
+   0.734
+  ],
+  "buried": 0.026,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.2298,
+     0.5247,
+     0.1352,
+     0.2531
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 35,
+     "h": 64
+    },
+    "want": {
+     "w": 27,
+     "h": 50
+    },
+    "tpt": 42.3
+   }
+  ],
+  "texelsPerTile": 42.3,
+  "glbBytes": 12276,
+  "texBytes": 1028,
+  "smallBytes": 762,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "box2",
+  "job": "D_Box2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Box2.prefab"
+  },
+  "foot": [
+   0.9105,
+   0.9105
+  ],
+  "height": 0.7346,
+  "scale": 1,
+  "uvPerTile": 1.3188,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.9105,
+   0.7346,
+   0.9105
+  ],
+  "triangles": 108,
+  "parts": [
+   "box2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.91,
+   0.735,
+   0.91
+  ],
+  "buried": 0,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.2331,
+     0.5259,
+     0.1178,
+     0.1178
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 32
+    },
+    "want": {
+     "w": 25,
+     "h": 25
+    },
+    "tpt": 42.2
+   }
+  ],
+  "texelsPerTile": 42.2,
+  "glbBytes": 7404,
+  "texBytes": 790,
+  "smallBytes": 600,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "sewers_crate1",
+  "job": "D_Sewers_crate1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Sewers_crate1.prefab"
+  },
+  "foot": [
+   1.1749,
+   1.6
+  ],
+  "height": 1.3676,
+  "scale": 0.5713,
+  "uvPerTile": 0.20012,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.1749,
+   1.3676,
+   1.6
+  ],
+  "triangles": 610,
+  "parts": [
+   "sewers_crate1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Wall3.mat",
+   "Top-Down Dungeons/_source/Materials/Bricks1.mat",
+   "Top-Down Dungeons/_source/Materials/Deco.mat"
+  ],
+  "rawSize": [
+   2.057,
+   2.394,
+   2.801
+  ],
+  "buried": 0.684,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Wall3.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0007,
+     0.0098,
+     0.9755,
+     0.9822
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 163,
+     "h": 164
+    },
+    "want": {
+     "w": 102,
+     "h": 103
+    },
+    "tpt": 51.3
+   },
+   {
+    "mat": "Bricks1.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     -0.2375,
+     0.0281,
+     1.513,
+     0.4399
+    ],
+    "rect": {
+     "x": 0,
+     "y": 164,
+     "w": 249,
+     "h": 73
+    },
+    "want": {
+     "w": 156,
+     "h": 46
+    },
+    "tpt": 51.2
+   },
+   {
+    "mat": "Deco.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5119,
+     0.002,
+     0.4863,
+     0.241
+    ],
+    "rect": {
+     "x": 0,
+     "y": 237,
+     "w": 35,
+     "h": 18
+    },
+    "want": {
+     "w": 22,
+     "h": 11
+    },
+    "tpt": 51.7
+   }
+  ],
+  "texelsPerTile": 51.2,
+  "glbBytes": 35860,
+  "texBytes": 9290,
+  "smallBytes": 3768,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "crate1",
+  "job": "I_Crate1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Crate1.prefab"
+  },
+  "foot": [
+   0.8277,
+   0.6393
+  ],
+  "height": 0.5148,
+  "scale": 0.7,
+  "uvPerTile": 0.4041,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.8277,
+   0.5148,
+   0.6393
+  ],
+  "triangles": 75,
+  "parts": [
+   "crate1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   1.182,
+   0.735,
+   0.913
+  ],
+  "buried": 0.017,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.3967,
+     0.1417,
+     0.1279,
+     0.2282
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 73,
+     "h": 128
+    },
+    "want": {
+     "w": 46,
+     "h": 81
+    },
+    "tpt": 51.7
+   }
+  ],
+  "texelsPerTile": 51.7,
+  "glbBytes": 4244,
+  "texBytes": 2428,
+  "smallBytes": 1296,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "crate6",
+  "job": "I_Crate6",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Crate6.prefab"
+  },
+  "foot": [
+   0.7466,
+   0.6393
+  ],
+  "height": 0.5643,
+  "scale": 0.7,
+  "uvPerTile": 0.24144,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.7466,
+   0.5643,
+   0.6393
+  ],
+  "triangles": 134,
+  "parts": [
+   "crate6"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   1.067,
+   0.806,
+   0.913
+  ],
+  "buried": 0,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.2677,
+     0.0098,
+     0.6679,
+     0.3282
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 127
+    },
+    "want": {
+     "w": 133,
+     "h": 66
+    },
+    "tpt": 61.8
+   }
+  ],
+  "texelsPerTile": 61.8,
+  "glbBytes": 8540,
+  "texBytes": 4832,
+  "smallBytes": 2070,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "sack1",
+  "job": "D_Sack1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Sack1.prefab"
+  },
+  "foot": [
+   1.0002,
+   0.6379
+  ],
+  "height": 0.4116,
+  "scale": 1,
+  "uvPerTile": 0.61644,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.0002,
+   0.4116,
+   0.6379
+  ],
+  "triangles": 42,
+  "parts": [
+   "sack1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   1,
+   0.412,
+   0.638
+  ],
+  "buried": 0.181,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5596,
+     0.526,
+     0.2017,
+     0.2792
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 47,
+     "h": 64
+    },
+    "want": {
+     "w": 39,
+     "h": 53
+    },
+    "tpt": 39.5
+   }
+  ],
+  "texelsPerTile": 39.5,
+  "glbBytes": 2624,
+  "texBytes": 1242,
+  "smallBytes": 808,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "sack2",
+  "job": "D_Sack2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Sack2.prefab"
+  },
+  "foot": [
+   0.5907,
+   0.655
+  ],
+  "height": 0.7366,
+  "scale": 1,
+  "uvPerTile": 0.54195,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.5907,
+   0.7366,
+   0.655
+  ],
+  "triangles": 66,
+  "parts": [
+   "sack2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.591,
+   0.737,
+   0.655
+  ],
+  "buried": 0.005,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.3747,
+     0.558,
+     0.2732,
+     0.4068
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 43,
+     "h": 64
+    },
+    "want": {
+     "w": 40,
+     "h": 60
+    },
+    "tpt": 34.7
+   }
+  ],
+  "texelsPerTile": 34.7,
+  "glbBytes": 3248,
+  "texBytes": 1204,
+  "smallBytes": 804,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "sacks_gr1",
+  "job": "D_Sacks_gr1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Sacks_gr1.prefab"
+  },
+  "foot": [
+   1.0752,
+   1.3343
+  ],
+  "height": 0.6452,
+  "scale": 1,
+  "uvPerTile": 0.61644,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.0752,
+   0.6452,
+   1.3343
+  ],
+  "triangles": 126,
+  "parts": [
+   "sacks_gr1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   1.075,
+   0.645,
+   1.334
+  ],
+  "buried": 0.181,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5596,
+     0.526,
+     0.2017,
+     0.2792
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 47,
+     "h": 64
+    },
+    "want": {
+     "w": 39,
+     "h": 53
+    },
+    "tpt": 39.5
+   }
+  ],
+  "texelsPerTile": 39.5,
+  "glbBytes": 5064,
+  "texBytes": 1222,
+  "smallBytes": 826,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "sacks_gr2",
+  "job": "D_Sacks_gr2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Sacks_gr2.prefab"
+  },
+  "foot": [
+   1.0905,
+   1.6
+  ],
+  "height": 0.8035,
+  "scale": 0.8405,
+  "uvPerTile": 0.34064,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.0905,
+   0.8035,
+   1.6
+  ],
+  "triangles": 344,
+  "parts": [
+   "sacks_gr2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   1.298,
+   0.956,
+   1.904
+  ],
+  "buried": 0.075,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.3747,
+     0.5192,
+     0.6155,
+     0.4455
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 93
+    },
+    "want": {
+     "w": 94,
+     "h": 68
+    },
+    "tpt": 43.6
+   }
+  ],
+  "texelsPerTile": 43.6,
+  "glbBytes": 11180,
+  "texBytes": 3110,
+  "smallBytes": 1436,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "jar1",
+  "job": "D_Jar1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Jar1.prefab"
+  },
+  "foot": [
+   0.3282,
+   0.2842
+  ],
+  "height": 0.4896,
+  "scale": 1,
+  "uvPerTile": 1.28975,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.3282,
+   0.4896,
+   0.2842
+  ],
+  "triangles": 68,
+  "parts": [
+   "jar1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.328,
+   0.49,
+   0.284
+  ],
+  "buried": 0.006,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     -0.0002,
+     0.004,
+     0.1863,
+     0.1991
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 31,
+     "h": 32
+    },
+    "want": {
+     "w": 25,
+     "h": 26
+    },
+    "tpt": 41.3
+   }
+  ],
+  "texelsPerTile": 41.3,
+  "glbBytes": 3548,
+  "texBytes": 756,
+  "smallBytes": 594,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "jar2",
+  "job": "D_Jar2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Jar2.prefab"
+  },
+  "foot": [
+   0.2707,
+   0.2345
+  ],
+  "height": 0.5957,
+  "scale": 1,
+  "uvPerTile": 1.1991,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.2707,
+   0.5957,
+   0.2345
+  ],
+  "triangles": 56,
+  "parts": [
+   "jar2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.271,
+   0.596,
+   0.234
+  ],
+  "buried": 0.004,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.1909,
+     0.0066,
+     0.1821,
+     0.2001
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 30,
+     "h": 32
+    },
+    "want": {
+     "w": 26,
+     "h": 28
+    },
+    "tpt": 38.4
+   }
+  ],
+  "texelsPerTile": 38.4,
+  "glbBytes": 3424,
+  "texBytes": 822,
+  "smallBytes": 638,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "jar3",
+  "job": "D_Jar3",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Jar3.prefab"
+  },
+  "foot": [
+   0.378,
+   0.3274
+  ],
+  "height": 0.6487,
+  "scale": 1,
+  "uvPerTile": 1.03073,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.378,
+   0.6487,
+   0.3274
+  ],
+  "triangles": 44,
+  "parts": [
+   "jar3"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.378,
+   0.649,
+   0.327
+  ],
+  "buried": 0.009,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.3786,
+     0.0071,
+     0.1784,
+     0.1996
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 29,
+     "h": 32
+    },
+    "want": {
+     "w": 29,
+     "h": 32
+    },
+    "tpt": 33
+   }
+  ],
+  "texelsPerTile": 33,
+  "glbBytes": 3160,
+  "texBytes": 868,
+  "smallBytes": 628,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "jar4",
+  "job": "D_Jar4",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Jar4.prefab"
+  },
+  "foot": [
+   0.2937,
+   0.2544
+  ],
+  "height": 0.4754,
+  "scale": 1,
+  "uvPerTile": 1.33988,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.2937,
+   0.4754,
+   0.2544
+  ],
+  "triangles": 56,
+  "parts": [
+   "jar4"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.294,
+   0.475,
+   0.254
+  ],
+  "buried": 0.009,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.1867,
+     0.0034,
+     0.1881,
+     0.2037
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 29,
+     "h": 32
+    },
+    "want": {
+     "w": 22,
+     "h": 24
+    },
+    "tpt": 42.9
+   }
+  ],
+  "texelsPerTile": 42.9,
+  "glbBytes": 3460,
+  "texBytes": 820,
+  "smallBytes": 636,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "jar5",
+  "job": "D_Jar5",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Jar5.prefab"
+  },
+  "foot": [
+   0.4405,
+   0.3815
+  ],
+  "height": 0.4502,
+  "scale": 1,
+  "uvPerTile": 1.0369,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.4405,
+   0.4502,
+   0.3815
+  ],
+  "triangles": 58,
+  "parts": [
+   "jar5"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.441,
+   0.45,
+   0.381
+  ],
+  "buried": 0,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.3821,
+     0.0051,
+     0.1784,
+     0.1601
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 29
+    },
+    "want": {
+     "w": 31,
+     "h": 28
+    },
+    "tpt": 33.2
+   }
+  ],
+  "texelsPerTile": 33.2,
+  "glbBytes": 3276,
+  "texBytes": 868,
+  "smallBytes": 626,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "jar6",
+  "job": "D_Jar6",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Jar6.prefab"
+  },
+  "foot": [
+   0.3541,
+   0.3066
+  ],
+  "height": 0.6548,
+  "scale": 1,
+  "uvPerTile": 1.18443,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.3541,
+   0.6548,
+   0.3066
+  ],
+  "triangles": 81,
+  "parts": [
+   "jar6"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.354,
+   0.655,
+   0.307
+  ],
+  "buried": 0.011,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.1867,
+     -0.0015,
+     0.1881,
+     0.2085
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 29,
+     "h": 32
+    },
+    "want": {
+     "w": 25,
+     "h": 28
+    },
+    "tpt": 37.9
+   }
+  ],
+  "texelsPerTile": 37.9,
+  "glbBytes": 4156,
+  "texBytes": 818,
+  "smallBytes": 640,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "jar_gr1",
+  "job": "D_Jar_gr1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Jar_gr1.prefab"
+  },
+  "foot": [
+   0.6596,
+   1.0808
+  ],
+  "height": 0.6487,
+  "scale": 1,
+  "uvPerTile": 0.41534,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.6596,
+   0.6487,
+   1.0808
+  ],
+  "triangles": 292,
+  "parts": [
+   "jar_gr1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.66,
+   0.649,
+   1.081
+  ],
+  "buried": 0,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     -0.0002,
+     0.004,
+     0.5572,
+     0.2028
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 48
+    },
+    "want": {
+     "w": 78,
+     "h": 29
+    },
+    "tpt": 53.2
+   }
+  ],
+  "texelsPerTile": 53.2,
+  "glbBytes": 11584,
+  "texBytes": 1828,
+  "smallBytes": 962,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "jar_gr2",
+  "job": "D_Jar_gr2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Jar_gr2.prefab"
+  },
+  "foot": [
+   0.6692,
+   1.3935
+  ],
+  "height": 0.6548,
+  "scale": 1,
+  "uvPerTile": 0.59993,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.6692,
+   0.6548,
+   1.3935
+  ],
+  "triangles": 239,
+  "parts": [
+   "jar_gr2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.669,
+   0.655,
+   1.393
+  ],
+  "buried": 0,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.1867,
+     -0.0015,
+     0.3738,
+     0.2085
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 64,
+     "h": 36
+    },
+    "want": {
+     "w": 54,
+     "h": 30
+    },
+    "tpt": 38.4
+   }
+  ],
+  "texelsPerTile": 38.4,
+  "glbBytes": 9872,
+  "texBytes": 1164,
+  "smallBytes": 770,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "bucket1",
+  "job": "D_Bucket1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Bucket1.prefab"
+  },
+  "foot": [
+   0.4854,
+   0.4928
+  ],
+  "height": 0.5573,
+  "scale": 1,
+  "uvPerTile": 0.25372,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.4854,
+   0.5573,
+   0.4928
+  ],
+  "triangles": 104,
+  "parts": [
+   "bucket1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Addons.mat"
+  ],
+  "rawSize": [
+   0.485,
+   0.557,
+   0.493
+  ],
+  "buried": -0.002,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0029,
+     0.3724,
+     0.6863,
+     0.6247
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 116
+    },
+    "want": {
+     "w": 127,
+     "h": 115
+    },
+    "tpt": 32.5
+   }
+  ],
+  "texelsPerTile": 32.5,
+  "glbBytes": 6048,
+  "texBytes": 3832,
+  "smallBytes": 1762,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "basin1",
+  "job": "I_Basin1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Basin1.prefab"
+  },
+  "foot": [
+   1.0841,
+   1.0841
+  ],
+  "height": 0.687,
+  "scale": 0.7,
+  "uvPerTile": 0.16049,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": true,
+  "sizeTiles": [
+   1.0841,
+   0.687,
+   1.0841
+  ],
+  "triangles": 140,
+  "parts": [
+   "water",
+   "body"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1_alpha.mat",
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   1.549,
+   0.981,
+   1.549
+  ],
+  "buried": -0.016,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1_alpha.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.8633,
+     0.8426,
+     0.0651,
+     0.0651
+    ],
+    "rect": {
+     "x": 140,
+     "y": 0,
+     "w": 40,
+     "h": 40
+    },
+    "want": {
+     "w": 31,
+     "h": 31
+    },
+    "tpt": 41.6
+   },
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5089,
+     0.1381,
+     0.4642,
+     0.8529
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 140,
+     "h": 256
+    },
+    "want": {
+     "w": 110,
+     "h": 201
+    },
+    "tpt": 41
+   }
+  ],
+  "texelsPerTile": 41,
+  "glbBytes": 9116,
+  "texBytes": 8342,
+  "smallBytes": 3598,
+  "alpha": [
+   {
+    "alphaMat": true,
+    "softFrac": 1
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "table1",
+  "job": "I_Table1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Table1.prefab"
+  },
+  "foot": [
+   1.6,
+   0.8715
+  ],
+  "height": 0.634,
+  "scale": 0.6261,
+  "uvPerTile": 0.52622,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   0.634,
+   0.8715
+  ],
+  "triangles": 140,
+  "parts": [
+   "table1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   2.555,
+   1.013,
+   1.392
+  ],
+  "buried": -2.776,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5755,
+     0.0041,
+     0.4164,
+     0.361
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 64,
+     "h": 56
+    },
+    "want": {
+     "w": 61,
+     "h": 53
+    },
+    "tpt": 33.7
+   }
+  ],
+  "texelsPerTile": 33.7,
+  "glbBytes": 10364,
+  "texBytes": 1012,
+  "smallBytes": 716,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "table1b",
+  "job": "I_Table1B",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Table1B.prefab"
+  },
+  "foot": [
+   1.6,
+   0.4786
+  ],
+  "height": 0.3548,
+  "scale": 0.3438,
+  "uvPerTile": 0.84994,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   0.3548,
+   0.4786
+  ],
+  "triangles": 176,
+  "parts": [
+   "table1b"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   4.653,
+   1.032,
+   1.392
+  ],
+  "buried": 0.006,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5667,
+     0.0041,
+     0.4293,
+     0.361
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 64,
+     "h": 54
+    },
+    "want": {
+     "w": 38,
+     "h": 32
+    },
+    "tpt": 54.4
+   }
+  ],
+  "texelsPerTile": 54.4,
+  "glbBytes": 12672,
+  "texBytes": 1082,
+  "smallBytes": 738,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "table_tawern3",
+  "job": "I_Table_Tawern3",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Table_Tawern3.prefab"
+  },
+  "foot": [
+   1.6,
+   0.3195
+  ],
+  "height": 0.3034,
+  "scale": 0.2557,
+  "uvPerTile": 1.20784,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   0.3034,
+   0.3195
+  ],
+  "triangles": 156,
+  "parts": [
+   "table_tawern3"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   6.258,
+   1.187,
+   1.25
+  ],
+  "buried": 0,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5701,
+     0.004,
+     0.4299,
+     0.3069
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 23
+    },
+    "want": {
+     "w": 27,
+     "h": 19
+    },
+    "tpt": 38.7
+   }
+  ],
+  "texelsPerTile": 38.7,
+  "glbBytes": 12216,
+  "texBytes": 650,
+  "smallBytes": 584,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "bench1",
+  "job": "I_Bench1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Bench1.prefab"
+  },
+  "foot": [
+   1.5113,
+   0.4399
+  ],
+  "height": 0.4294,
+  "scale": 0.7,
+  "uvPerTile": 0.41042,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.5113,
+   0.4294,
+   0.4399
+  ],
+  "triangles": 136,
+  "parts": [
+   "bench1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   2.159,
+   0.613,
+   0.628
+  ],
+  "buried": 0.03,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5773,
+     0.0122,
+     0.4139,
+     0.3585
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 112
+    },
+    "want": {
+     "w": 78,
+     "h": 68
+    },
+    "tpt": 52.5
+   }
+  ],
+  "texelsPerTile": 52.5,
+  "glbBytes": 9320,
+  "texBytes": 2088,
+  "smallBytes": 1090,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "bench3",
+  "job": "I_Bench3",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Bench3.prefab"
+  },
+  "foot": [
+   0.4886,
+   0.4646
+  ],
+  "height": 0.5785,
+  "scale": 0.7,
+  "uvPerTile": 0.46701,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.4886,
+   0.5785,
+   0.4646
+  ],
+  "triangles": 156,
+  "parts": [
+   "bench3"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.698,
+   0.826,
+   0.664
+  ],
+  "buried": 0.002,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5794,
+     0.0085,
+     0.3988,
+     0.3611
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 117
+    },
+    "want": {
+     "w": 69,
+     "h": 63
+    },
+    "tpt": 59.8
+   }
+  ],
+  "texelsPerTile": 59.8,
+  "glbBytes": 7268,
+  "texBytes": 2138,
+  "smallBytes": 1132,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "bench7",
+  "job": "I_Bench7",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Bench7.prefab"
+  },
+  "foot": [
+   1.6,
+   0.4969
+  ],
+  "height": 0.3573,
+  "scale": 0.5519,
+  "uvPerTile": 0.17691,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   0.3573,
+   0.4969
+  ],
+  "triangles": 132,
+  "parts": [
+   "bench7"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   2.899,
+   0.647,
+   0.9
+  ],
+  "buried": 0,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5064,
+     0.0016,
+     0.4925,
+     0.9581
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 132,
+     "h": 256
+    },
+    "want": {
+     "w": 94,
+     "h": 182
+    },
+    "tpt": 45.3
+   }
+  ],
+  "texelsPerTile": 45.3,
+  "glbBytes": 8020,
+  "texBytes": 7474,
+  "smallBytes": 3168,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "cupboard2_1",
+  "job": "I_Cupboard2_1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Cupboard2_1.prefab"
+  },
+  "foot": [
+   1.6,
+   0.5038
+  ],
+  "height": 2.1983,
+  "scale": 0.6011,
+  "uvPerTile": 0.27779,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   2.1983,
+   0.5038
+  ],
+  "triangles": 178,
+  "parts": [
+   "cupboard2_1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   2.662,
+   3.657,
+   0.838
+  ],
+  "buried": -0.001,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.4869,
+     0.0142,
+     0.5022,
+     0.3126
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 79
+    },
+    "want": {
+     "w": 116,
+     "h": 72
+    },
+    "tpt": 35.6
+   }
+  ],
+  "texelsPerTile": 35.6,
+  "glbBytes": 12532,
+  "texBytes": 1734,
+  "smallBytes": 956,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "cupboard2_1_books1",
+  "job": "I_Cupboard2_1_books1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Cupboard2_1_books1.prefab"
+  },
+  "foot": [
+   1.6,
+   0.5038
+  ],
+  "height": 2.1983,
+  "scale": 0.6011,
+  "uvPerTile": 0.17457,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   2.1983,
+   0.5038
+  ],
+  "triangles": 396,
+  "parts": [
+   "cupboard2_1_books1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   2.662,
+   3.657,
+   0.838
+  ],
+  "buried": -0.001,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     -0.0005,
+     0.0142,
+     0.9896,
+     0.9865
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 255
+    },
+    "want": {
+     "w": 184,
+     "h": 183
+    },
+    "tpt": 44.7
+   }
+  ],
+  "texelsPerTile": 44.7,
+  "glbBytes": 27688,
+  "texBytes": 14670,
+  "smallBytes": 5896,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "bed_17",
+  "job": "I_Bed_17",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Bed_17.prefab"
+  },
+  "foot": [
+   1.0899,
+   1.6
+  ],
+  "height": 0.1804,
+  "scale": 0.6025,
+  "uvPerTile": 0.80189,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.0899,
+   0.1804,
+   1.6
+  ],
+  "triangles": 52,
+  "parts": [
+   "cloth",
+   "body"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat",
+   "Top-Down Interiors/Origin/Models/Materials/Alphas.mat"
+  ],
+  "rawSize": [
+   1.809,
+   0.299,
+   2.656
+  ],
+  "buried": -0.003,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.6559,
+     0.8255,
+     0.1277,
+     0.1724
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 34,
+     "h": 45
+    },
+    "want": {
+     "w": 22,
+     "h": 29
+    },
+    "tpt": 51.1
+   },
+   {
+    "mat": "Alphas.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.6458,
+     0.4816,
+     0.1895,
+     0.1647
+    ],
+    "rect": {
+     "x": 34,
+     "y": 0,
+     "w": 30,
+     "h": 27
+    },
+    "want": {
+     "w": 19,
+     "h": 17
+    },
+    "tpt": 51.7
+   }
+  ],
+  "texelsPerTile": 51.1,
+  "glbBytes": 4160,
+  "texBytes": 878,
+  "smallBytes": 708,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "bed_18",
+  "job": "I_Bed_18",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Bed_18.prefab"
+  },
+  "foot": [
+   1.0218,
+   1.6
+  ],
+  "height": 0.1941,
+  "scale": 0.6025,
+  "uvPerTile": 0.75263,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.0218,
+   0.1941,
+   1.6
+  ],
+  "triangles": 60,
+  "parts": [
+   "cloth",
+   "body"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat",
+   "Top-Down Interiors/Origin/Models/Materials/Alphas.mat"
+  ],
+  "rawSize": [
+   1.696,
+   0.322,
+   2.656
+  ],
+  "buried": 0.002,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.6559,
+     0.8255,
+     0.1277,
+     0.1724
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 43
+    },
+    "want": {
+     "w": 22,
+     "h": 29
+    },
+    "tpt": 48.1
+   },
+   {
+    "mat": "Alphas.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.6456,
+     0.4816,
+     0.1895,
+     0.1647
+    ],
+    "rect": {
+     "x": 32,
+     "y": 0,
+     "w": 32,
+     "h": 28
+    },
+    "want": {
+     "w": 22,
+     "h": 19
+    },
+    "tpt": 48.2
+   }
+  ],
+  "texelsPerTile": 48.1,
+  "glbBytes": 4320,
+  "texBytes": 834,
+  "smallBytes": 682,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "furniture10_1",
+  "job": "I_Furniture10_1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Furniture10_1.prefab"
+  },
+  "foot": [
+   1.2746,
+   0.299
+  ],
+  "height": 0.7575,
+  "scale": 0.7,
+  "uvPerTile": 0.15944,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.2746,
+   0.7575,
+   0.299
+  ],
+  "triangles": 272,
+  "parts": [
+   "furniture10_1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   1.821,
+   1.082,
+   0.427
+  ],
+  "buried": 0.157,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.3162,
+     0.0235,
+     0.6383,
+     0.9755
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 167,
+     "h": 256
+    },
+    "want": {
+     "w": 131,
+     "h": 201
+    },
+    "tpt": 40.8
+   }
+  ],
+  "texelsPerTile": 40.8,
+  "glbBytes": 15156,
+  "texBytes": 9586,
+  "smallBytes": 3966,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "furniture11",
+  "job": "I_Furniture11",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Furniture11.prefab"
+  },
+  "foot": [
+   1.0661,
+   0.1364
+  ],
+  "height": 0.2033,
+  "scale": 0.7,
+  "uvPerTile": 0.58012,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.0661,
+   0.2033,
+   0.1364
+  ],
+  "triangles": 112,
+  "parts": [
+   "furniture11"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   1.523,
+   0.29,
+   0.195
+  ],
+  "buried": 0.102,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5697,
+     0.0142,
+     0.1944,
+     0.3126
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 40,
+     "h": 64
+    },
+    "want": {
+     "w": 35,
+     "h": 56
+    },
+    "tpt": 37.1
+   }
+  ],
+  "texelsPerTile": 37.1,
+  "glbBytes": 7272,
+  "texBytes": 774,
+  "smallBytes": 650,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "chair4",
+  "job": "I_Chair4",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Furniture/Chair4.prefab"
+  },
+  "foot": [
+   0.4756,
+   0.6864
+  ],
+  "height": 0.7479,
+  "scale": 0.7,
+  "uvPerTile": 0.57054,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.4756,
+   0.7479,
+   0.6864
+  ],
+  "triangles": 164,
+  "parts": [
+   "chair4"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.679,
+   1.068,
+   0.981
+  ],
+  "buried": 0.015,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.6031,
+     0.2612,
+     0.3927,
+     0.5638
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 45,
+     "h": 64
+    },
+    "want": {
+     "w": 40,
+     "h": 57
+    },
+    "tpt": 36.5
+   }
+  ],
+  "texelsPerTile": 36.5,
+  "glbBytes": 10488,
+  "texBytes": 1640,
+  "smallBytes": 976,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "furnace1",
+  "job": "D_Furnace1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Furnace1.prefab"
+  },
+  "foot": [
+   0.9231,
+   0.9231
+  ],
+  "height": 1.5407,
+  "scale": 1,
+  "uvPerTile": 0.18049,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "anchors": [
+   {
+    "name": "Point light",
+    "p": [
+     0,
+     1.526,
+     0
+    ]
+   },
+   {
+    "name": "Fire2",
+    "p": [
+     0,
+     1.315,
+     0
+    ]
+   }
+  ],
+  "sizeTiles": [
+   0.9231,
+   1.5407,
+   0.9231
+  ],
+  "triangles": 334,
+  "parts": [
+   "coals",
+   "body"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Deco.mat",
+   "Top-Down Dungeons/_source/Materials/Up.mat"
+  ],
+  "rawSize": [
+   0.923,
+   1.541,
+   0.923
+  ],
+  "buried": 0.989,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Deco.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5103,
+     0.0028,
+     0.4525,
+     0.2159
+    ],
+    "rect": {
+     "x": 105,
+     "y": 0,
+     "w": 34,
+     "h": 17
+    },
+    "want": {
+     "w": 24,
+     "h": 12
+    },
+    "tpt": 46.8
+   },
+   {
+    "mat": "Up.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.4424,
+     0.0078,
+     0.3841,
+     0.9388
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 105,
+     "h": 256
+    },
+    "want": {
+     "w": 73,
+     "h": 179
+    },
+    "tpt": 46.1
+   }
+  ],
+  "texelsPerTile": 46.1,
+  "glbBytes": 20104,
+  "texBytes": 5234,
+  "smallBytes": 2278,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "furnace3",
+  "job": "D_Furnace3",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Furnace3.prefab"
+  },
+  "foot": [
+   0.8727,
+   0.8741
+  ],
+  "height": 0.6719,
+  "scale": 1,
+  "uvPerTile": 0.1974,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "anchors": [
+   {
+    "name": "Point light",
+    "p": [
+     0,
+     0.558,
+     0
+    ]
+   },
+   {
+    "name": "Fire2",
+    "p": [
+     0,
+     0.52,
+     0
+    ]
+   }
+  ],
+  "sizeTiles": [
+   0.8727,
+   0.6719,
+   0.8741
+  ],
+  "triangles": 276,
+  "parts": [
+   "coals",
+   "body"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Deco.mat",
+   "Top-Down Dungeons/_source/Materials/Up.mat"
+  ],
+  "rawSize": [
+   0.873,
+   0.672,
+   0.874
+  ],
+  "buried": 0.021,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Deco.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5103,
+     0.0028,
+     0.4525,
+     0.2159
+    ],
+    "rect": {
+     "x": 0,
+     "y": 169,
+     "w": 36,
+     "h": 17
+    },
+    "want": {
+     "w": 23,
+     "h": 11
+    },
+    "tpt": 51.1
+   },
+   {
+    "mat": "Up.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.018,
+     0.3805,
+     0.9291,
+     0.615
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 169
+    },
+    "want": {
+     "w": 164,
+     "h": 108
+    },
+    "tpt": 50.2
+   }
+  ],
+  "texelsPerTile": 50.2,
+  "glbBytes": 18996,
+  "texBytes": 8002,
+  "smallBytes": 3418,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "furnace2a",
+  "job": "D_Furnace2A",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Furnace2A.prefab"
+  },
+  "foot": [
+   0.8569,
+   0.7361
+  ],
+  "height": 1.4266,
+  "scale": 1,
+  "uvPerTile": 0.14896,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "anchors": [
+   {
+    "name": "Point light",
+    "p": [
+     -0.005,
+     0.936,
+     -0.05
+    ]
+   },
+   {
+    "name": "Fire2",
+    "p": [
+     0.079,
+     0.805,
+     -0.058
+    ]
+   }
+  ],
+  "sizeTiles": [
+   0.8569,
+   1.4266,
+   0.7361
+  ],
+  "triangles": 241,
+  "parts": [
+   "coals",
+   "body"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Deco.mat",
+   "Top-Down Dungeons/_source/Materials/Up.mat"
+  ],
+  "rawSize": [
+   0.857,
+   1.427,
+   0.736
+  ],
+  "buried": 0.399,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Deco.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.5035,
+     0.0338,
+     0.4837,
+     0.1859
+    ],
+    "rect": {
+     "x": 0,
+     "y": 245,
+     "w": 27,
+     "h": 11
+    },
+    "want": {
+     "w": 23,
+     "h": 9
+    },
+    "tpt": 39.2
+   },
+   {
+    "mat": "Up.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0029,
+     0.0061,
+     0.9917,
+     0.9856
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 248,
+     "h": 245
+    },
+    "want": {
+     "w": 210,
+     "h": 208
+    },
+    "tpt": 37.9
+   }
+  ],
+  "texelsPerTile": 37.9,
+  "glbBytes": 14480,
+  "texBytes": 12588,
+  "smallBytes": 4716,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "hearth1",
+  "job": "I_Hearth1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Fireplace/Hearth1.prefab"
+  },
+  "foot": [
+   0.7415,
+   0.7415
+  ],
+  "height": 1.3963,
+  "scale": 0.7,
+  "uvPerTile": 0.12938,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.7415,
+   1.3963,
+   0.7415
+  ],
+  "triangles": 228,
+  "parts": [
+   "hearth1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   1.059,
+   1.995,
+   1.059
+  ],
+  "buried": 0.005,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.1178,
+     0.169,
+     0.8794,
+     0.8154
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 237
+    },
+    "want": {
+     "w": 248,
+     "h": 230
+    },
+    "tpt": 33.1
+   }
+  ],
+  "texelsPerTile": 33.1,
+  "glbBytes": 12056,
+  "texBytes": 14284,
+  "smallBytes": 5624,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "candle1",
+  "job": "I_Candle1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Lights/Candle1.prefab"
+  },
+  "foot": [
+   0.1449,
+   0.1458
+  ],
+  "height": 0.5065,
+  "scale": 0.7,
+  "uvPerTile": 1.02552,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": true,
+  "anchors": [
+   {
+    "name": "Candleflame",
+    "p": [
+     -0.01,
+     0.508,
+     0
+    ]
+   }
+  ],
+  "sizeTiles": [
+   0.1449,
+   0.5065,
+   0.1458
+  ],
+  "triangles": 24,
+  "parts": [
+   "flame",
+   "body"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat",
+   "Top-Down Interiors/Origin/Models/Materials/Addons1_alpha.mat"
+  ],
+  "rawSize": [
+   0.207,
+   0.724,
+   0.208
+  ],
+  "buried": -0.007,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.0736,
+     0.0879,
+     0.0742,
+     0.1373
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 35,
+     "h": 64
+    },
+    "want": {
+     "w": 18,
+     "h": 33
+    },
+    "tpt": 64.4
+   },
+   {
+    "mat": "Addons1_alpha.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.9366,
+     0.8987,
+     0.0381,
+     0.0355
+    ],
+    "rect": {
+     "x": 35,
+     "y": 0,
+     "w": 12,
+     "h": 10
+    },
+    "want": {
+     "w": 6,
+     "h": 5
+    },
+    "tpt": 72.8
+   }
+  ],
+  "texelsPerTile": 64.4,
+  "glbBytes": 3744,
+  "texBytes": 1540,
+  "smallBytes": 976,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": true,
+    "softFrac": 0.7583333333333333
+   }
+  ]
+ },
+ {
+  "id": "candle4",
+  "job": "I_Candle4",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Lights/Candle4.prefab"
+  },
+  "foot": [
+   0.2162,
+   0.228
+  ],
+  "height": 0.193,
+  "scale": 0.7,
+  "uvPerTile": 0.83083,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": true,
+  "anchors": [
+   {
+    "name": "Candleflame",
+    "p": [
+     0.001,
+     0.185,
+     0.005
+    ]
+   }
+  ],
+  "sizeTiles": [
+   0.2162,
+   0.193,
+   0.228
+  ],
+  "triangles": 29,
+  "parts": [
+   "flame",
+   "body"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1_alpha.mat",
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.309,
+   0.276,
+   0.326
+  ],
+  "buried": -0.003,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1_alpha.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.9366,
+     0.8837,
+     0.0399,
+     0.0505
+    ],
+    "rect": {
+     "x": 51,
+     "y": 0,
+     "w": 13,
+     "h": 18
+    },
+    "want": {
+     "w": 8,
+     "h": 11
+    },
+    "tpt": 52.4
+   },
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.0004,
+     0.0879,
+     0.1474,
+     0.1357
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 51,
+     "h": 46
+    },
+    "want": {
+     "w": 31,
+     "h": 28
+    },
+    "tpt": 53.7
+   }
+  ],
+  "texelsPerTile": 52.4,
+  "glbBytes": 3980,
+  "texBytes": 1910,
+  "smallBytes": 1050,
+  "alpha": [
+   {
+    "alphaMat": true,
+    "softFrac": 0.782051282051282
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "chandelier4",
+  "job": "I_Chandelier4",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Lights/Chandelier4.prefab"
+  },
+  "foot": [
+   0.2473,
+   0.2473
+  ],
+  "height": 0.6386,
+  "scale": 0.7,
+  "uvPerTile": 0.50318,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "anchors": [
+   {
+    "name": "Candleflame",
+    "p": [
+     0,
+     0.639,
+     0.001
+    ]
+   }
+  ],
+  "sizeTiles": [
+   0.2473,
+   0.6386,
+   0.2473
+  ],
+  "triangles": 202,
+  "parts": [
+   "chandelier4"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.353,
+   0.912,
+   0.353
+  ],
+  "buried": 0.008,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.0004,
+     0.0411,
+     0.519,
+     0.1825
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 64,
+     "h": 23
+    },
+    "want": {
+     "w": 64,
+     "h": 23
+    },
+    "tpt": 32.2
+   }
+  ],
+  "texelsPerTile": 32.2,
+  "glbBytes": 12160,
+  "texBytes": 1038,
+  "smallBytes": 732,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "torch1",
+  "job": "D_Torch1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Torch1.prefab"
+  },
+  "foot": [
+   0.1977,
+   0.4836
+  ],
+  "height": 1.0008,
+  "scale": 1,
+  "uvPerTile": 0.78793,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "anchors": [
+   {
+    "name": "Fire1",
+    "p": [
+     0,
+     0.771,
+     -0.091
+    ]
+   },
+   {
+    "name": "Point light",
+    "p": [
+     0,
+     1.181,
+     -0.285
+    ]
+   }
+  ],
+  "sizeTiles": [
+   0.1977,
+   1.0008,
+   0.4836
+  ],
+  "triangles": 160,
+  "parts": [
+   "torch1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Deco.mat"
+  ],
+  "rawSize": [
+   0.198,
+   1.001,
+   0.484
+  ],
+  "buried": 0.316,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Deco.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.2545,
+     0.0015,
+     0.7438,
+     0.3726
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 64,
+     "h": 33
+    },
+    "want": {
+     "w": 41,
+     "h": 21
+    },
+    "tpt": 50.4
+   }
+  ],
+  "texelsPerTile": 50.4,
+  "glbBytes": 10240,
+  "texBytes": 1148,
+  "smallBytes": 724,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "well1",
+  "job": "De_Well1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs_elementar/Well1.prefab"
+  },
+  "foot": [
+   1.6,
+   1.6
+  ],
+  "height": 0.1932,
+  "scale": 0.9554,
+  "uvPerTile": 0.16002,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   0.1932,
+   1.6
+  ],
+  "triangles": 62,
+  "parts": [
+   "well1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Ground1.mat"
+  ],
+  "rawSize": [
+   1.675,
+   0.202,
+   1.675
+  ],
+  "buried": 0.002,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Ground1.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0109,
+     0.5163,
+     0.9603,
+     0.4773
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 128
+    },
+    "want": {
+     "w": 200,
+     "h": 100
+    },
+    "tpt": 41
+   }
+  ],
+  "texelsPerTile": 41,
+  "glbBytes": 3828,
+  "texBytes": 6606,
+  "smallBytes": 2704,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "well2",
+  "job": "De_Well2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs_elementar/Well2.prefab"
+  },
+  "foot": [
+   1.6,
+   1.6
+  ],
+  "height": 0.1933,
+  "scale": 0.8567,
+  "uvPerTile": 0.1995,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   0.1933,
+   1.6
+  ],
+  "triangles": 80,
+  "parts": [
+   "well2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Ground1.mat"
+  ],
+  "rawSize": [
+   1.868,
+   0.226,
+   1.868
+  ],
+  "buried": 0.001,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Ground1.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.2534,
+     0.7157,
+     0.7476,
+     0.2811
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 97
+    },
+    "want": {
+     "w": 161,
+     "h": 61
+    },
+    "tpt": 51.1
+   }
+  ],
+  "texelsPerTile": 51.1,
+  "glbBytes": 4128,
+  "texBytes": 5526,
+  "smallBytes": 2214,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "column5",
+  "job": "De_Column5",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs_elementar/Column5.prefab"
+  },
+  "foot": [
+   0.7738,
+   0.7738
+  ],
+  "height": 2.0039,
+  "scale": 1,
+  "uvPerTile": 0.14263,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.7738,
+   2.0039,
+   0.7738
+  ],
+  "triangles": 18,
+  "parts": [
+   "column5"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Wall3.mat"
+  ],
+  "rawSize": [
+   0.774,
+   2.004,
+   0.774
+  ],
+  "buried": 0.024,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Wall3.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0014,
+     0.0091,
+     0.6743,
+     0.4419
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 168
+    },
+    "want": {
+     "w": 225,
+     "h": 148
+    },
+    "tpt": 36.5
+   }
+  ],
+  "texelsPerTile": 36.5,
+  "glbBytes": 2224,
+  "texBytes": 6362,
+  "smallBytes": 2598,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "column7",
+  "job": "De_Column7",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs_elementar/Column7.prefab"
+  },
+  "foot": [
+   0.852,
+   0.8968
+  ],
+  "height": 3.011,
+  "scale": 1,
+  "uvPerTile": 0.15312,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.852,
+   3.011,
+   0.8968
+  ],
+  "triangles": 26,
+  "parts": [
+   "column7"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Wall4.mat"
+  ],
+  "rawSize": [
+   0.852,
+   3.011,
+   0.897
+  ],
+  "buried": 0.001,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Wall4.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.4686,
+     0.0967,
+     0.2388,
+     0.5146
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 119,
+     "h": 256
+    },
+    "want": {
+     "w": 98,
+     "h": 210
+    },
+    "tpt": 39.2
+   }
+  ],
+  "texelsPerTile": 39.2,
+  "glbBytes": 2332,
+  "texBytes": 6128,
+  "smallBytes": 2346,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "column9",
+  "job": "De_Column9",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs_elementar/Column9.prefab"
+  },
+  "foot": [
+   0.6,
+   0.6
+  ],
+  "height": 1.3996,
+  "scale": 1,
+  "uvPerTile": 0.24715,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.6,
+   1.3996,
+   0.6
+  ],
+  "triangles": 28,
+  "parts": [
+   "column9"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Up.mat"
+  ],
+  "rawSize": [
+   0.6,
+   1.4,
+   0.6
+  ],
+  "buried": 0.003,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Up.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.153,
+     0.0211,
+     0.507,
+     0.4558
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 230
+    },
+    "want": {
+     "w": 130,
+     "h": 117
+    },
+    "tpt": 63.3
+   }
+  ],
+  "texelsPerTile": 63.3,
+  "glbBytes": 2660,
+  "texBytes": 10798,
+  "smallBytes": 4188,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "king_obelisk",
+  "job": "De_King_obelisk",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs_elementar/King_obelisk.prefab"
+  },
+  "foot": [
+   1.6,
+   1.5591
+  ],
+  "height": 3.365,
+  "scale": 0.8013,
+  "uvPerTile": 0.11561,
+  "tex": {
+   "desk": 512,
+   "small": 256
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   3.365,
+   1.5591
+  ],
+  "triangles": 444,
+  "parts": [
+   "king_obelisk"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Deco.mat",
+   "Top-Down Dungeons/_source/Materials/Up.mat",
+   "Top-Down Dungeons/_source/Materials/Bricks1.mat"
+  ],
+  "rawSize": [
+   1.997,
+   4.199,
+   1.946
+  ],
+  "buried": 0.002,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Deco.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0054,
+     0.2097,
+     0.9917,
+     0.7856
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 350,
+     "h": 278
+    },
+    "want": {
+     "w": 190,
+     "h": 151
+    },
+    "tpt": 59.1
+   },
+   {
+    "mat": "Up.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.686,
+     0.451,
+     0.2742,
+     0.2793
+    ],
+    "rect": {
+     "x": 350,
+     "y": 0,
+     "w": 129,
+     "h": 131
+    },
+    "want": {
+     "w": 70,
+     "h": 71
+    },
+    "tpt": 59.7
+   },
+   {
+    "mat": "Bricks1.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     -0.4833,
+     0.0022,
+     2.3571,
+     0.4826
+    ],
+    "rect": {
+     "x": 0,
+     "y": 278,
+     "w": 512,
+     "h": 105
+    },
+    "want": {
+     "w": 278,
+     "h": 57
+    },
+    "tpt": 59.1
+   }
+  ],
+  "texelsPerTile": 59.1,
+  "glbBytes": 17112,
+  "texBytes": 32248,
+  "smallBytes": 11472,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   },
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "rock4a",
+  "job": "D_Rock4A",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Rock4A.prefab"
+  },
+  "foot": [
+   1.4779,
+   1.5926
+  ],
+  "height": 1.6372,
+  "scale": 1,
+  "uvPerTile": 0.25012,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.4779,
+   1.6372,
+   1.5926
+  ],
+  "triangles": 34,
+  "parts": [
+   "rock4a"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Rocks.mat"
+  ],
+  "rawSize": [
+   1.478,
+   1.637,
+   1.593
+  ],
+  "buried": 0.819,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Rocks.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.3782,
+     0.7942,
+     0.2016,
+     0.1883
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 120
+    },
+    "want": {
+     "w": 128,
+     "h": 120
+    },
+    "tpt": 32
+   }
+  ],
+  "texelsPerTile": 32,
+  "glbBytes": 2384,
+  "texBytes": 2072,
+  "smallBytes": 1032,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "rock4b",
+  "job": "D_Rock4B",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Rock4B.prefab"
+  },
+  "foot": [
+   1.3228,
+   1.131
+  ],
+  "height": 0.382,
+  "scale": 1,
+  "uvPerTile": 0.54689,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.3228,
+   0.382,
+   1.131
+  ],
+  "triangles": 19,
+  "parts": [
+   "rock4b"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Rocks.mat"
+  ],
+  "rawSize": [
+   1.323,
+   0.382,
+   1.131
+  ],
+  "buried": 0.05,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Rocks.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.595,
+     0.0504,
+     0.0907,
+     0.0925
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 63,
+     "h": 64
+    },
+    "want": {
+     "w": 58,
+     "h": 59
+    },
+    "tpt": 35
+   }
+  ],
+  "texelsPerTile": 35,
+  "glbBytes": 2032,
+  "texBytes": 1054,
+  "smallBytes": 714,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "pav_debris1",
+  "job": "D_Pav_debris1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Pav_debris1.prefab"
+  },
+  "foot": [
+   0.3793,
+   0.3628
+  ],
+  "height": 0.1911,
+  "scale": 1,
+  "uvPerTile": 1.47817,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.3793,
+   0.1911,
+   0.3628
+  ],
+  "triangles": 14,
+  "parts": [
+   "pav_debris1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Pavement.mat"
+  ],
+  "rawSize": [
+   0.379,
+   0.191,
+   0.363
+  ],
+  "buried": 0.096,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Pavement.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.421,
+     0.3167,
+     0.0823,
+     0.0779
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 31
+    },
+    "want": {
+     "w": 22,
+     "h": 21
+    },
+    "tpt": 47.3
+   }
+  ],
+  "texelsPerTile": 47.3,
+  "glbBytes": 1932,
+  "texBytes": 840,
+  "smallBytes": 622,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "pav_debris4",
+  "job": "D_Pav_debris4",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Pav_debris4.prefab"
+  },
+  "foot": [
+   0.6486,
+   0.7037
+  ],
+  "height": 0.2336,
+  "scale": 1,
+  "uvPerTile": 0.85712,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.6486,
+   0.2336,
+   0.7037
+  ],
+  "triangles": 18,
+  "parts": [
+   "pav_debris4"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Pavement.mat"
+  ],
+  "rawSize": [
+   0.649,
+   0.234,
+   0.704
+  ],
+  "buried": 0.117,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Pavement.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.2561,
+     0.2246,
+     0.1209,
+     0.1117
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 64,
+     "h": 59
+    },
+    "want": {
+     "w": 38,
+     "h": 35
+    },
+    "tpt": 54.9
+   }
+  ],
+  "texelsPerTile": 54.9,
+  "glbBytes": 2116,
+  "texBytes": 1630,
+  "smallBytes": 914,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "pav_debris7",
+  "job": "D_Pav_debris7",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Pav_debris7.prefab"
+  },
+  "foot": [
+   0.8164,
+   0.8012
+  ],
+  "height": 0.2985,
+  "scale": 1,
+  "uvPerTile": 0.75231,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.8164,
+   0.2985,
+   0.8012
+  ],
+  "triangles": 18,
+  "parts": [
+   "pav_debris7"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Pavement.mat"
+  ],
+  "rawSize": [
+   0.816,
+   0.299,
+   0.801
+  ],
+  "buried": 0.149,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Pavement.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.2816,
+     0.35,
+     0.14,
+     0.1384
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 64,
+     "h": 64
+    },
+    "want": {
+     "w": 43,
+     "h": 43
+    },
+    "tpt": 48.1
+   }
+  ],
+  "texelsPerTile": 48.1,
+  "glbBytes": 2076,
+  "texBytes": 1478,
+  "smallBytes": 852,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "pave_debris_gr1",
+  "job": "D_Pave_debris_gr1",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Pave_debris_gr1.prefab"
+  },
+  "foot": [
+   1.6,
+   1.317
+  ],
+  "height": 0.1859,
+  "scale": 0.7381,
+  "uvPerTile": 0.33034,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.6,
+   0.1859,
+   1.317
+  ],
+  "triangles": 74,
+  "parts": [
+   "pave_debris_gr1"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Pavement.mat"
+  ],
+  "rawSize": [
+   2.168,
+   0.252,
+   1.784
+  ],
+  "buried": 0,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Pavement.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.1575,
+     0.2246,
+     0.4595,
+     0.1928
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 54
+    },
+    "want": {
+     "w": 97,
+     "h": 41
+    },
+    "tpt": 42.3
+   }
+  ],
+  "texelsPerTile": 42.3,
+  "glbBytes": 4288,
+  "texBytes": 2154,
+  "smallBytes": 1066,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "pave_debris_gr2",
+  "job": "D_Pave_debris_gr2",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Pave_debris_gr2.prefab"
+  },
+  "foot": [
+   1.2687,
+   1.6
+  ],
+  "height": 0.2324,
+  "scale": 0.7725,
+  "uvPerTile": 0.2912,
+  "tex": {
+   "desk": 128,
+   "small": 64
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.2687,
+   0.2324,
+   1.6
+  ],
+  "triangles": 82,
+  "parts": [
+   "pave_debris_gr2"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Pavement.mat"
+  ],
+  "rawSize": [
+   1.642,
+   0.301,
+   2.071
+  ],
+  "buried": 0,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Pavement.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0123,
+     0.2113,
+     0.4911,
+     0.2062
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 128,
+     "h": 55
+    },
+    "want": {
+     "w": 110,
+     "h": 47
+    },
+    "tpt": 37.3
+   }
+  ],
+  "texelsPerTile": 37.3,
+  "glbBytes": 4660,
+  "texBytes": 2214,
+  "smallBytes": 1116,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "deco1_skull",
+  "job": "D_Deco1_skull",
+  "source": {
+   "pack": "Top-Down Dungeons",
+   "prefab": "Top-Down Dungeons/Prefabs/Deco1_skull.prefab"
+  },
+  "foot": [
+   0.195,
+   0.3451
+  ],
+  "height": 0.4561,
+  "scale": 1,
+  "uvPerTile": 1.75094,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.195,
+   0.4561,
+   0.3451
+  ],
+  "triangles": 58,
+  "parts": [
+   "deco1_skull"
+  ],
+  "materials": [
+   "Top-Down Dungeons/_source/Materials/Deco.mat"
+  ],
+  "rawSize": [
+   0.195,
+   0.456,
+   0.345
+  ],
+  "buried": 0.228,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Deco.mat",
+    "src": [
+     2048,
+     2048
+    ],
+    "crop": [
+     0.0115,
+     0.0114,
+     0.1779,
+     0.1817
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 32
+    },
+    "want": {
+     "w": 19,
+     "h": 19
+    },
+    "tpt": 56
+   }
+  ],
+  "texelsPerTile": 56,
+  "glbBytes": 3028,
+  "texBytes": 864,
+  "smallBytes": 638,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "stone_skull",
+  "job": "B_stone_skull",
+  "source": {
+   "pack": "BitGem Dungeon_Set_01",
+   "prefab": "BitGem/Dungeon_Set_01/Prefabs/Original/stone_skull.prefab"
+  },
+  "foot": [
+   0.9395,
+   0.9669
+  ],
+  "height": 1.1349,
+  "scale": 1,
+  "uvPerTile": 0.13654,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.9395,
+   1.1349,
+   0.9669
+  ],
+  "triangles": 96,
+  "parts": [
+   "stone_skull"
+  ],
+  "materials": [
+   "BitGem/Dungeon_Set_01/Materials/dungeon_set_01_mat.mat"
+  ],
+  "rawSize": [
+   0.939,
+   1.135,
+   0.967
+  ],
+  "buried": -0.02,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "dungeon_set_01_mat.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5011,
+     0.8291,
+     0.2484,
+     0.0937
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 256,
+     "h": 97
+    },
+    "want": {
+     "w": 235,
+     "h": 89
+    },
+    "tpt": 35
+   }
+  ],
+  "texelsPerTile": 35,
+  "glbBytes": 5104,
+  "texBytes": 3698,
+  "smallBytes": 1842,
+  "alpha": [
+   {
+    "alphaMat": true,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "carpet_round3",
+  "job": "I_Carpet_round3",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Carpets Cloths/Carpet_round3.prefab"
+  },
+  "foot": [
+   1.6,
+   1.6
+  ],
+  "height": 0,
+  "scale": 0.4386,
+  "uvPerTile": 1.24499,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": true,
+  "sizeTiles": [
+   1.6,
+   0,
+   1.6
+  ],
+  "triangles": 12,
+  "parts": [
+   "carpet_round3"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Alphas_alpha.mat"
+  ],
+  "rawSize": [
+   3.648,
+   0,
+   3.648
+  ],
+  "buried": -0.023,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Alphas_alpha.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.2109,
+     0.5224,
+     0.1607,
+     0.1613
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 32
+    },
+    "want": {
+     "w": 26,
+     "h": 26
+    },
+    "tpt": 39.8
+   }
+  ],
+  "texelsPerTile": 39.8,
+  "glbBytes": 2036,
+  "texBytes": 1216,
+  "smallBytes": 774,
+  "alpha": [
+   {
+    "alphaMat": true,
+    "softFrac": 0.4609375
+   }
+  ]
+ },
+ {
+  "id": "carpet_square3_1",
+  "job": "I_Carpet_square3_1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Carpets Cloths/Carpet_square3_1.prefab"
+  },
+  "foot": [
+   1.6,
+   1.0619
+  ],
+  "height": 0.0326,
+  "scale": 0.3793,
+  "uvPerTile": 1.25102,
+  "tex": {
+   "desk": 32,
+   "small": 16
+  },
+  "cutout": true,
+  "sizeTiles": [
+   1.6,
+   0.0326,
+   1.0619
+  ],
+  "triangles": 24,
+  "parts": [
+   "carpet_square3_1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Alphas_alpha.mat"
+  ],
+  "rawSize": [
+   4.218,
+   0.086,
+   2.799
+  ],
+  "buried": -0.03,
+  "capped": true,
+  "chart": [
+   {
+    "mat": "Alphas_alpha.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.2149,
+     0.6809,
+     0.2219,
+     0.1476
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 32,
+     "h": 22
+    },
+    "want": {
+     "w": 26,
+     "h": 18
+    },
+    "tpt": 40
+   }
+  ],
+  "texelsPerTile": 40,
+  "glbBytes": 2264,
+  "texBytes": 916,
+  "smallBytes": 674,
+  "alpha": [
+   {
+    "alphaMat": true,
+    "softFrac": 0.22869318181818182
+   }
+  ]
+ },
+ {
+  "id": "paint1",
+  "job": "I_Paint1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Paint1.prefab"
+  },
+  "foot": [
+   1.1358,
+   0.0553
+  ],
+  "height": 0.7637,
+  "scale": 0.7,
+  "uvPerTile": 0.1473,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   1.1358,
+   0.7637,
+   0.0553
+  ],
+  "triangles": 18,
+  "parts": [
+   "paint1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   1.623,
+   1.091,
+   0.079
+  ],
+  "buried": 0.382,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.3202,
+     0.2225,
+     0.1162,
+     0.5374
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 56,
+     "h": 256
+    },
+    "want": {
+     "w": 48,
+     "h": 220
+    },
+    "tpt": 37.7
+   }
+  ],
+  "texelsPerTile": 37.7,
+  "glbBytes": 2624,
+  "texBytes": 2844,
+  "smallBytes": 1422,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "paint2",
+  "job": "I_Paint2",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Paint2.prefab"
+  },
+  "foot": [
+   0.8114,
+   0.0395
+  ],
+  "height": 0.5456,
+  "scale": 0.7,
+  "uvPerTile": 0.19135,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.8114,
+   0.5456,
+   0.0395
+  ],
+  "triangles": 18,
+  "parts": [
+   "paint2"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   1.159,
+   0.779,
+   0.056
+  ],
+  "buried": 0.273,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.3129,
+     0.2225,
+     0.1185,
+     0.5778
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 53,
+     "h": 256
+    },
+    "want": {
+     "w": 35,
+     "h": 169
+    },
+    "tpt": 49
+   }
+  ],
+  "texelsPerTile": 49,
+  "glbBytes": 2628,
+  "texBytes": 3356,
+  "smallBytes": 1606,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "paint3",
+  "job": "I_Paint3",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Paint3.prefab"
+  },
+  "foot": [
+   0.4522,
+   0.0327
+  ],
+  "height": 0.6726,
+  "scale": 0.7,
+  "uvPerTile": 0.24847,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.4522,
+   0.6726,
+   0.0327
+  ],
+  "triangles": 18,
+  "parts": [
+   "paint3"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.646,
+   0.961,
+   0.047
+  ],
+  "buried": 0.336,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.313,
+     0.2225,
+     0.1185,
+     0.5374
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 57,
+     "h": 256
+    },
+    "want": {
+     "w": 29,
+     "h": 131
+    },
+    "tpt": 63.6
+   }
+  ],
+  "texelsPerTile": 63.6,
+  "glbBytes": 2624,
+  "texBytes": 3034,
+  "smallBytes": 1480,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "paint4",
+  "job": "I_Paint4",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Paint4.prefab"
+  },
+  "foot": [
+   0.5508,
+   0.0399
+  ],
+  "height": 0.8192,
+  "scale": 0.7,
+  "uvPerTile": 0.17585,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.5508,
+   0.8192,
+   0.0399
+  ],
+  "triangles": 18,
+  "parts": [
+   "paint4"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.787,
+   1.17,
+   0.057
+  ],
+  "buried": 0.41,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.3134,
+     0.2225,
+     0.1181,
+     0.6201
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 49,
+     "h": 256
+    },
+    "want": {
+     "w": 35,
+     "h": 183
+    },
+    "tpt": 45
+   }
+  ],
+  "texelsPerTile": 45,
+  "glbBytes": 2628,
+  "texBytes": 3442,
+  "smallBytes": 1616,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "paint5",
+  "job": "I_Paint5",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Paint5.prefab"
+  },
+  "foot": [
+   0.4522,
+   0.0327
+  ],
+  "height": 0.6726,
+  "scale": 0.7,
+  "uvPerTile": 0.23526,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.4522,
+   0.6726,
+   0.0327
+  ],
+  "triangles": 18,
+  "parts": [
+   "paint5"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.646,
+   0.961,
+   0.047
+  ],
+  "buried": 0.336,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.3202,
+     0.2225,
+     0.1163,
+     0.5787
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 53,
+     "h": 256
+    },
+    "want": {
+     "w": 29,
+     "h": 141
+    },
+    "tpt": 60.2
+   }
+  ],
+  "texelsPerTile": 60.2,
+  "glbBytes": 2628,
+  "texBytes": 3268,
+  "smallBytes": 1584,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "paint6",
+  "job": "I_Paint6",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Paint6.prefab"
+  },
+  "foot": [
+   0.6199,
+   0.0449
+  ],
+  "height": 0.9219,
+  "scale": 0.7,
+  "uvPerTile": 0.15543,
+  "tex": {
+   "desk": 256,
+   "small": 128
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.6199,
+   0.9219,
+   0.0449
+  ],
+  "triangles": 18,
+  "parts": [
+   "paint6"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.886,
+   1.317,
+   0.064
+  ],
+  "buried": 0.461,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.3202,
+     0.2225,
+     0.1163,
+     0.6198
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 48,
+     "h": 256
+    },
+    "want": {
+     "w": 39,
+     "h": 206
+    },
+    "tpt": 39.8
+   }
+  ],
+  "texelsPerTile": 39.8,
+  "glbBytes": 2620,
+  "texBytes": 3290,
+  "smallBytes": 1552,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "shield1",
+  "job": "I_Shield1",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Shield1.prefab"
+  },
+  "foot": [
+   0.6869,
+   0.097
+  ],
+  "height": 1.0275,
+  "scale": 0.7,
+  "uvPerTile": 0.88869,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.6869,
+   1.0275,
+   0.097
+  ],
+  "triangles": 64,
+  "parts": [
+   "shield1"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.981,
+   1.468,
+   0.139
+  ],
+  "buried": 0.514,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.5094,
+     0.5516,
+     0.0873,
+     0.1262
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 44,
+     "h": 64
+    },
+    "want": {
+     "w": 25,
+     "h": 36
+    },
+    "tpt": 56.9
+   }
+  ],
+  "texelsPerTile": 56.9,
+  "glbBytes": 4100,
+  "texBytes": 1418,
+  "smallBytes": 912,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "shield2",
+  "job": "I_Shield2",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Shield2.prefab"
+  },
+  "foot": [
+   0.6874,
+   0.097
+  ],
+  "height": 1.0275,
+  "scale": 0.7,
+  "uvPerTile": 0.91396,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.6874,
+   1.0275,
+   0.097
+  ],
+  "triangles": 64,
+  "parts": [
+   "shield2"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.982,
+   1.468,
+   0.139
+  ],
+  "buried": 0.514,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.4256,
+     0.6255,
+     0.0447,
+     0.1262
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 23,
+     "h": 64
+    },
+    "want": {
+     "w": 13,
+     "h": 36
+    },
+    "tpt": 58.5
+   }
+  ],
+  "texelsPerTile": 58.5,
+  "glbBytes": 4068,
+  "texBytes": 1186,
+  "smallBytes": 800,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ },
+ {
+  "id": "shield3",
+  "job": "I_Shield3",
+  "source": {
+   "pack": "Top-Down Interiors",
+   "prefab": "Top-Down Interiors/Prefabs/Props/Shield3.prefab"
+  },
+  "foot": [
+   0.6874,
+   0.097
+  ],
+  "height": 1.0275,
+  "scale": 0.7,
+  "uvPerTile": 0.88557,
+  "tex": {
+   "desk": 64,
+   "small": 32
+  },
+  "cutout": false,
+  "sizeTiles": [
+   0.6874,
+   1.0275,
+   0.097
+  ],
+  "triangles": 64,
+  "parts": [
+   "shield3"
+  ],
+  "materials": [
+   "Top-Down Interiors/Origin/Models/Materials/Addons1.mat"
+  ],
+  "rawSize": [
+   0.982,
+   1.468,
+   0.139
+  ],
+  "buried": 0.514,
+  "capped": false,
+  "chart": [
+   {
+    "mat": "Addons1.mat",
+    "src": [
+     4096,
+     4096
+    ],
+    "crop": [
+     0.475,
+     0.6387,
+     0.0435,
+     0.1262
+    ],
+    "rect": {
+     "x": 0,
+     "y": 0,
+     "w": 22,
+     "h": 64
+    },
+    "want": {
+     "w": 13,
+     "h": 37
+    },
+    "tpt": 56.7
+   }
+  ],
+  "texelsPerTile": 56.7,
+  "glbBytes": 4072,
+  "texBytes": 1128,
+  "smallBytes": 766,
+  "alpha": [
+   {
+    "alphaMat": false,
+    "softFrac": 0
+   }
+  ]
+ }
+]

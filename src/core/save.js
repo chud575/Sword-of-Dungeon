@@ -51,6 +51,7 @@ export const DEFAULT_SETTINGS = {
   pathPreview: true,       // hover path + click-to-move route markers
   touchControls: 'auto',   // 'auto' | 'on' | 'off'
   autosaveInterval: 45,    // seconds of play between background autosaves (0 = off)
+  devMode: false,          // Settings -> Developer: the level builder (Shift+B, debug/levelBuilder.js)
 };
 
 function storage() {

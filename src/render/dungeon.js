@@ -14,7 +14,8 @@ import { LOOK } from './look.js';
 import { MeshBuilder, slabGeometry, rockGeometry, candleClusterGeometry } from './dungeonGeo.js';
 import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
 import { syncSpriteSnap } from './props.js';
-import { loadPropModels } from './props/models.js';
+import { loadPropModels, hasPropModel } from './props/models.js';
+import { flatProps } from './props/mode.js';
 import { buildModelProp, isModelled } from './props/furniture.js';
 import { buildForestProps, buildForestAltar } from './props/forest.js';
 import { buildKitArches, buildKitColumns, buildKitPitCap, kitPropMaterials } from './props/kitProps.js';
@@ -172,6 +173,28 @@ function makeGridProbe() {
     syncSpriteSnap(renderer, camera);    // and the lattice every pixel-snapped billboard rounds to
   };
   return probe;
+}
+
+/**
+ * Where one decor view stands and how big it is, from its entry alone: tile, facing, and the level
+ * builder's optional fields (AMBIENCE §4.1) — `tilesX` x `tilesY` footprint (the piece is stretched over
+ * that rectangle of tiles, north-west anchored, in world axes), `scale` (the whole piece, default 1) and
+ * `lift` (tiles above the floor). Computed from `d` every time, never accumulated, so the builder can call
+ * it on every tick of a slider or a drag. A wall piece hangs on its wall face and takes no footprint.
+ * @param {THREE.Object3D} o @param {{x:number, y:number, facing?:string, tilesX?:number, tilesY?:number, scale?:number, lift?:number}} d
+ */
+export function applyDecorTransform(o, d) {
+  const u = o.userData;
+  if (u.baseScale === undefined) { u.baseScale = o.scale.x; u.baseY = o.position.y; }
+  const k = typeof d.scale === 'number' && d.scale > 0 ? d.scale : 1;
+  const wall = u.decor && u.decor.cls === 'wall';
+  const tx = wall ? 1 : Math.max(1, d.tilesX | 0), ty = wall ? 1 : Math.max(1, d.tilesY | 0);
+  o.scale.set(u.baseScale * k * tx, u.baseScale * k, u.baseScale * k * ty);
+  const lift = typeof d.lift === 'number' ? d.lift : 0;
+  if (wall) {
+    const f = DECOR_FACE[d.facing] || DECOR_FACE.s;
+    o.position.set(d.x + f.dx * 0.5, u.baseY + lift, d.y + f.dy * 0.5);
+  } else o.position.set(d.x + (tx - 1) / 2, u.baseY + lift, d.y + (ty - 1) / 2);
 }
 
 export class DungeonView {
@@ -463,11 +486,15 @@ export class DungeonView {
       // architecture and the props that are actually 3D — which is the only way to judge the
       // architecture. Nothing is removed from `level.decor`: this is a view setting, so a piece
       // that vanishes here is still on the tile and still blocks it.
+      // A piece the level builder hid (debug/levelBuilder.js) stays in `level.decor` so a save keeps it
+      // and it can be restored, but it is not drawn, does not block and does not burn.
+      if (d.hidden) continue;
       let o = this.modelFor(d) || this.props.decor(d);
       // ...and the solid kit pieces ARE real geometry, so "models only" keeps them too: filtering on
       // "came from the imported library" instead would empty every furnished room in the game.
       if (o && this.modelsOnly && !(o.userData.decor && (o.userData.decor.model || o.userData.decor.kit))) o = null;
       if (!o) { dropped.set(d.type, (dropped.get(d.type) || 0) + 1); continue; }
+      o.userData.decorRef = d;
       const cls = (o.userData.decor && o.userData.decor.cls) || 'prop';
       if (cls === 'wall') {
         const f = DECOR_FACE[d.facing] || DECOR_FACE.s;
@@ -479,6 +506,9 @@ export class DungeonView {
         this.addAt(o, d.x, d.y);
         if (cls === 'decal') this.turnDecal(o, d.x, d.y);
       }
+      // THE BUILDER'S TWO KNOBS (AMBIENCE §4.1, optional fields). Applied AFTER addAt, which writes the
+      // group's position and would otherwise wipe the lift.
+      applyDecorTransform(o, d);
       this.decorViews.push(o);
     }
     if (dropped.size) {
@@ -518,7 +548,11 @@ export class DungeonView {
   }
 
   modelFor(d) {
-    if (!this.modelLib || !isModelled(d.type)) return null;
+    if (flatProps()) return null;                 // `?props=flat`: nothing imported, nothing modelled
+    // `art: 'dc'` (the level builder) asks for the Dungeon Crawlers model outright, even for a type the
+    // kit cuts first — which is every type the library maps (tools/propsheet.mjs), so without it the
+    // library's 116 meshes load and are never seen.
+    if (!this.modelLib || !(isModelled(d.type) || (d.art === 'dc' && hasPropModel(d.type)))) return null;
     return buildModelProp(this.modelLib, d.type, {
       variant: d.variant | 0, facing: d.facing, blocking: !!d.blocking, lit: this.decorLit(d),
       span: d.span | 0,

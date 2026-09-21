@@ -167,13 +167,13 @@ export class Input {
   keyCapture(e) {
     const sheet = this.confirm.isOpen ? this.confirm : this.controls.isOpen ? this.controls : this.statsSheet.isOpen ? this.statsSheet : null;
     if (!sheet) return;
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
     if (sheet.handleKey(e)) { e.preventDefault(); e.stopImmediatePropagation(); }
   }
 
   keyDown(e) {
     if (!this.enabled) return;
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT')) return;
     const id = keyId(e);
     const a = this.keybinds.lookup(id);
     if (!a) return;

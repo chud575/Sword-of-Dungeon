@@ -12,7 +12,12 @@ import { PALETTE, createShaftMaterial, worldTexelUniform } from './materials.js'
 import { glowTexture, glintTexture, sigilTexture, runeCircleTexture, billboard, groundGlow, flame, litMaterial, getFog, updateFlames } from './propFx.js';
 import { paint, toRGBA, Palette, makePix, blit, setPx, keyShade, bounds } from './sprites/pixelPainter.js';
 import { INK, INK_LIT, LIT, ramp } from './sprites/style.js';
-import { PX_PER_TILE, frameTexelSize, texelGrid, SPRITE_MASK_ALPHA } from './sprites/spriteBillboard.js';
+import { PX_PER_TILE, frameTexelSize, texelGrid, SPRITE_MASK_ALPHA, sitOnTile, WORLD_QUADS } from './sprites/spriteBillboard.js';
+import { spriteTexture, spriteTexels } from './props/atlas2d.js';
+import { buildGroundSprite } from './props/atlas2d.js';
+
+/** `?loot=ground`: the loot sprites lie flat on the floor instead of standing up (see `goldSack`). */
+const GROUND_LOOT = (() => { try { return new URLSearchParams(location.search).get('loot') === 'ground'; } catch { return false; } })();
 // The furniture is painted with the toolkit exported at the bottom of this file, so the import is
 // a cycle by construction. It is safe because neither module touches the other's bindings while it
 // is being evaluated: furniture.js only declares painters and a registry at module scope, and this
@@ -238,6 +243,7 @@ function pixelSnap(mat, { rigid = false } = {}) {
  * the camera's VIEW-SPACE DEPTH (not its radial distance, which is longer at the edges of the
  * frame and quietly shrank everything away from the centre).
  */
+const _sitM = new THREE.Matrix4();
 function syncPixelSprite(m, renderer, camera) {
   renderer.getDrawingBufferSize(_snapVp.value);
   m.getWorldPosition(_wp);
@@ -255,6 +261,12 @@ function syncPixelSprite(m, renderer, camera) {
   m.scale.set(t.w * w, t.h * w, 1);
   placeArtChildren(m);
   m.updateMatrix();
+  // ...and the same correction the cast gets: overhead, a pickup sits on its tile instead of standing
+  // a whole sprite-height north of it (sprites/spriteBillboard.js `sitOnTile`).
+  // half a TILE south, not half the art: the piece's base lands on the near edge of its own square
+  const sit = sitOnTile(_fwd);
+  const artH = Math.max(1e-4, t.h * w);
+  if (sit > 0.001) m.matrix.multiply(_sitM.makeTranslation(0, -0.5 * sit / artH, 0));
   if (m.parent) m.matrixWorld.multiplyMatrices(m.parent.matrixWorld, m.matrix);
   else m.matrixWorld.copy(m.matrix);
 }
@@ -299,8 +311,66 @@ function spriteMask(mat) {
   return mat;
 }
 
+/**
+ * THE SAME BILLBOARD, FROM A READY TEXTURE — the owner's sprite sheet (render/props/props2d.js).
+ *
+ * `pixelSprite` paints its texture from a Pix and a palette; this one is handed a texture (a region of
+ * the sheet's atlas) and the SIZE IN TEXELS the piece should cover, because the sheet's own pixels are
+ * not this game's texels: its art is drawn at whatever scale the sheet used, and what matters is that a
+ * table ends up about a tile and a quarter across. Everything else is shared: the quad is pivoted on its
+ * floor row, alpha-tested so it writes depth, lit by the room, masked as sprite art for the grade, and
+ * sized and faced by `syncPixelSprite` every frame.
+ * @param {string} key @param {THREE.Texture} tex @param {{w:number,h:number}} texels
+ * @param {{glow?:number, emissive?:number}} [o]
+ */
+/**
+ * A SPRITE AS A QUAD ON THE FLOOR — the world-space path (sprites/spriteBillboard.js WORLD_QUADS).
+ *
+ * The art is sized in TILES from its own texels and laid flat on the floor plane, with its pivot row on
+ * the near edge of the tile so the piece runs north up its own square. No screen-pixel sizing, no texel
+ * snapping, no per-frame camera maths: it is geometry in the world and holds as still as the flagstones.
+ * @param {string} key @param {THREE.Texture} tex @param {{w:number,h:number}} texels @param {object} o
+ */
+function worldQuadSprite(key, tex, texels, o = {}) {
+  const w = texels.w / PX_PER_TILE, h = texels.h / PX_PER_TILE;
+  const g = geo(`quad:${key}:${w.toFixed(3)}x${h.toFixed(3)}`, () => new THREE.PlaneGeometry(w, h)
+    .rotateX(-Math.PI / 2)              // into the floor plane
+    .translate(0, 0, -(h / 2) + 0.5));  // pivot row on the tile's near edge
+  const mat = litMaterial('quad:' + key, {
+    map: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide, roughness: 1, metalness: 0,
+    color: new THREE.Color(o.albedo ?? 0xffffff),
+    emissiveMap: tex, emissive: new THREE.Color(o.emissive ?? 0xffffff), emissiveIntensity: (o.glow ?? 0.14) * 0.5,
+  });
+  const m = new THREE.Mesh(g, mat);
+  m.castShadow = false; m.receiveShadow = false;
+  m.position.y = ITEM_PIVOT_Y + 0.03;   // clear of the flagstone, or it z-fights the floor
+  return m;
+}
+
+function textureSprite(key, tex, texels, o = {}) {
+  if (WORLD_QUADS) return worldQuadSprite(key, tex, texels, o);
+  // THE SHEET'S ART IS ALREADY LIT. It is drawn with its own highlights and its own black shading, at
+  // full saturation, so putting a torch pool on top of it at full strength clips it to orange — the
+  // guardroom's table came back as a bright smear, which is the opposite of "identify what you are
+  // looking at". The albedo is taken down and the self-light lifted instead, which compresses the
+  // piece into a band that survives both a torch pool and an unlit corridor.
+  const mat = pixelSnap(spriteMask(litMaterial('sheet:' + key, {
+    map: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide, roughness: 1, metalness: 0,
+    color: new THREE.Color(o.albedo ?? 0xffffff),
+    emissiveMap: tex, emissive: new THREE.Color(o.emissive ?? 0xffffff), emissiveIntensity: (o.glow ?? 0.14) * 0.5,
+  })));
+  const m = new THREE.Mesh(geo('pixelQuad', () => new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0)), mat);
+  m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false;
+  m.position.y = ITEM_PIVOT_Y;
+  m.userData.tex = { w: texels.w, h: texels.h };
+  m.onBeforeRender = (renderer, scene, camera) => syncPixelSprite(m, renderer, camera);
+  return m;
+}
+
 function pixelSprite(key, art, pal, o = {}) {
   const tex = pixelTexture(key, art, pal);
+  // the same card on the floor for the painted art (pickups, scatter): one path for every sprite
+  if (WORLD_QUADS) return worldQuadSprite(key, tex, tex.userData.size, o);
   const mat = pixelSnap(spriteMask(litMaterial('pixel:' + key, {
     map: tex, alphaTest: 0.5, transparent: false, side: THREE.DoubleSide,
     roughness: 1, metalness: 0,
@@ -899,7 +969,7 @@ const bookPal = (() => {
 // chest, which is exactly the fault the pickups above were rebuilt to fix. One projection, one
 // grid, one key light, for the loot and for the furniture it is standing on.
 export {
-  itemPalette, pixelSprite, pixelTexture, pixelSnap, floorDecal, contactShadow, onArt,
+  itemPalette, pixelSprite, pixelTexture, pixelSnap, floorDecal, contactShadow, onArt, textureSprite,
   span, box, ell, topFace, frontFace, shift, model, step,
   SQUASH, ITEM_PIVOT_Y,
 };
@@ -1036,9 +1106,32 @@ export class PropFactory {
     animate(g, (dt, time) => this.tickGlints(g, time));
   }
 
+  /**
+   * THE OWNER'S OWN LOOT SPRITES (2026-09-20: "replace coins, coin pouches, and treasure chests with
+   * these 3 sprites"). Drawn from the sheet atlas (props/atlas2d.js) instead of this file's painted art
+   * or the Freeport chest, in every prop mode — these three are the owner's, full stop. Everything
+   * around them is unchanged: the warm pool on the floor, the twinkles, the bob, the contact shadow.
+   * @param {string} name @param {number} tiles how wide it should stand
+   */
+  lootSprite(name, tiles, o = {}) {
+    const tex = spriteTexture(name), size = spriteTexels(name, tiles);
+    return tex && size ? textureSprite(name, tex, size, { glow: o.glow ?? 0.18, albedo: o.albedo ?? 0xd8d8d8 }) : null;
+  }
+
   goldSack(g, amount = 20) {
     const rich = Math.min(1, amount / 120);
-    const s = pixelSprite('sack', artSack, PAL.sack, { glow: 0.1 });
+    // `?loot=ground` lays the sack FLAT ON THE FLOOR as a textured quad instead of standing it up as a
+    // billboard — the owner's experiment (props/props2d.js `buildGroundSprite`). It holds still like the
+    // flagstones because it IS geometry on the floor: no billboarding, no texel snapping, nothing camera-sized.
+    if (GROUND_LOOT) {
+      const q = buildGroundSprite('gold-pouch', { tiles: 0.8 });
+      if (q) {
+        g.add(q);
+        g.add(pickupPool(0xffb340, 0.54, { opacity: 0.09 + rich * 0.05 }));
+        return g;
+      }
+    }
+    const s = this.lootSprite('gold-pouch', 0.78) || pixelSprite('sack', artSack, PAL.sack, { glow: 0.1 });
     g.add(s);
     g.add(pickupPool(0xffb340, 0.54, { opacity: 0.09 + rich * 0.05 }));
     g.add(contactShadow(0.4));
@@ -1050,7 +1143,7 @@ export class PropFactory {
   }
 
   buriedCache(g) {
-    const s = pixelSprite('cache', artCache, PAL.cache, { glow: 0.08 });
+    const s = this.lootSprite('gold-coins', 0.8) || pixelSprite('cache', artCache, PAL.cache, { glow: 0.08 });
     g.add(s);
     g.add(pickupPool(0xffb340, 0.42, { opacity: 0.06 }));
     g.add(contactShadow(0.46));
@@ -1077,7 +1170,18 @@ export class PropFactory {
    * pool are unchanged: they are what says "loot" rather than "furniture".
    */
   chest(g) {
-    // the imported Freeport chest when it is on (props/freeport.js), the kit's otherwise
+    // The owner's chest sprite; the Freeport / kit chest is the fallback if the atlas has not landed.
+    const s = this.lootSprite('treasure-chest', 0.95, { glow: 0.14 });
+    if (s) {
+      g.add(s);
+      g.add(pickupPool(0xffb340, 0.7, { opacity: 0.12 }));
+      const shed = contactShadow(0.9, { strength: 0.62 });
+      shed.scale.set(0.98, 0.68, 1); shed.position.set(0.02, 0.013, 0.04);
+      g.add(shed);
+      this.addGlints(g, 0xfff0b0, [[-0.22, 0.5], [0.26, 0.42]], { size: 0.13, rate: 1.2, on: s });
+      this.finishGlints(g);
+      return g;
+    }
     const { mesh, glints } = buildFreeportChest(false) || buildKitChest(false);
     g.add(mesh);
     g.add(pickupPool(0xffb340, 0.7, { opacity: 0.12 }));
@@ -1091,6 +1195,22 @@ export class PropFactory {
   /** Open chest for the loot moment: lid thrown back, gold heaped inside, light spilling out. */
   chestOpen() {
     const g = new THREE.Group();
+    // the owner's open chest (2026-09-20), matching the closed one it springs from
+    const s = this.lootSprite('treasure-chest-open', 1.0, { glow: 0.2 });
+    if (s) {
+      g.add(s);
+      const shed = contactShadow(0.9, { strength: 0.62 });
+      shed.scale.set(0.98, 0.68, 1); shed.position.set(0.02, 0.013, 0.04);
+      g.add(shed);
+      // the light out of the open lid sits ON the art, over the heap (see `onArt`)
+      const lit = billboard(glowTexture(), 0xffc860, 0.55);
+      onArt(s, lit, 0, 0.42, 0.55);
+      g.add(lit);
+      g.userData.inner = lit;
+      this.addGlints(g, 0xfff4c0, [[-0.1, 0.46], [0.18, 0.5], [0.04, 0.38]], { size: 0.16, rate: 3, on: s });
+      this.finishGlints(g);
+      return g;
+    }
     const { mesh, glints } = buildFreeportChest(true) || buildKitChest(true);
     g.add(mesh);
     const sh = contactShadow(1, { strength: 0.62 });

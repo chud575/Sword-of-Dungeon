@@ -2,13 +2,22 @@
 // panel is built: `ui-vellum` (the default, "4a Worn vellum"), `ui-module` (?ui=module) or neither
 // (?ui=classic). Formatting only: nothing here changes a game value.
 
-/** @returns {'vellum'|'module'|'classic'} */
+/**
+ * `booklet` (option 2c) is checked FIRST because it rides on the module cover's markup and carries
+ * `ui-module` as well: it is a restyle of that HUD, not a third one (see ui/booklet.css).
+ * @returns {'vellum'|'booklet'|'module'|'classic'}
+ */
 export function uiTheme() {
   if (typeof document === 'undefined' || !document.body) return 'classic';
   const c = document.body.classList;
-  return c.contains('ui-vellum') ? 'vellum' : c.contains('ui-module') ? 'module' : 'classic';
+  return c.contains('ui-vellum') ? 'vellum'
+    : c.contains('ui-booklet') ? 'booklet'
+      : c.contains('ui-glass') ? 'glass'
+        : c.contains('ui-module') ? 'module' : 'classic';
 }
 export const isVellum = () => uiTheme() === 'vellum';
+export const isBooklet = () => uiTheme() === 'booklet';
+export const isGlass = () => uiTheme() === 'glass';
 
 const ROMAN = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']];
 /** Lowercase roman numerals ("xxvi"); digits outside 1–3999. */

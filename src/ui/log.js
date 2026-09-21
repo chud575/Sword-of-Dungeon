@@ -46,6 +46,9 @@ export class MessageLog {
     const line = document.createElement('div');
     const shout = /^[A-Z0-9 !'.?:,\-()]+$/.test(entry.text) && entry.text.length < 32;
     line.className = `line k-${entry.kind || 'info'}${shout ? ' shout' : ''}${silent ? '' : ' fresh'}`;
+    // The entry's number in the run, for themes that print it in the margin like a module's play log
+    // (ui/booklet.css renders it from this attribute). `total` counts the entry we are adding now.
+    line.dataset.n = String(this.total + 1).padStart(4, '0');
     line.innerHTML = `${escape(entry.text)}<span class="t">${fmt(time)}</span>`;
     this.lines.appendChild(line);
     const rec = { el: line, time, old: false };

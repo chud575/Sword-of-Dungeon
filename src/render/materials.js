@@ -485,8 +485,13 @@ function repaintRgb(tex, W, H, fn) {
  * @param {string|null} id a key of TILE_SKINS, or null
  * @returns {Promise<boolean>} false if the id is unknown or the sheet could not be inflated
  */
-export async function setTileSkin(id) {
+export async function setTileSkin(id, { force = false } = {}) {
   if (id && !TILE_SKINS[id]) { console.warn(`setTileSkin: unknown skin '${id}'`); return false; }
+  // ASKING FOR THE SKIN THAT IS ALREADY ON IS FREE. Repainting four atlases and deriving a normal map
+  // costs 1.3 SECONDS (measured), and `app.applySettings` calls this on every settings change — so
+  // dragging any slider fired a 1.3s repaint per pointer event and the sliders could not be dragged
+  // at all. Nothing about the atlas depends on anything else in that call, so this is a pure no-op.
+  if (!force && (id || null) === activeSkin && textures) return true;
   if (id && !(await loadTileSheet())) return false;
   activeSkin = id || null;
   if (!textures) return true;                 // nothing painted yet; first paint will use it

@@ -7,6 +7,7 @@
 //  - per-depth yaw variation, overview framing and a cinematic breathing orbit for the title
 // Everything is deterministic (seeded noise, pure functions of time) so debug.step is repeatable.
 import * as THREE from 'three';
+import { PX_PER_TILE, WORLD_QUADS } from './sprites/spriteBillboard.js';
 import { bus as globalBus } from '../core/events.js';
 import { TILE } from '../core/constants.js';
 import { TraumaShaker } from './cameraShake.js';
@@ -43,6 +44,8 @@ const BASE_TILES_TALL = 14.0; // world tiles visible top-to-bottom at zoom 1
  * perspective camera glides regardless.
  */
 const CAM_SNAP = (() => { try { return new URLSearchParams(location.search).get('camsnap') === '1'; } catch { return false; } })();
+/** ...and overhead it is ON unless `?camsnap=0` turns it off (see `place`). */
+const CAM_SNAP_AUTO = (() => { try { return new URLSearchParams(location.search).get('camsnap') !== '0'; } catch { return true; } })();
 /** Zoom stops: each wheel notch moves to the neighbouring stop. */
 export const ZOOM_STOPS = [0.72, 0.85, 1, 1.18, 1.4];
 /**
@@ -491,12 +494,67 @@ export class CameraRig {
     let tx = this.smoothTarget.x, tz = this.smoothTarget.z;
     // Round the followed point onto the screen's texel lattice (see CAM_SNAP). A step north is
     // foreshortened by sin(elevation), so depth needs the larger world step to cover the same pixels.
-    if (CAM_SNAP && c.isOrthographicCamera && !this.overview && Math.abs(yaw) < 1e-6 && this.devicePxH > 0) {
-      const S = Math.max(1, this.texelSize);
+    // STRAIGHT DOWN, THE CAMERA ALWAYS SNAPS (owner, 2026-09-20: "i want the pixel art to stop
+    // wobbling"). Following the hero continuously resamples every texel of the floor and every sprite
+    // at a new sub-pixel offset each frame, which is what shimmers. Rounding the FOLLOWED POINT onto
+    // the texel lattice moves the whole frame in whole pixels instead, so nothing resamples. At 17
+    // degrees this was rejected as chunky (scrolling then steps in 2px units — see CAM_SNAP), and that
+    // decision stands: this is for the overhead view only, where a perspective camera looking at a flat
+    // floor has ONE scale for the whole frame and the snap is exact. `?camsnap=1` still forces it on at
+    // any tilt, `?camsnap=0` off entirely.
+    const overhead = Math.abs(Math.cos(elev)) < 0.18;     // within ~10 degrees of straight down
+    // ...AND THE QUADS RETIRED IT. Snapping the camera existed to hold SCREEN-SPACE sprites on their
+    // texel grid; with the cast and the props drawn as quads in the world (sprites/spriteBillboard.js
+    // WORLD_QUADS) nothing is measured in screen pixels any more, so there is nothing left to align —
+    // and the lattice actively hurt: a camera spring easing to rest creeps under it and pops a whole
+    // texel late in the glide, which is the wobble the owner filmed at the end of every camera tween
+    // (measured: 0.0313 world units of movement in the last 30 frames of a settle, against 0.006 with
+    // the snap off). `?camsnap=1` still forces it on for comparison.
+    const snapping = WORLD_QUADS ? CAM_SNAP : (CAM_SNAP || (overhead && CAM_SNAP_AUTO));
+    if (snapping && !this.overview && Math.abs(yaw) < 1e-6 && this.devicePxH > 0
+        && (c.isOrthographicCamera || overhead)) {
+      // THE CAMERA MUST SNAP TO THE GRID THE ART IS DRAWN ON, and it must WORK IT OUT ITSELF.
+      //
+      // The rig's own `texelSize` is not it: that is the integer the ortho frustum was built from, which
+      // equals the cast's texel size at 1x and does NOT at 2x — measured on a Retina display at Native,
+      // the cast drew at 3 device pixels a texel while this snapped in steps of 2, and the art wobbled
+      // however cleanly the camera moved ("native resolution - still wobbles").
+      //
+      // `texelGrid()` is not it either, and that mistake was worse. It is ONE GLOBAL, written by whichever
+      // sprite rendered last — the minimap's, a preview camera's, anything — so the play camera read a
+      // stranger's grid: S=1 at 0.15 pixels per world unit, a lattice 6.6 TILES wide. The camera locked
+      // onto one point and leapt 5.45 units when it flipped, which is what the owner saw as the frame
+      // going wild through a zoom.
+      //
+      // So it is derived here, from this camera, the same way `frameTexelSize` derives it: whole device
+      // pixels per texel, at `PX_PER_TILE` texels to the tile.
+      //
+      // ONE SCALE, AND A STABLE ONE. `viewHeight` is the world height the frame covers, and the
+      // perspective fov is fitted to it at the focal plane below — so this is the right number for both
+      // projections. Deriving it from `fov` and the camera's height instead put `dive` (which moves every
+      // frame) inside the step, so the LATTICE moved and the snapped point wandered by half a step each
+      // frame: measured 15.9982 / 16.0106 / 15.9935 on a hero standing still.
       const pxPerWorld = this.devicePxH / Math.max(1e-6, this.viewHeight);
-      const stepX = S / pxPerWorld, stepZ = S / Math.max(1e-6, pxPerWorld * Math.abs(Math.sin(elev)));
-      tx = Math.round(tx / stepX) * stepX;
-      tz = Math.round(tz / stepZ) * stepZ;
+      const S = Math.max(1, Math.round(pxPerWorld / PX_PER_TILE));
+      // ONE SCALE, AND A STABLE ONE. `viewHeight` is the world height the frame covers, and the
+      // perspective fov is fitted to it at the focal plane below — so this is the right number for both
+      // projections. Deriving it from `fov` and the camera's height instead put `dive` (which moves
+      // every frame) inside the step, so the LATTICE moved and the snapped point wandered by half a
+      // step each frame: measured 15.9982 / 16.0106 / 15.9935 on a hero standing still.
+
+      const stepX = S / pxPerWorld, stepZ = S / Math.max(1e-6, pxPerWorld * Math.max(0.35, Math.abs(Math.sin(elev))));
+      // ...AND ONLY WHILE THAT GRID IS HOLDING STILL. Zooming changes the texel size and the
+      // pixels-per-world every frame, so the lattice itself moves and the rounded point lands somewhere
+      // else each time — the frame shook hard through a zoom, which it never did before the snap
+      // (owner, 2026-09-20: "it never wobbled when zooming before and now its going crazy"). A moving
+      // lattice is worse than none, so the snap stands down until the grid settles, which it does the
+      // moment the zoom stops.
+      const settled = this._snapS === S && Math.abs((this._snapPxPerWorld || 0) - pxPerWorld) < 1e-6;
+      this._snapS = S; this._snapPxPerWorld = pxPerWorld;
+      if (settled) {
+        tx = Math.round(tx / stepX) * stepX;
+        tz = Math.round(tz / stepZ) * stepZ;
+      }
     }
     c.position.set(tx + Math.sin(yaw) * r, y + this.dive, tz + Math.cos(yaw) * r);
     this._tmp.set(tx, this.lookHeight + this.dive * 0.4, tz);

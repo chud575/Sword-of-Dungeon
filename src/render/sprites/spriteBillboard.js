@@ -129,6 +129,40 @@ const _gFwd = new THREE.Vector3(), _gVp = new THREE.Vector2();
  * @param {number} [pxPerTile] sprite texels per world tile
  * @returns {number} device pixels per texel (>= 1)
  */
+/**
+ * HOW MUCH A SPRITE SHOULD SIT ON ITS TILE RATHER THAN STAND UP FROM IT (owner, 2026-09-20: "every
+ * character is now offset too much from the tile they are actually on").
+ *
+ * A billboard stands upright from a pivot at its feet, at FULL height on screen — the HD-2D trade this
+ * game is built on. Under the shipped camera (17 degrees off vertical) that reads as a figure standing
+ * on the flagstone. Take the tilt to 0 and the camera is looking straight DOWN: a body has no visible
+ * front left, and the sprite is drawn a whole body-length north of the tile it stands on, which is
+ * exactly the offset the owner saw. So the pivot slides from the feet to the middle of the art as the
+ * view goes overhead, and the figure lies on its own square like a counter on a board.
+ *
+ * It is keyed on the tilt itself, NOT on `-fwd.y` (which is already 0.96 at 17 degrees and would drag
+ * the shipped camera halfway into this correction): `sin(tilt)` is the horizontal run of the view
+ * direction, 0.29 at 17 degrees and 0 straight down, and the blend is over the last 10 degrees only.
+ * @param {THREE.Vector3} fwd the camera's world forward
+ */
+/**
+ * QUADS ON THE FLOOR, NOT SPRITES ON THE SCREEN — the default since 2026-09-20, `?quads=0` for the old
+ * screen-space path. The owner's verdict after a morning of chasing shimmer: the one thing in the frame
+ * that never wobbled was a gold sack drawn as a texture on a quad lying on the ground, because it is
+ * ordinary geometry and holds as still as the floor. Everything else — quads sized in device pixels,
+ * texel grids, snapped pivots, snapped cameras — was machinery for keeping a screen-space sprite steady,
+ * and it lost that fight at every zoom.
+ */
+export const WORLD_QUADS = (() => { try { return new URLSearchParams(location.search).get('quads') !== '0'; } catch { return true; } })();
+
+export function sitOnTile(fwd) {
+  const run = Math.hypot(fwd.x, fwd.z);          // sin(tilt): 0 looking straight down
+  const k = 1 - Math.min(1, run / SIT_ON_TILE_RUN);
+  return k * k * (3 - 2 * k);                    // smoothstep, so a tilt slider does not snap
+}
+/** The tilt (as sin) at which a sprite is fully standing again: 0.18 ~ 10.4 degrees. */
+export const SIT_ON_TILE_RUN = 0.18;
+
 export function frameTexelSize(renderer, camera, pxPerTile = PX_PER_TILE) {
   // Orthographic: scale does not vary with depth, so the grid is exact with no rounding at all.
   // The rig sizes its frustum from a chosen integer texel size, so we can read it straight back —
@@ -218,6 +252,8 @@ function makeSpriteMaterial(texture, fog) {
     uMap: { value: texture }, uTexel: { value: new THREE.Vector2(1 / texture.image.width, 1 / texture.image.height) },
     uRect: { value: new THREE.Vector4(0, 0, 1, 1) }, uFlip: { value: 0 },
     uSizeTex: { value: new THREE.Vector2(48, 48) }, uPivot: { value: new THREE.Vector2(0.5, 0) }, uSquash: { value: new THREE.Vector2(1, 1) },
+    uSitOnTile: { value: 0 },   // 1 when the camera looks straight down: see SIT_ON_TILE below
+    uWorldQuad: { value: 0 },   // 1 = a flat quad lying on the floor, in world units (see WORLD_QUADS)
     // screen-space placement (see the header): device pixels per texel, viewport in device pixels,
     // and pixels per world unit at the anchor's depth (used to rebuild a world position for lighting)
     uTexelPx: { value: 4 }, uViewport: { value: new THREE.Vector2(1600, 900) }, uPxPerWorld: { value: 128 }, uZLift: { value: 1.6 },
@@ -274,8 +310,8 @@ function makeSpriteMaterial(texture, fog) {
     blendSrc: THREE.OneFactor, blendDst: THREE.ZeroFactor, blendEquation: THREE.AddEquation,
     blendSrcAlpha: THREE.OneFactor, blendDstAlpha: THREE.ZeroFactor, blendEquationAlpha: THREE.AddEquation,
     vertexShader: `
-      uniform vec4 uRect; uniform float uFlip; uniform vec2 uSizeTex, uPivot, uSquash;
-      uniform float uTexelPx, uPxPerWorld, uZLift; uniform vec2 uViewport; uniform vec3 uRight;
+      uniform vec4 uRect; uniform float uFlip; uniform vec2 uSizeTex, uPivot, uSquash; uniform float uSitOnTile;
+      uniform float uTexelPx, uPxPerWorld, uZLift, uWorldQuad; uniform vec2 uViewport; uniform vec3 uRight;
       varying vec2 vUv; varying vec2 vTex; varying vec2 vFogXZ; varying vec3 vLit;
       void main() {
         vUv = uv;
@@ -285,16 +321,63 @@ function makeSpriteMaterial(texture, fog) {
         vec4 anchor = projectionMatrix * viewMatrix * modelMatrix * vec4(0.0, 0.0, 0.0, 1.0);
         vec3 world = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
         vFogXZ = world.xz;
+        // ---------------------------------------------------------------------------------------
+        // A QUAD ON THE FLOOR (uWorldQuad, the default: see WORLD_QUADS). The figure is a card lying on
+        // its tile, sized in WORLD units — art texels over TEXELS_PER_TILE — and nothing about it is
+        // measured in screen pixels. That is the whole point: a quad in the world resamples exactly as
+        // the flagstones under it do, which is to say not at all, so it cannot crawl, shimmer or step
+        // however the camera moves or zooms. Everything below this branch — the pixel-sized quad, the
+        // texel snap, the faked upright depth — exists only to make a SCREEN-space sprite hold still,
+        // and none of it survived contact with a zoom (owner, 2026-09-20: "let's remove the pixel grid
+        // and get everything onto a quad the way it should be").
+        if (uWorldQuad > 0.5) {
+          float tilesX = uSizeTex.x * uSquash.x / ${PX_PER_TILE}.0;
+          float tilesY = uSizeTex.y * uSquash.y / ${PX_PER_TILE}.0;
+          // THE CARD LIES WITH THE MAP, on the world axes — it does not turn to face anyone. uRight is
+          // the direction from the camera to the sprite, which is what a billboard needs and is NOISE
+          // here: looking straight down, the camera is directly ABOVE the figure, that vector has no
+          // meaningful direction left (measured (0.502, 0, 0.865) where east is (1,0,0)), and the card
+          // was laid at a random angle that span with the camera.
+          vec3 right = vec3(1.0, 0.0, 0.0);                      // east
+          vec3 back = vec3(0.0, 0.0, 1.0);                       // south; the art runs north up the map
+          vec3 pos = world
+            + right * ((uv.x - uPivot.x) * tilesX)
+            - back * ((uv.y - uPivot.y) * tilesY - 0.5);
+          pos.y += 0.05;          // clear of the flagstone, or the card z-fights the floor it lies on
+          vLit = pos;
+          gl_Position = projectionMatrix * viewMatrix * vec4(pos, 1.0);
+          return;
+        }
         // corner offset in device pixels: whole texels, each exactly uTexelPx pixels
+        // SIT THE FIGURE ON ITS TILE WHEN THE CAMERA IS OVERHEAD (see SIT_ON_TILE). The quad stands UP
+        // from a pivot at the feet, which is right while the camera can see a body's front; looking
+        // straight down there is no front to see, and a standing sprite is drawn a whole body NORTH of
+        // the tile it occupies. So the FEET go to the near edge of the tile — half a tile (16 texels)
+        // south of its centre — and the figure lies up its own square (owner, 2026-09-20: "just put his
+        // feet at the bottom of the tile for now"). Centring the art instead put his boots a half-body
+        // into the tile behind him, where the wall's top face cut them off.
+        float sitPx = uSitOnTile * 16.0 * uTexelPx;
         vec2 off = vec2((uv.x - uPivot.x) * uSizeTex.x * uSquash.x, (uv.y - uPivot.y) * uSizeTex.y * uSquash.y) * uTexelPx;
-        // sub-pixel snap: put the pivot on a whole pixel so every texel edge lands on a pixel edge
+        off.y -= sitPx;
+        // SNAP THE PIVOT TO A WHOLE TEXEL, not a whole pixel. A pixel is not the grid this art lives on:
+        // at 2x the cast is drawn at 3 device pixels a texel, so rounding the pivot to a pixel still let
+        // the sprite's own texel boundaries slide a third of a texel between frames, and the art shimmered
+        // as the hero walked (owner, 2026-09-20). Rounded to uTexelPx, every texel edge lands on the
+        // same pixel edge every frame: the figure steps one texel at a time and stops crawling.
         vec2 apx = (anchor.xy / max(1e-6, anchor.w) * 0.5 + 0.5) * uViewport;
-        off += floor(apx + 0.5) - apx;
+        float grid = max(1.0, uTexelPx);
+        off += (floor(apx / grid + 0.5) * grid) - apx;
         // the world point this texel would occupy if the sprite were a real standing figure: used
         // for lighting, and for DEPTH — the quad is flat in screen space but keeps the depth of an
         // upright body, so the head still draws in front of the stairs or crates it is standing on
         // while every texel stays exactly uTexelPx pixels.
-        vec2 offWorld = off / max(1e-4, uPxPerWorld);
+        // ...and it is the STANDING offset that answers for depth and light, never the sat-down one.
+        // Sitting the art on its tile moves it DOWN the screen; feeding that shifted offset in here put
+        // the lower half of every figure BELOW the floor, so the floor won the depth test and the hero
+        // came out cut off at the waist (owner, 2026-09-20). The pretend-body is still upright on the
+        // tile: only the pixels moved.
+        vec2 offStand = off + vec2(0.0, sitPx);
+        vec2 offWorld = offStand / max(1e-4, uPxPerWorld);
         vLit = world + uRight * offWorld.x + vec3(0.0, offWorld.y, 0.0);
         // uZLift = 1/cos(pitch): the body the depth pretends to be is as tall as the sprite LOOKS on
         // screen, which is what lets a hero standing on the stairs draw in front of their near frame.
@@ -622,7 +705,16 @@ export class SpriteBillboard {
     if (this.lights && this._lightCount === scene.children.length) return;
     const L = { hemi: null, dir: null, points: [], spots: [] };
     scene.traverse((o) => {
-      if (o.isHemisphereLight) L.hemi = o; else if (o.isDirectionalLight) L.dir = o;
+      if (o.isHemisphereLight) L.hemi = o;
+      // ONE DIRECTIONAL, AND IT MUST BE THE PAINTED KEY. This shader takes a single key direction,
+      // and it used to take whichever DirectionalLight `traverse` reached last. When the world shadow
+      // sun was added (2026-09-18) it was added after `moon`, so the whole cast silently reshaded to
+      // the sun's 52 degrees at 55% strength — a key climbing toward overhead is the definition of
+      // the pillow shading `tests/screenTruth.test.js` gates, and the entry count went 27 -> 30 in
+      // one commit. A light that exists only to cast (`userData.shadowOnly`) is skipped here, and
+      // `moon` publishes the FULL key intensity it and the sun share as `userData.keyTotal`, so a
+      // sprite is lit by the direction its art is painted for at the brightness the room actually has.
+      else if (o.isDirectionalLight) { if (!o.userData.shadowOnly) L.dir = o; }
       else if (o.isPointLight) L.points.push(o); else if (o.isSpotLight) L.spots.push(o);
     });
     this.lights = L; this._lightCount = scene.children.length;
@@ -652,6 +744,8 @@ export class SpriteBillboard {
     const vp = renderer.getDrawingBufferSize(this._vp);
     u.uViewport.value.copy(vp);
     const fwd = this._tmp2.set(0, 0, -1).applyQuaternion(camera.quaternion);
+    u.uSitOnTile.value = sitOnTile(fwd);
+    u.uWorldQuad.value = WORLD_QUADS ? 1 : 0;
     const ax = wp.x + this.mesh.position.x - camera.position.x;
     const ay = wp.y - camera.position.y;
     const az = wp.z + this.mesh.position.z - camera.position.z;
@@ -675,7 +769,7 @@ export class SpriteBillboard {
     this.collectLights(scene);
     const L = this.lights;
     if (L.hemi) { u.uHemiSky.value.copy(L.hemi.color).multiplyScalar(L.hemi.intensity); u.uHemiGround.value.copy(L.hemi.groundColor).multiplyScalar(L.hemi.intensity); }
-    if (L.dir) { u.uDirColor.value.copy(L.dir.color).multiplyScalar(L.dir.intensity); u.uDirDir.value.copy(L.dir.position).sub(L.dir.target.position).normalize(); }
+    if (L.dir) { u.uDirColor.value.copy(L.dir.color).multiplyScalar(L.dir.userData.keyTotal ?? L.dir.intensity); u.uDirDir.value.copy(L.dir.position).sub(L.dir.target.position).normalize(); }
     let best = null, bestW = 0;
     for (let i = 0; i < MAX_POINTS; i++) {
       const l = L.points[i];
@@ -729,7 +823,10 @@ export class SpriteBillboard {
     const fr = this.frame; if (!fr) return;
     const ct = frameContacts(this.sheet, fr);
     const sq = Math.abs(this.squash.x) || 1;
-    const tw = this.texelWorld * sq;                                 // world size of one texel
+    // ONE TEXEL, IN WORLD UNITS. The screen-space path sizes a texel from the camera (S / pxPerWorld);
+    // a quad on the floor is sized from the art alone, so a texel is exactly one over PX_PER_TILE and
+    // the pool is measured in the same units as the card it belongs to.
+    const tw = WORLD_QUADS ? 1 / PX_PER_TILE : this.texelWorld * sq;  // world size of one texel
     // The measured span jumps frame to frame — one boot planted mid-stride, a cape hem swinging into
     // the bottom rows — so ease it: the pool breathes with the gait instead of snapping, and it still
     // grows properly as a dying body sprawls out.
@@ -740,13 +837,23 @@ export class SpriteBillboard {
     const lift = this._footLift;
     const footW = Math.max(0.1, this._footW * tw);                   // world width of the stance
     // quad half-extents: the skirt reaches well past the stance, and a lifted body's pool spreads
-    const R = footW * (1.15 + Math.min(0.5, lift * 0.09)) + 3 * tw;
+    // A CARD NEEDS A WIDER POOL THAN A STANDEE. The pool is mostly hidden behind an upright sprite and
+    // only its skirt shows; under a card it reads through every transparent texel of the art, so the
+    // same numbers put less shade on the visible floor — the thinnest of the cast (assassin) measured
+    // 52 px against the 64 the contact gate wants. The reach grows for the quads only.
+    const R = footW * ((WORLD_QUADS ? 1.5 : 1.15) + Math.min(0.5, lift * 0.09)) + 3 * tw;
     const RD = R * BLOB_DEPTH;                                       // front-to-back half-extent
-    // lay flat (x = camera right), then yaw with the billboard
-    this.blob.quaternion.setFromAxisAngle(this._xAxis, -Math.PI / 2).premultiply(this._q.setFromAxisAngle(this._up, yaw));
-    this.blob.scale.set(R * 2, RD * 2, 1);
-    const rx = Math.cos(yaw), rz = -Math.sin(yaw);   // the quad's local +x in world
-    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);  // the quad's local +y in world
+    // lay flat (x = camera right), then yaw with the billboard — but with the card ALREADY on the floor
+    // the pool has no upright body to sit under, and a 2.2-tile skirt (measured) reads from straight
+    // above as a grey pad around the figure rather than as shade. On the quads it lies on the world
+    // axes like the card, and is held to the piece's own footprint.
+    const yawQ = WORLD_QUADS ? 0 : yaw;
+    this.blob.quaternion.setFromAxisAngle(this._xAxis, -Math.PI / 2).premultiply(this._q.setFromAxisAngle(this._up, yawQ));
+    // The card is alpha-tested and lies just ABOVE the pool, so the pool reads through everything the
+    // figure does not cover — which is what grounds a card that would otherwise look pasted on.
+    this.blob.scale.set(R * 2, WORLD_QUADS ? R * 2 * BLOB_DEPTH : RD * 2, 1);
+    const rx = Math.cos(yawQ), rz = -Math.sin(yawQ);   // the quad's local +x in world
+    const fx = -Math.sin(yawQ), fz = -Math.cos(yawQ);  // the quad's local +y in world
     const mir = this.flip ? -1 : 1;
     const offx = this._footCx * tw * mir;
     // centre it under the boots AS DRAWN: the quad is pulled `depthBias` toward the camera, which on
@@ -798,7 +905,10 @@ export class SpriteBillboard {
     set(0, rx * (-hw - px0), rz * (-hw - px0)); set(1, rx * (hw - px0), rz * (hw - px0));
     set(2, rx * (-hw - px0) + ax * len, rz * (-hw - px0) + az * len); set(3, rx * (hw - px0) + ax * len, rz * (hw - px0) + az * len);
     this.castGeo.attributes.position.needsUpdate = true;
-    this.cast.visible = strength > 0.02 && this.opacity > 0.05;
+    // The silhouette shadow is a screen-space trick: a smear of the sprite laid on the floor away from
+    // the light, which reads as a cast shadow at a tilt and as a grey slab lying beside the figure when
+    // the card itself is already flat on the ground. Off with the quads.
+    this.cast.visible = !WORLD_QUADS && strength > 0.02 && this.opacity > 0.05;
     this.castMat.uniforms.uStrength.value = 0.3 * Math.min(1, strength * 1.5) * this.opacity;
   }
 
