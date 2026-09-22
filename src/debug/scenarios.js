@@ -9,6 +9,7 @@ import { MONSTER_SPRITES } from '../render/sprites/monsters/index.js';
 import { FURNITURE_TYPES, furnitureVariants } from '../render/props/furniture.js';
 import { DRESSING_TYPES, dressingClass, dressingVariants } from '../render/props/dressing.js';
 import { setPropsMode } from '../render/props/mode.js';
+import { buildDesignerHall } from './floorDesigner.js';
 
 /** Walkable tiles adjacent to (x,y) (8-way), nearest-first order as given by DIRS8. */
 function neighbours(level, x, y, { empty = true } = {}) {
@@ -1518,6 +1519,28 @@ export const scenarios = {
     ctx.renderer.rebuildLevel();
     ctx.step(600);
     setPropsMode(null);        // the pieces already built stay; the next plate is back on the default
+  },
+
+  /**
+   * THE FLOOR DESIGNER'S HALL (debug/floorDesigner.js), with one of each thing it adds to a level: a
+   * placed light (lighting.js reads `light` entries), a named sheet sprite on the floor (dungeon.js
+   * `type: 'sprite'`), and the owner's pit and stairs. Here so `npm run smoke` builds them.
+   */
+  async 'floor-designer'(ctx) {
+    const g = ctx.reset();
+    const { level, arrival } = buildDesignerHall(g);
+    level.setDecor([
+      { type: 'light', x: arrival.x - 3, y: arrival.y, facing: 's', variant: 0, blocking: false, placed: true, light: { color: 0xff6a20, intensity: 4.5, radius: 6, y: 1, kind: 'fire' } },
+      { type: 'light', x: arrival.x + 3, y: arrival.y, facing: 's', variant: 0, blocking: false, placed: true, light: { color: 0x6fa8ff, intensity: 3.5, radius: 5.5, y: 1.2, kind: 'water' } },
+      { type: 'sprite', x: arrival.x - 2, y: arrival.y - 3, facing: 's', variant: 0, blocking: false, placed: true, sprite: 'floor-pit', tiles: 1 },
+      { type: 'sprite', x: arrival.x, y: arrival.y - 3, facing: 's', variant: 0, blocking: false, placed: true, sprite: 'floor-stairs-down', tiles: 1 },
+      { type: 'sprite', x: arrival.x + 2, y: arrival.y - 3, facing: 's', variant: 0, blocking: false, placed: true, sprite: 'floor-stairs-up', tiles: 1 },
+    ]);
+    g.enterLevel(1, 'teleport', { arrival });
+    level.wanderTimer = Infinity;
+    ctx.renderer.fog.override = 'all';
+    ctx.renderer.rebuildLevel();
+    ctx.step(600);
   },
 
   async 'supplied-props'(ctx) {

@@ -1,5 +1,6 @@
 // Renderer: Three scene, camera rig, lighting, dungeon view, character views, effects and the
 // post-processing chain (bloom, vignette/grading/flash/fade, ACES output). Listens to game events.
+import { buildGroundSprite } from './props/atlas2d.js';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -272,7 +273,17 @@ export class Renderer {
 
   bind() {
     const on = (n, f) => this.unsub.push(this.bus.on(n, f));
-    on('level:enter', (p) => this.onLevelEnter(p));
+    on('level:enter', (p) => { this.falling = null; if (this.playerView && this.playerView.sprite) this.playerView.sprite.sink = 1; this.onLevelEnter(p); });
+    // THE HERO GOES DOWN THE HOLE (owner, 2026-09-21: "scale the hero down to 0"): through the fall hold
+    // (game.js FALL_HOLD) his sprite shrinks to nothing about his feet, while the camera sinks after him
+    // (camera.js 'fall'). The level below restores him on `level:enter`.
+    on('fall:start', ({ hold, opened, x, y }) => {
+      this.falling = { t: 0, dur: Math.max(0.1, (hold || 1) * 0.8) };
+      // a trap that just gave way has no hole in the drawn floor yet (the field is painted per level):
+      // lay the owner's pit sprite on the tile so there is something to fall INTO. The level's own
+      // pit is painted the next time it is built.
+      if (opened) { const hole = buildGroundSprite('floor-pit', { tiles: 1 }); if (hole) { hole.position.set(x, 0.015, y); this.dungeon.root.add(hole); } }
+    });
     on('entity:moved', (p) => this.onMoved(p));
     on('entity:attacked', (p) => {
       const a = this.views.get(p.attacker.id), d = this.views.get(p.defender.id);
@@ -447,6 +458,11 @@ export class Renderer {
     const g = this.game; if (!g) return;
     this.time += dt;
     this.syncViews(dt);
+    if (this.falling && this.playerView && this.playerView.sprite) {
+      const f = this.falling; f.t += dt;
+      const k = Math.min(1, f.t / f.dur);
+      this.playerView.sprite.sink = 1 - k * k;
+    }
     this.dungeon.update(dt);
     const pv = this.playerView;
     const ppos = pv ? pv.pos : this._ppos.set(g.player.x, 0, g.player.y);

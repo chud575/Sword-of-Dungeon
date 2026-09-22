@@ -224,6 +224,8 @@ generated level and every test that compares generated arrays is unaffected.
 | `tilesX`, `tilesY` | `number` | footprint in tiles, default 1 × 1: the piece is stretched over that rectangle with `(x,y)` as its NORTH-WEST tile, in world axes, and `decorTiles()` returns every tile of it — so a blocking 2 × 3 table blocks six tiles. Turning the piece (R) swaps the two. Wall pieces take none |
 | `scale` | `number` | size multiplier on the whole piece, default 1 (`applyDecorTransform`, render/dungeon.js) |
 | `lift` | `number` | tiles above the floor, default 0 — a candlestick at 0.45 stands on a table; a lit piece's light rises with it |
+| `rotX`, `rotY`, `rotZ` | `number` | free rotation in degrees, default 0, composed on top of the facing turn in world axes about the tile-centre pivot (Euler order YXZ): Y spins on the floor, X tips (90 stands a floor quad up), Z rolls. Blocking and footprint do not turn with it |
+| `offX`, `offY` | `number` | slide off the tile centre, in tiles (+x east, +y south), default 0 — or, when the entry has none, the default saved for its object in the builder (`render/props/offsets.js`, localStorage `fargoal.decorOffsets.v1`, keyed by sprite name, model, `dc:type` or type). A lit piece's light moves with it |
 | `art` | `'dc'` | draw the owner's Dungeon Crawlers model for this type even where the kit would win (`DungeonView.modelFor`) |
 | `model` | `string` | an asset id, as the Freeport and supplied builders already accepted |
 

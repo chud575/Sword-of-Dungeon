@@ -220,7 +220,8 @@ export class Effects {
     on('fx:teleport', (p) => this.teleport(p.from, p.to));
     on('fx:levelup', (p) => this.levelUp(p.x, p.y)); // levelUp() already shouts LEVEL UP!
     on('fx:explosion', (p) => this.explosion(p.x, p.y));
-    on('fx:fall', (p) => { this.dust(p.x, p.y, 40); this.rings.play({ x: p.x, z: p.y, color: 0x8a7a68, dur: 0.5, intensity: 0.5, fn: (m, k) => { m.scale.setScalar(0.3 + k * 1.6); m.material.opacity = 0.6 * (1 - k); } }); });
+    on('fx:fall', (p) => { this.dust(p.x, p.y, 14);   // light: the hole must still read through it (the fall hold, game.js FALL_HOLD)
+     this.rings.play({ x: p.x, z: p.y, color: 0x8a7a68, dur: 0.5, intensity: 0.5, fn: (m, k) => { m.scale.setScalar(0.3 + k * 1.6); m.material.opacity = 0.6 * (1 - k); } }); });
     on('fx:ceiling', (p) => { this.dust(p.x, p.y, 70); this.matter.emit({ x: p.x, y: 2.5, z: p.y, count: 30, color: [0x6a6058, 0x4a4038], speed: 0.6, up: -0.5, life: 1.2, size: 0.09, gravity: -6, drag: 0.5, radius: 0.3, bounce: 0.2 }, this.rng); this.shakeRequest += 0.7; this.flash.color.set(0.6, 0.6, 0.6); this.flash.amount = 0.5; });
     on('fx:chest', (p) => this.chestOpen(p.x, p.y));
     on('fx:blink', (p) => { this.burst(p.x, p.y, { color: [0xb197fc, 0x7f5fd0], count: 30, speed: 1.2, up: 1, life: 0.6, size: 0.1, y: 0.4, gravity: 0 }); this.flashes.play({ x: p.x, y: 0.5, z: p.y, color: 0xb197fc, size0: 0.3, size1: 1.2, dur: 0.25 }); });

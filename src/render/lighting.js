@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import { TILE } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
+import { decorOffset } from './props/offsets.js';
 
 const FOG_GLSL = `
 uniform sampler2D fogTex; uniform vec2 fogSize; uniform vec3 fogTint;
@@ -185,7 +186,11 @@ const SWORD_VIOLET = new THREE.Color(0xc9b0ff);
 const TORCH_POOL = 8;
 const TORCH_POOL_LOW = 5;
 const TEMPLE_POOL = 2;
-const MOOD_POOL = 4;
+// Room fires AND placed lights (the Floor Designer, debug/floorDesigner.js) share this pool. Four was
+// enough for the fires a generated room carries; a designer room can hold as many lights as the owner
+// places, so desktop keeps eight live and `low` four.
+const MOOD_POOL = 8;
+const MOOD_POOL_LOW = 4;
 
 /**
  * THE ELEVEN LIGHT MOODS (docs/AMBIENCE.md §7) — the thing that turns dressing into ambience.
@@ -590,7 +595,7 @@ export class Lighting {
     // The per-room mood (AMBIENCE §7): a fixed pool for the fires standing in the rooms, plus one
     // soft fill that follows the player and carries the colour of the room he is standing in.
     this.moodLights = [];
-    for (let i = 0; i < MOOD_POOL; i++) {
+    for (let i = 0; i < (quality === 'low' ? MOOD_POOL_LOW : MOOD_POOL); i++) {
       const l = new THREE.PointLight(0xffffff, 0, 5, 2);
       scene.add(l); this.moodLights.push(l);
     }
@@ -855,8 +860,17 @@ export class Lighting {
       return mi >= 0 ? MOOD_KEYS[mi] : 'torchlit';
     };
     for (const d of level.decor || []) {
+      if (d.hidden) continue;
+      // A PLACED LIGHT (the Floor Designer): its own colour, strength, reach, height and beat, carried
+      // on the entry. Unlike a fire it is not put out by a `dark` or `cold` room — the owner placed it.
+      if (d.light) {                  // a placed light, alone or burning in a sprite
+        const L = d.light;
+        const off = decorOffset(d);
+        src.push({ x: d.x + off.x, y: (L.y ?? 1.2) + (typeof d.lift === 'number' ? d.lift : 0), z: d.y + off.y, color: L.color ?? 0xffc080, intensity: L.intensity ?? 3, radius: L.radius ?? 5, kind: L.kind || 'steady', phase: rng.float(0, 100) });
+        continue;
+      }
       const spec = DECOR_LIGHTS[d.type];
-      if (!spec || d.hidden) continue;
+      if (!spec) continue;
       const v = d.variant | 0;
       if (spec.maxV !== undefined && v > spec.maxV) continue;
       if (spec.minV !== undefined && v < spec.minV) continue;
@@ -867,7 +881,8 @@ export class Lighting {
       // alchemy keep their glow: neither of those needs a match.
       if (FIRE_KINDS.has(spec.kind) && FIRELESS_MOODS.has(moodOf(d.x, d.y))) continue;
       // a builder footprint stretches the piece from its NW tile; its fire burns in the middle of it
-      const cx = d.x + (Math.max(1, d.tilesX | 0) - 1) / 2, cz = d.y + (Math.max(1, d.tilesY | 0) - 1) / 2;
+      const off = decorOffset(d);
+      const cx = d.x + (Math.max(1, d.tilesX | 0) - 1) / 2 + off.x, cz = d.y + (Math.max(1, d.tilesY | 0) - 1) / 2 + off.y;
       src.push({ x: cx, y: spec.y + (typeof d.lift === 'number' ? d.lift : 0), z: cz, color: spec.color, intensity: spec.intensity, radius: spec.radius, kind: spec.kind, phase: rng.float(0, 100) });
     }
     // A flooded room throws its own reflected light: one rippling source over the water it holds.
@@ -1068,10 +1083,11 @@ export class Lighting {
       ts.target.position.set(nearestTorch.x + nearestTorch.nx * 3.2, -0.6, nearestTorch.z + nearestTorch.nz * 3.2);
       ts.intensity = TORCH_TUNE.spot * f;
     } else this.torchSpot.intensity = 0;
-    // The fires standing in the rooms: nearest four get the pool, each on its own beat.
+    // The fires standing in the rooms, and the lights placed in the Floor Designer: the nearest get the
+    // pool, each on its own beat.
     const near = this.nearest(this.moodSources, px, pz);
     this.assignPool(this.moodLights, near, dt, { cut: POOL_TUNE.decorCut, allLit: state.allLit, enabled: !!G.decor, fadeSeconds: POOL_TUNE.fade, rampUnits: POOL_TUNE.decorRamp });
-    for (let i = 0; i < MOOD_POOL; i++) {
+    for (let i = 0; i < this.moodLights.length; i++) {
       const l = this.moodLights[i], sp = l.userData.poolSpot, gain = l.userData.poolGain;
       if (!sp || gain <= 0.001) { l.intensity = 0; continue; }
       const f = moodFlicker(sp.kind, t, sp.phase);

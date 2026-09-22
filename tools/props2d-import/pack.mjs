@@ -17,7 +17,10 @@ const args = Object.fromEntries(process.argv.slice(3).map((a, i, arr) => a.start
 const DIR = path.resolve(process.argv[2]);
 const OUT = path.resolve(args.out || 'src/assets/props2d');
 const WIDTH = Number(args.width || 1024);
-const BG = Number(args.bg || 46);          // luma at or under this, reached from the edge, is ground
+// The sheet's ground is luma 0-4 almost everywhere (measured over every crop edge: 15,307 of ~17k edge
+// pixels). It was 46, which let the fill run on into the black outlines and every dark interior — the
+// shelf's back, the crate's shadow side, the portcullis — and left half the sheet in lace (2026-09-21).
+const BG = Number(args.bg || 6);           // luma at or under this, reached from the edge, is ground
 
 const files = fs.readdirSync(DIR).filter((f) => f.endsWith('.png')).sort();
 const b = await chromium.launch();
@@ -81,12 +84,21 @@ const res = await page.evaluate(async ({ input, WIDTH, BG }) => {
     const d = g.getImageData(0, 0, c.width, c.height);
     const px = d.data, W = c.width, H = c.height;
     const lum = (i) => 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+    // A source that already carries its own transparency (edge pixels clear) is trusted as it is. The
+    // flood below is for sheet cuts on a dark ground: on a cut-out it poured in through the gaps between
+    // the owner's pit-rim stones and erased the pit's earth and both staircases (2026-09-21).
+    let clearEdge = 0, edgeN = 0;
+    for (let x = 0; x < W; x++) { edgeN += 2; if (px[x * 4 + 3] < 16) clearEdge++; if (px[((H - 1) * W + x) * 4 + 3] < 16) clearEdge++; }
+    for (let y = 0; y < H; y++) { edgeN += 2; if (px[(y * W) * 4 + 3] < 16) clearEdge++; if (px[(y * W + W - 1) * 4 + 3] < 16) clearEdge++; }
+    const ownAlpha = clearEdge > edgeN * 0.5;
     // flood the ground in from every edge pixel that is dark enough
     const q = [];
     const seen = new Uint8Array(W * H);
     const push = (x, y) => { if (x < 0 || y < 0 || x >= W || y >= H) return; const i = y * W + x; if (seen[i]) return; if (lum(i * 4) > BG) return; seen[i] = 1; q.push(i); };
-    for (let x = 0; x < W; x++) { push(x, 0); push(x, H - 1); }
-    for (let y = 0; y < H; y++) { push(0, y); push(W - 1, y); }
+    if (!ownAlpha) {
+      for (let x = 0; x < W; x++) { push(x, 0); push(x, H - 1); }
+      for (let y = 0; y < H; y++) { push(0, y); push(W - 1, y); }
+    }
     while (q.length) {
       const i = q.pop(), x = i % W, y = (i / W) | 0;
       px[i * 4 + 3] = 0;

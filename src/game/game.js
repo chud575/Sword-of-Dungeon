@@ -24,6 +24,15 @@ const STAT_DEFAULTS = {
 /** Held-direction pacing: after `rampStart` seconds of holding, steps shorten towards `minPace`. */
 const HOLD = { rampStart: 1.0, rampLength: 2.2, minPace: 0.62 };
 
+/**
+ * THE FALL HOLDS ON THE LEVEL YOU FELL FROM (owner, 2026-09-21: "leave the camera on the origin level for
+ * about 1s before transitioning to the lower floor"). A pit — a trap giving way or a slip into an open one —
+ * used to swap the level out on the very step that opened it, so the player never saw the floor go. Now the
+ * world freezes where it is for `FALL_HOLD` seconds of simulation, the hole and its dust on screen, and
+ * only then does `enterLevel` run. Nothing moves, casts or opens in that second (`busy()`).
+ */
+export const FALL_HOLD = 1.0;
+
 export class Game {
   /**
    * @param {{seed?:number|string, difficulty?:string, bus?:import('../core/events.js').EventBus, autoStart?:boolean}} opts
@@ -213,6 +222,14 @@ export class Game {
   step(dt) {
     const s = this.state, p = this.player, B = this.balance;
     if (s.over || s.paused) return;
+    if (s.falling) {
+      s.falling.t -= dt;
+      if (s.falling.t > 0) return;
+      const f = s.falling; s.falling = null;
+      this.enterLevel(f.depth, 'pit', { levels: f.levels });
+      if (f.log) this.log(f.log, 'danger');
+      return;
+    }
     s.time += dt; s.elapsed += dt;
     if (tickQuest(this, dt)) return;
 
@@ -294,7 +311,7 @@ export class Game {
    * @returns {boolean} true if the step was performed immediately
    */
   move(dx, dy) {
-    if (this.state.over) return false;
+    if (this.busy()) return false;
     dx = Math.sign(dx); dy = Math.sign(dy);
     if (!dx && !dy) return false;
     if (this.player.moveTimer <= 0) return this.performMove(dx, dy);
@@ -325,7 +342,7 @@ export class Game {
 
   /** Stand still for a moment (lets regeneration tick). */
   wait() {
-    if (this.state.over) return false;
+    if (this.busy()) return false;
     this.pendingMove = null;
     this.player.moveTimer = Math.max(this.player.moveTimer, this.balance.playerStepTime);
     return true;
@@ -440,8 +457,7 @@ export class Game {
         this.emit('fx:fall', { x, y });
         this.checkIdleDeath();
         if (this.state.over) return;
-        this.enterLevel(level.depth + levels, 'pit', { levels });
-        this.log(`DOWN ${levels} LEVELS`, 'danger');
+        this.startFall(level.depth + levels, levels, `DOWN ${levels} LEVELS`, { opened: true });
         return;
       }
       case 'ceiling': {
@@ -486,12 +502,22 @@ export class Game {
       if (this.state.over) return;
     }
     this.emit('fx:fall', { x: p.x, y: p.y });
-    this.enterLevel(L + levels, 'pit', { levels });
+    this.startFall(L + levels, levels);
   }
+
+  /** Begin the held fall to `depth` (see FALL_HOLD). `log` is written on landing, on the new level. */
+  startFall(depth, levels, log = null, { opened = false } = {}) {
+    this.state.falling = { t: FALL_HOLD, depth, levels, log };
+    this.heldDir = null; this.heldTime = 0; this.pendingMove = null;
+    this.emit('fall:start', { depth, levels, x: this.player.x, y: this.player.y, hold: FALL_HOLD, opened });
+  }
+
+  /** True while the player can't act: dead, or mid-fall between two levels. */
+  busy() { return !!(this.state.over || this.state.falling); }
 
   /** Context action: stairs, temple, climbable pit. Returns true if something happened. */
   interact() {
-    if (this.state.over) return false;
+    if (this.busy()) return false;
     const p = this.player, level = this.level;
     const tile = level.get(p.x, p.y);
     if (tile === TILE.STAIRS_DOWN) return this.descend();
@@ -559,6 +585,7 @@ export class Game {
 
   /** Bury all carried gold under your feet (max 10 caches per level). */
   buryGold() {
+    if (this.busy()) return false;
     const p = this.player, level = this.level;
     if (p.gold <= 0) { this.log('No gold to hide.', 'info'); return false; }
     if (level.buriedCount >= this.balance.maxBuriedCaches) { this.log('Too many caches on this level.', 'info'); return false; }
@@ -572,9 +599,9 @@ export class Game {
   }
 
   /** Use an inventory item (potion, beacon). */
-  useItem(type) { const ok = useItemFn(this, type); if (ok && type === 'potion') this.stats.potions++; return ok; }
+  useItem(type) { if (this.busy()) return false; const ok = useItemFn(this, type); if (ok && type === 'potion') this.stats.potions++; return ok; }
   /** Cast a spell (teleport, shield, regeneration, invisibility, light, drift). */
-  castSpell(type) { const ok = castSpellFn(this, type); if (ok) this.stats.spells++; return ok; }
+  castSpell(type) { if (this.busy()) return false; const ok = castSpellFn(this, type); if (ok) this.stats.spells++; return ok; }
   /** Toggle an active Light spell. */
   toggleLight() { return toggleLightFn(this); }
 

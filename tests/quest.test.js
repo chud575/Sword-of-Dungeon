@@ -96,6 +96,8 @@ test('temple sacrifice converts gold to XP and pits drop you deeper', () => {
   assert.equal(g.player.xp, xp + 40);
   g.heal();
   g.springTrap('pit', g.player.x, g.player.y);
+  assert.equal(g.depth, 1, 'the fall holds on the level it opened in (FALL_HOLD)');
+  for (let i = 0; i < 6 && g.state.falling; i++) g.update(0.25);
   assert.ok(g.depth >= 3 && g.depth <= 6, `fell to ${g.depth}`);
   assert.ok(g.level.climbable.length === 1);
   const d = g.depth;

@@ -10,7 +10,7 @@ export const ITEM_TABLE = {
   enchant: { type: 'enchant', name: 'Enchanted Weapon', plural: 'Enchanted Weapons', key: null, kind: 'passive', found: 'ENCHANTED WEAPON!!', desc: 'Battle skill +5..14 and +1 damage per enchantment.' },
   beacon: { type: 'beacon', name: 'Beacon', plural: 'Beacons', key: '+', kind: 'placeable', found: 'BEACON!!', desc: 'Place it: teleports arrive here and monsters cannot see you on it.' },
   gold: { type: 'gold', name: 'Gold', plural: 'Gold', kind: 'gold', desc: 'Sacrifice it at a temple for experience.' },
-  chest: { type: 'chest', name: 'Treasure square', plural: 'Treasure squares', kind: 'container', desc: 'Hidden treasure or trap — 44% trap.' },
+  chest: { type: 'chest', name: 'Treasure square', plural: 'Treasure squares', kind: 'container', desc: 'A closed chest: treasure, or a trap. Only opening it tells you which.' },
   sword: { type: 'sword', name: 'The Sword of Fargoal', plural: 'Swords of Fargoal', kind: 'quest', desc: 'Umla will know where you are.' },
 };
 

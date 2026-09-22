@@ -149,7 +149,7 @@ export class CameraRig {
   listen() {
     if (!this.bus) return;
     const on = (n, f) => this.unsub.push(this.bus.on(n, f));
-    on('game:start', ({ game }) => { if (game) { this.level = game.level; this.depthYaw = depthYaw(game.level && game.level.depth); } });
+    on('game:start', ({ game }) => { if (this.transition && this.transition.kind === 'fall') this.transition = null; if (game) { this.level = game.level; this.depthYaw = depthYaw(game.level && game.level.depth); } });
     on('level:enter', ({ level, depth, via }) => {
       this.level = level || this.level;
       this.depthYaw = depthYaw(depth ?? (level && level.depth));
@@ -172,6 +172,7 @@ export class CameraRig {
         this.kick(dx / len, dz / len, killed ? 0.16 : crit ? 0.12 : 0.07); // lunge toward the target
       }
     });
+    on('fall:start', ({ hold }) => this.startTransition('fall', hold || 1));
     on('trap:triggered', ({ type }) => { if (type === 'explosion' || type === 'ceiling') this.punchFov(2.5); });
   }
 
@@ -344,7 +345,8 @@ export class CameraRig {
    * 'drop' (pit) and 'arrive' (new level push-in) are single-phase.
    */
   startTransition(kind, onMid) {
-    const dur = kind === 'drop' ? 0.85 : kind === 'arrive' ? 1.1 : 1.05;
+    const dur = typeof onMid === 'number' ? onMid : kind === 'drop' ? 0.85 : kind === 'arrive' ? 1.1 : 1.05;
+    if (typeof onMid === 'number') onMid = null;
     this.transition = { kind, t: 0, dur, midDone: kind === 'drop' || kind === 'arrive', onMid: onMid || null, landed: false, frozen: false };
   }
 
@@ -417,6 +419,15 @@ export class CameraRig {
         out.distMul = 1 + 0.08 * u;
         if (!tr.landed && k2 > 0.5) { tr.landed = true; this.shaker.add(0.28); }
       }
+    } else if (tr.kind === 'fall') {
+      // THE FLOOR GIVES WAY (game.js FALL_HOLD): held on the level he fell from, the camera goes down the
+      // hole after the hero — sinking toward the pit, the view narrowing, the dark closing in at the end —
+      // and hands over to 'drop' on the level below.
+      const e = easeInQuad(k);
+      out.dive = -5.5 * e;
+      out.fov = -9 * e;
+      out.distMul = 1 - 0.3 * e;
+      out.fade = Math.min(1, Math.max(0, (k - 0.55) / 0.45) * 0.85);
     } else if (tr.kind === 'drop') {
       // free fall from above, a thud on landing and a small bounce
       const land = 0.58;
@@ -433,7 +444,8 @@ export class CameraRig {
       out.elevAdd = 5 * DEG * u;
       out.dive = 0.6 * u;
     }
-    if (k >= 1) { this.transition = null; return { dive: 0, fade: 0, fov: 0, roll: 0, distMul: 1, elevAdd: 0 }; }
+    // a fall holds its last frame until the level below takes over with 'drop' (no bright frame between)
+    if (k >= 1 && tr.kind !== 'fall') { this.transition = null; return { dive: 0, fade: 0, fov: 0, roll: 0, distMul: 1, elevAdd: 0 }; }
     return out;
   }
 

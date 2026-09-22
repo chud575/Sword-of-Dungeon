@@ -38,7 +38,11 @@ test('levels are connected, deterministic and well-formed for 20 seeds x depths 
       const sacks = lv.items.filter((it) => it.type === 'gold' && !it.hidden);
       assert.ok(sacks.length >= 6 && sacks.length <= 10, `gold sacks ${sacks.length}`);
       for (const s of sacks) assert.ok(s.gold >= 10 * depth && s.gold < 10 * depth + 20);
-      const squares = lv.items.filter((it) => it.type === 'chest' && it.hidden);
+      // the original's treasure squares; the hidden traps now also lie in chests (generator.js
+      // trapsIntoChests), marked `fromTrap`, and are checked on their own
+      const squares = lv.items.filter((it) => it.type === 'chest' && it.hidden && !it.fromTrap);
+      for (const c of lv.items.filter((it) => it.fromTrap)) { assert.ok(['teleport', 'pit'].includes(c.trap)); assert.ok(lv.isWalkable(c.x, c.y)); }
+      assert.equal(lv.traps.length, 0, 'every trap is in a chest');
       assert.ok(squares.length >= 3 && squares.length <= depth + 2, `treasure squares ${squares.length}`);
       for (const it of lv.items) assert.ok(lv.isWalkable(it.x, it.y), 'item on walkable tile');
       // sword level: sword instead of temple

@@ -16,6 +16,8 @@ import { PX_PER_TILE, frameTexelSize, texelGrid, SPRITE_MASK_ALPHA, sitOnTile, W
 import { spriteTexture, spriteTexels } from './props/atlas2d.js';
 import { buildGroundSprite } from './props/atlas2d.js';
 
+/** `?squares=slab`: draw the hidden treasure-or-trap squares as the old lifted flagstone, not a chest. */
+const SLAB_SQUARES = typeof location !== 'undefined' && new URLSearchParams(location.search).get('squares') === 'slab';
 /** `?loot=ground`: the loot sprites lie flat on the floor instead of standing up (see `goldSack`). */
 const GROUND_LOOT = (() => { try { return new URLSearchParams(location.search).get('loot') === 'ground'; } catch { return false; } })();
 // The furniture is painted with the toolkit exported at the bottom of this file, so the import is
@@ -344,6 +346,7 @@ function worldQuadSprite(key, tex, texels, o = {}) {
   const m = new THREE.Mesh(g, mat);
   m.castShadow = false; m.receiveShadow = false;
   m.position.y = ITEM_PIVOT_Y + 0.03;   // clear of the flagstone, or it z-fights the floor
+  m.userData.quadCard = true;           // DungeonView.syncItems raises it by its row (atlas2d.js ROW_LIFT)
   return m;
 }
 
@@ -1057,7 +1060,11 @@ export class PropFactory {
     g.userData.anim = { y0: 0, amp: 0, speed: 0, spin: 0, t: this.rng.float(0, 6) };
     switch (it.type) {
       case 'gold': return it.hidden ? this.buriedCache(g) : this.goldSack(g, it.gold || 20);
-      case 'chest': return it.hidden ? this.trapSquare(g) : this.chest(g);
+      // Every treasure-or-trap square is a CHEST on the floor (owner, 2026-09-21: "all potions and traps
+      // should be inside a chest, not an invisible tile"). What is inside is still only learned by opening
+      // it — a trapped one looks exactly like a full one. `trapSquare` (the lifted flagstone) is kept for
+      // comparison behind `?squares=slab`.
+      case 'chest': return it.hidden && SLAB_SQUARES ? this.trapSquare(g) : this.chest(g);
       case 'sword': return this.swordInStone(g);
       case 'potion': return this.potion(g);
       case 'sack': return this.magicSack(g);

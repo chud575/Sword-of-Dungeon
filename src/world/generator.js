@@ -105,6 +105,7 @@ export function generateLevel(seed, depth, opts = {}) {
   placeTreasure(level, rng);
   placeDecor(level, isSwordLevel);
   if (opts.monsters !== false) spawnMonsters(level, rng, balance);
+  trapsIntoChests(level);
   return level;
 }
 
@@ -122,6 +123,7 @@ function generateForestLevel(level, rng, balance, opts) {
   placeTraps(level, rng);
   placeTreasure(level, rng);
   if (opts.monsters !== false) spawnMonsters(level, rng, balance);
+  trapsIntoChests(level);
   return level;
 }
 
@@ -495,6 +497,19 @@ function placeTraps(level, rng) {
     const type = level.depth <= 2 || rng.chance(0.55) ? 'teleport' : 'pit';
     level.traps.push({ x: t.x, y: t.y, type, revealed: false });
   }
+}
+
+/**
+ * EVERY TRAP IS IN A CHEST (owner, 2026-09-21: "all potions and traps should be inside a chest, not an
+ * invisible tile"). `placeTraps` still lays its hidden traps exactly where it always did — same draws, same
+ * tiles, so a seed's dungeon does not move — and they are then handed over as trapped treasure squares,
+ * which the renderer draws as a closed chest (props.js `item`). Opening one springs the trap through
+ * `Game.openChest`, the same path the generator's own trapped squares already took. Runs LAST and draws
+ * nothing from the rng, so no placement downstream shifts either.
+ */
+function trapsIntoChests(level) {
+  for (const t of level.traps) level.addItem({ type: 'chest', x: t.x, y: t.y, qty: 1, hidden: true, trap: t.type, content: null, fromTrap: true });
+  level.traps = [];
 }
 
 function placeTreasure(level, rng) {

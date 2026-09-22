@@ -16,6 +16,8 @@ import { billboard, glowTexture, flatGlowMaterial } from './propFx.js';
 import { syncSpriteSnap } from './props.js';
 import { loadPropModels, hasPropModel } from './props/models.js';
 import { flatProps } from './props/mode.js';
+import { buildGroundSprite, rowLift, isFlatSprite, STAND_Y } from './props/atlas2d.js';
+import { decorOffset } from './props/offsets.js';
 import { buildModelProp, isModelled } from './props/furniture.js';
 import { buildForestProps, buildForestAltar } from './props/forest.js';
 import { buildKitArches, buildKitColumns, buildKitPitCap, kitPropMaterials } from './props/kitProps.js';
@@ -183,6 +185,29 @@ function makeGridProbe() {
  * it on every tick of a slider or a drag. A wall piece hangs on its wall face and takes no footprint.
  * @param {THREE.Object3D} o @param {{x:number, y:number, facing?:string, tilesX?:number, tilesY?:number, scale?:number, lift?:number}} d
  */
+/**
+ * The designer's gizmo for a placed light: a bulb in the light's own colour at its height, a stalk to the
+ * floor, and a ring on the flagstones at the light's reach. Unlit (MeshBasicMaterial) so it reads the same
+ * in any room, and pickable, since the level builder selects by geometry.
+ * @param {{color?:number, radius?:number, y?:number}} L
+ */
+export function lightMarker(L) {
+  const g = new THREE.Group();
+  const c = new THREE.Color(L.color ?? 0xffc080);
+  const y = L.y ?? 1.2, r = L.radius ?? 5;
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 8), new THREE.MeshBasicMaterial({ color: c }));
+  bulb.position.y = y;
+  g.add(bulb);
+  const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, y, 6), new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.5 }));
+  stalk.position.y = y / 2;
+  g.add(stalk);
+  const pts = [];
+  for (let i = 0; i <= 48; i++) { const a = (i / 48) * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * r, 0.04, Math.sin(a) * r)); }
+  const ring = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: c, transparent: true, opacity: 0.55 }));
+  g.add(ring);
+  return g;
+}
+
 export function applyDecorTransform(o, d) {
   const u = o.userData;
   if (u.baseScale === undefined) { u.baseScale = o.scale.x; u.baseY = o.position.y; }
@@ -191,10 +216,23 @@ export function applyDecorTransform(o, d) {
   const tx = wall ? 1 : Math.max(1, d.tilesX | 0), ty = wall ? 1 : Math.max(1, d.tilesY | 0);
   o.scale.set(u.baseScale * k * tx, u.baseScale * k, u.baseScale * k * ty);
   const lift = typeof d.lift === 'number' ? d.lift : 0;
+  const off = decorOffset(d);                    // the builder's X / Y nudge, or the object's saved default
+  // FREE ROTATION (builder: rotX / rotY / rotZ, degrees). Composed ON TOP of whatever turn the piece was
+  // built with (its facing), in world axes about its tile-centre pivot: Y spins it on the floor, X tips it
+  // forward/back (90 stands a floor quad up), Z rolls it sideways.
+  if (u.baseQuat === undefined) u.baseQuat = o.quaternion.clone();
+  const rx = +d.rotX || 0, ry = +d.rotY || 0, rz = +d.rotZ || 0;
+  if (rx || ry || rz) {
+    const R = Math.PI / 180;
+    o.quaternion.setFromEuler(new THREE.Euler(rx * R, ry * R, rz * R, 'YXZ')).multiply(u.baseQuat);
+  } else o.quaternion.copy(u.baseQuat);
+  // an upright 2D piece is raised to the common card height and then by its row (atlas2d.js ROW_LIFT)
+  const sheet = u.decor && u.decor.sheet;
+  const row = sheet && !isFlatSprite(sheet) ? (u.decor.ground ? STAND_Y - 0.02 : STAND_Y - 0.04) + rowLift(d.y + off.y) : 0;
   if (wall) {
     const f = DECOR_FACE[d.facing] || DECOR_FACE.s;
-    o.position.set(d.x + f.dx * 0.5, u.baseY + lift, d.y + f.dy * 0.5);
-  } else o.position.set(d.x + (tx - 1) / 2, u.baseY + lift, d.y + (ty - 1) / 2);
+    o.position.set(d.x + f.dx * 0.5 + off.x, u.baseY + lift + row, d.y + f.dy * 0.5 + off.y);
+  } else o.position.set(d.x + (tx - 1) / 2 + off.x, u.baseY + lift + row, d.y + (ty - 1) / 2 + off.y);
 }
 
 export class DungeonView {
@@ -489,6 +527,31 @@ export class DungeonView {
       // A piece the level builder hid (debug/levelBuilder.js) stays in `level.decor` so a save keeps it
       // and it can be restored, but it is not drawn, does not block and does not burn.
       if (d.hidden) continue;
+      // A PLACED LIGHT (debug/floorDesigner.js) has no art: it is drawn as a marker — the bulb at its
+      // height and its reach as a ring on the floor — and only while the designer is open, so the light
+      // itself can be judged without its own gizmo standing in it.
+      if (d.type === 'light' && d.light) {
+        const o = lightMarker(d.light);
+        o.userData.decorRef = d;
+        o.userData.decor = { type: 'light', cls: 'prop', light: true };
+        o.visible = !!this.showLightMarkers;
+        this.addAt(o, d.x, d.y);
+        applyDecorTransform(o, d);
+        this.decorViews.push(o);
+        continue;
+      }
+      // A NAMED SPRITE from the owner's sheet atlas, lying on the floor (the Floor Designer's "Your
+      // sprites": the pit, the stairs, and every piece of the prop sheet). `tiles` is its width.
+      if (d.type === 'sprite' && d.sprite) {
+        const o = buildGroundSprite(d.sprite, { tiles: d.tiles || 1, facing: d.facing });
+        if (o) {
+          o.userData.decorRef = d;
+          this.addAt(o, d.x, d.y);
+          applyDecorTransform(o, d);
+          this.decorViews.push(o);
+          continue;
+        }
+      }
       let o = this.modelFor(d) || this.props.decor(d);
       // ...and the solid kit pieces ARE real geometry, so "models only" keeps them too: filtering on
       // "came from the imported library" instead would empty every furnished room in the game.
@@ -1243,7 +1306,10 @@ export class DungeonView {
       if (this.itemViews.has(it.id)) continue;
       const v = this.props.item(it);
       v.position.set(it.x, 0, it.y);
-      if (it.hidden) this.turnDecal(v, it.x, it.y);   // the lifted-flagstone mark is a floor decal
+      // a pickup drawn as a floor card takes its row's height like every other upright 2D piece
+      let card = false; v.traverse((c) => { if (c.userData.quadCard) card = true; });
+      if (card) v.position.y = STAND_Y - 0.04 + rowLift(it.y);
+      if (it.hidden && it.type !== 'chest') this.turnDecal(v, it.x, it.y);   // the buried-cache mark is a floor decal
       v.userData.item = it;
       this.root.add(v);
       this.itemViews.set(it.id, v);

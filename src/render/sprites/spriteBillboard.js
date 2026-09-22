@@ -81,6 +81,7 @@
 //
 // Because the quad is parallel to the image plane there is no 1/cos(pitch) stretch any more; the
 // old trick only approximated this under orthographic projection.
+import { ROW_LIFT, STAND_Y, CAST_EDGE } from '../props/atlas2d.js';
 import * as THREE from 'three';
 import { readLiftFor } from './style.js';
 
@@ -343,7 +344,7 @@ function makeSpriteMaterial(texture, fog) {
           vec3 pos = world
             + right * ((uv.x - uPivot.x) * tilesX)
             - back * ((uv.y - uPivot.y) * tilesY - 0.5);
-          pos.y += 0.05;          // clear of the flagstone, or the card z-fights the floor it lies on
+          pos.y += ${STAND_Y + CAST_EDGE} + ${ROW_LIFT} * world.z;  // clear of the flagstone; a lower row nearer the camera (atlas2d.js ROW_LIFT)
           vLit = pos;
           gl_Position = projectionMatrix * viewMatrix * vec4(pos, 1.0);
           return;
@@ -650,6 +651,8 @@ export class SpriteBillboard {
     this.scale = 1;
     /** transient hit/attack deformation only (see the header): 1,1 whenever nothing is deforming */
     this.squash = new THREE.Vector2(1, 1);
+    /** 1..0: the hero dropping into a pit shrinks to nothing about his feet (renderer.js onFallStart) */
+    this.sink = 1;
     this.opacity = 1; this.flash = 0;
     /** device pixels per sprite texel — THE ONE the whole cast shares (see `frameTexelSize`) */
     this.texelPx = GRID.S; this.texelWorld = GRID.S / GRID.pxPerWorld;
@@ -686,8 +689,9 @@ export class SpriteBillboard {
     const u = this.material.uniforms;
     this.flip = this.animator.flipped;
     u.uFlip.value = this.flip ? 1 : 0;
-    u.uSquash.value.copy(this.squash);
+    u.uSquash.value.copy(this.squash).multiplyScalar(this.sink);
     u.uOpacity.value = this.opacity;
+    this.blob.visible = this.sink > 0.02;
     u.uFlash.value = this.flash;
     const fade = this.opacity < 1;
     if (this.material.transparent !== fade) {
@@ -851,7 +855,7 @@ export class SpriteBillboard {
     this.blob.quaternion.setFromAxisAngle(this._xAxis, -Math.PI / 2).premultiply(this._q.setFromAxisAngle(this._up, yawQ));
     // The card is alpha-tested and lies just ABOVE the pool, so the pool reads through everything the
     // figure does not cover — which is what grounds a card that would otherwise look pasted on.
-    this.blob.scale.set(R * 2, WORLD_QUADS ? R * 2 * BLOB_DEPTH : RD * 2, 1);
+    this.blob.scale.set(R * 2, WORLD_QUADS ? R * 2 * BLOB_DEPTH : RD * 2, 1).multiplyScalar(this.sink);
     const rx = Math.cos(yawQ), rz = -Math.sin(yawQ);   // the quad's local +x in world
     const fx = -Math.sin(yawQ), fz = -Math.cos(yawQ);  // the quad's local +y in world
     const mir = this.flip ? -1 : 1;

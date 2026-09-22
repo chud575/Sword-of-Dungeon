@@ -8,6 +8,7 @@ import { registerScenarios } from './debug/scenarios.js';
 import { TILE } from './core/constants.js';
 import { AudioEngine } from './core/audio.js';
 import { saveGame, loadSave, deleteSave, loadSettings, saveSettings } from './core/save.js';
+import { buildDesignerHall, DESIGNER_SEED } from './debug/floorDesigner.js';
 import { Hud } from './ui/hud.js';
 import { PanelCollapse } from './ui/collapse.js';
 import { Surround } from './render/surround.js';
@@ -131,6 +132,26 @@ const app = {
     newGame(seed ?? currentSeed, { difficulty: difficulty || difficultyParam });
     game.daily = daily; game.recordDaily = recordDaily;
     audio.ensure();
+    return game;
+  },
+  /**
+   * THE FLOOR DESIGNER (title menu): an empty, lit, monster-free hall with the level builder open, to
+   * place and test every prop and any light. The game is a `placeholder`, so nothing it does is saved to
+   * a quest; the room's own layout persists through the builder. See debug/floorDesigner.js.
+   */
+  floorDesigner() {
+    ui.menus.closeAll();
+    hideTitlePreview();
+    newGame(DESIGNER_SEED, { difficulty: 'story' });
+    game.placeholder = true;           // every save path refuses a placeholder
+    game.designer = true;
+    const { level, arrival } = buildDesignerHall(game);
+    game.enterLevel(1, 'teleport', { arrival });
+    level.wanderTimer = Infinity;      // enterLevel sets the clock; a workbench has no wandering monsters
+    renderer.fog.override = 'all';
+    renderer.rebuildLevel();
+    audio.ensure();
+    if (debug.levelBuilder) debug.levelBuilder.open({ force: true });
     return game;
   },
   /** Resume the most recent save. Returns false if there is none or it is corrupt. */

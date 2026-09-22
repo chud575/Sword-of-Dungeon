@@ -34,18 +34,50 @@ import { TILE } from '../core/constants.js';
 import { createRng } from '../core/rng.js';
 import { MODEL_MAP } from '../render/props/models.js';
 import { applyDecorTransform } from '../render/dungeon.js';
+import { PROPS2D } from '../assets/props2d/map.js';
+import { buildGroundSprite } from '../render/props/atlas2d.js';
+import { decorOffset, defaultOffset, offsetKey, saveDefaultOffset, clearDefaultOffset } from '../render/props/offsets.js';
 import { releaseFocusAfterClicks } from './lightPanel.js';
 
 const STORE_KEY = 'fargoal.levelBuilder.v1';
+const ROT_FIELDS = ['rotX', 'rotY', 'rotZ'];
 const FACINGS = ['s', 'w', 'n', 'e'];
 const FACE = { n: { dx: 0, dy: -1 }, e: { dx: 1, dy: 0 }, s: { dx: 0, dy: 1 }, w: { dx: -1, dy: 0 } };
 const FREEPORT_ASSETS = [
   ['chest_a', 'strongbox'], ['chest_b', 'strongbox'], ['chest_long', 'footlocker'], ['brazier_a', 'brazier'],
   ['brazier_b', 'brazier'], ['cupboard', 'cupboard'], ['table', 'table'], ['banquet', 'tableLong'],
 ];
+/**
+ * Light presets for the Floor Designer. Each places a `light` entry (render/lighting.js setMoods reads it)
+ * with its own colour, strength, reach, height and beat; every field is editable once placed. The kinds
+ * are lighting.js `moodFlicker`'s own, so a placed torch breathes exactly like a generated one.
+ */
+const LIGHT_PRESETS = [
+  // [label, light, the sheet sprite it burns in (null: the light alone)] — owner, 2026-09-21: the Lights
+  // tab places the SPRITE WITH ITS LIGHT, one entry, so the two move, turn, raise and delete together.
+  ['Torch', { color: 0xff6a20, intensity: 4.5, radius: 6, y: 1.0, kind: 'fire' }, 'floor-torch'],
+  ['Wall torch', { color: 0xff6a20, intensity: 4.5, radius: 6, y: 1.0, kind: 'fire' }, 'wall-torch-1'],
+  ['Wall torch (2)', { color: 0xff6a20, intensity: 4.5, radius: 6, y: 1.0, kind: 'fire' }, 'wall-torch-2'],
+  ['Wall sconce', { color: 0xffb060, intensity: 3.2, radius: 4.5, y: 1.0, kind: 'candle' }, 'wall-sconce'],
+  ['Skull sconce', { color: 0xc8e070, intensity: 2.6, radius: 4.5, y: 0.9, kind: 'sickly' }, 'skull-sconce'],
+  ['Candle', { color: 0xffe6b0, intensity: 1.8, radius: 2.8, y: 0.6, kind: 'candle' }, 'candles'],
+  ['Candle stand', { color: 0xffe6b0, intensity: 2.2, radius: 3.2, y: 0.9, kind: 'candle' }, 'candle-stand'],
+  ['Brazier fire', { color: 0xff6424, intensity: 4.2, radius: 5.2, y: 0.8, kind: 'fire' }, 'brazier'],
+  ['Campfire', { color: 0xff6e28, intensity: 5.5, radius: 6, y: 0.65, kind: 'fire' }, 'campfire'],
+  ['Campfire (2)', { color: 0xff6a20, intensity: 4.6, radius: 5.8, y: 0.8, kind: 'forge' }, 'campfire-b'],
+  ['Lantern', { color: 0xfff4e0, intensity: 3.0, radius: 5, y: 1.4, kind: 'steady' }, 'hanging-lantern'],
+  ['Magic blue', { color: 0x6fa8ff, intensity: 3.5, radius: 5.5, y: 1.2, kind: 'water' }, 'blue-flame'],
+  ['Fungal green', { color: 0x7fe3a8, intensity: 2.6, radius: 4.5, y: 0.5, kind: 'fungal' }, 'green-flame'],
+  ['Blood red', { color: 0xff3030, intensity: 3.0, radius: 4.5, y: 1.0, kind: 'candle' }, 'red-flame'],
+  ['Bare light', { color: 0xffc080, intensity: 3.0, radius: 5, y: 1.2, kind: 'steady' }, null],
+  ['Moonlight (bare)', { color: 0xbfd6ff, intensity: 3.0, radius: 8, y: 3.0, kind: 'steady' }, null],
+];
+const LIGHT_KINDS = ['steady', 'fire', 'candle', 'forge', 'fungal', 'sickly', 'water'];
+
 const SOURCE = {
+  light: ['#ffcf8a', 'light'], 'light + sprite': ['#ffcf8a', 'light + your sprite'],
   'owner-dc': ['#6fbf8a', 'yours · Dungeon Crawlers'], 'owner-freeport': ['#6fbf8a', 'yours · Freeport'],
-  'owner-supplied': ['#6fbf8a', 'yours · Top-Down pack'], 'claude-kit': ['#e07a5a', 'procedural kit'],
+  'owner-supplied': ['#6fbf8a', 'yours · sprite / pack'], 'claude-kit': ['#e07a5a', 'procedural kit'],
   'claude-pixel': ['#e07a5a', 'painted pixels'], none: ['#888', 'draws nothing'],
 };
 
@@ -57,7 +89,7 @@ const plain = (list) => JSON.parse(JSON.stringify(list || []));
 function sourceOf(o) {
   if (!o) return 'none';
   const u = o.userData.decor || {};
-  if (u.supplied) return 'owner-supplied';
+  if (u.supplied || u.sheet) return 'owner-supplied';     // the Top-Down packs, and the owner's sprite sheet
   if (u.freeport) return 'owner-freeport';
   if (u.model) return 'owner-dc';
   let meshes = 0; o.traverse((c) => { if (c.isMesh || c.isSprite) meshes++; });
@@ -133,7 +165,9 @@ export class LevelBuilder {
     }
   }
 
-  toggle() { if (this.root) this.close(); else this.open(); }
+  /** In the Floor Designer the builder is always available, dev mode or not. */
+  get designer() { return !!(this.game && this.game.designer); }
+  toggle() { if (this.root) this.close(); else this.open({ force: this.designer }); }
 
   /** Keep the generator's own list for Revert, taken before anything on this level is touched. */
   noteOrig(lv = this.level) {
@@ -143,8 +177,9 @@ export class LevelBuilder {
     this.orig.set(k, rec && rec.orig ? rec.orig : plain(lv.decor.filter((d) => !d.placed)));
   }
 
-  open() {
-    if (this.root || !this.devMode || !this.level) return;
+  /** @param {{force?:boolean}} [o] `force` opens it without dev mode — the Floor Designer does. */
+  open(o = {}) {
+    if (this.root || (!this.devMode && !o.force) || !this.level) return;
     this.noteOrig();
     this.buildPalette();
     const root = document.createElement('div');
@@ -161,6 +196,7 @@ export class LevelBuilder {
     document.body.append(root);
     this.root = root;
     if (this.pauseWorld) this.holdModal();
+    this.showLightMarkers(true);
     this.setMode('select');
     this.render();
   }
@@ -171,12 +207,19 @@ export class LevelBuilder {
     this.clearGhost(); this.clearMarks();
     this.selected = null; this.item = null;
     this.releaseModal();
+    this.showLightMarkers(false);
     this.root.remove(); this.root = null;
   }
 
   // The shared modal count only pauses on its 0 -> 1 step, so a builder opened while anything else holds
   // a modal would leave the world running under it. So the builder pauses the game itself as well; the
   // modal it holds is what keeps `game:paused` from opening the pause menu (ui/menus.js).
+  /** The placed-light gizmos show while the builder is open and not otherwise (dungeon.js lightMarker). */
+  showLightMarkers(on) {
+    this.dv.showLightMarkers = !!on;
+    for (const o of this.dv.decorViews) if (o.userData.decor && o.userData.decor.light) o.visible = !!on;
+  }
+
   holdModal() {
     if (this.modalHeld) return;
     this.modalHeld = true; this.setModal(true);
@@ -231,6 +274,18 @@ export class LevelBuilder {
     if (!this.dv.modelLib) this.paletteStale = true;
     // ...and every Freeport model by its own id (the game picks between a pair by tile position, so
     // the second chest and the second brazier are otherwise a matter of luck)
+    // THE OWNER'S SPRITES, flat on the floor: the pit and the two stairs first (2026-09-21), then every
+    // sprite of the prop sheet, so anything the owner has drawn can be laid down and judged in a room.
+    const ownFirst = ['floor-pit', 'floor-stairs-down', 'floor-stairs-up'];
+    const sheetNames = Object.keys(PROPS2D).filter((n) => !ownFirst.includes(n) && n !== 'rugs-strip').sort();
+    for (const name of ownFirst.concat(sheetNames)) {
+      if (!PROPS2D[name]) continue;
+      P.push({ key: `sp:${name}`, group: 'sprite', label: name, type: 'sprite', sprite: name, variants: 1, src: 'owner-supplied' });
+    }
+    LIGHT_PRESETS.forEach(([label, light, sprite]) => {
+      if (sprite && !PROPS2D[sprite]) return;
+      P.push({ key: `l:${label}`, group: 'light', label, type: sprite ? 'sprite' : 'light', variants: 1, light, sprite: sprite || undefined, src: sprite ? 'light + sprite' : 'light' });
+    });
     for (const [id, type] of FREEPORT_ASSETS) P.push({ key: `fp:${id}`, group: 'freeport', label: id, type, variants: DECOR_TYPES[type].v, model: id, blk: !!DECOR_TYPES[type].blk, src: 'owner-freeport' });
     this.palette = P;
   }
@@ -240,6 +295,8 @@ export class LevelBuilder {
     if (item.span) d.span = item.span;
     if (item.art) d.art = item.art;
     if (item.model) d.model = item.model;
+    if (item.light) d.light = { ...item.light };
+    if (item.sprite) { d.sprite = item.sprite; d.tiles = 1; }
     return d;
   }
 
@@ -248,7 +305,10 @@ export class LevelBuilder {
   viewFor(d) {
     const dv = this.dv;
     let o = null;
-    try { o = dv.modelFor(d) || this.renderer.props.decor(d); } catch { o = null; }
+    try {
+      o = d.type === 'sprite' && d.sprite ? buildGroundSprite(d.sprite, { tiles: d.tiles || 1, facing: d.facing })
+        : dv.modelFor(d) || this.renderer.props.decor(d);
+    } catch { o = null; }
     if (!o) return null;
     const cls = (o.userData.decor && o.userData.decor.cls) || 'prop';
     if (cls === 'wall') { const f = FACE[d.facing] || FACE.s; o.position.set(d.x + f.dx * 0.5, 0, d.y + f.dy * 0.5); } else o.position.set(d.x, 0, d.y);
@@ -288,8 +348,24 @@ export class LevelBuilder {
   edit(field, value, { live = false } = {}) {
     const d = this.selected; if (!d) return;
     d[field] = value;
-    if (live && (field === 'scale' || field === 'lift')) {
+    if (live && (field === 'scale' || field === 'lift' || ROT_FIELDS.includes(field))) {
       for (const o of this.dv.decorViews) if (o.userData.decorRef === d) applyDecorTransform(o, d);
+      this.scheduleSave();
+      return;
+    }
+    this.commit();
+  }
+
+  /**
+   * Change one field of the selected light. `live` (a slider mid-drag) relights the room without
+   * rebuilding the decor, so the drag stays smooth; the marker catches up on release.
+   */
+  editLight(field, value, live = false) {
+    const d = this.selected; if (!d || !d.light) return;
+    d.light[field] = value;
+    if (live) {
+      const lv = this.level, L = this.renderer.lighting;
+      if (lv && L && L.setMoods) L.setMoods(lv, createRng(((lv.seed | 0) * 31 + 11) >>> 0));
       this.scheduleSave();
       return;
     }
@@ -504,7 +580,7 @@ export class LevelBuilder {
     const inField = e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA');
     const isB = e.code === 'KeyB' || (typeof e.key === 'string' && e.key.toLowerCase() === 'b');
     if (isB && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && !inField) {
-      if (!this.devMode) return;
+      if (!this.devMode && !this.designer) return;
       e.preventDefault(); e.stopPropagation(); this.toggle(); return;
     }
     if (!this.root || inField || e.metaKey || e.ctrlKey) return;
@@ -642,6 +718,38 @@ export class LevelBuilder {
       const nv = d.art === 'dc' ? (MODEL_MAP[d.type] || [1]).length : spec ? spec.v : 1;
       h += `<div>variant ${btn('v-', '‹')} ${d.variant | 0} / ${nv - 1} ${btn('v+', '›')} &nbsp; facing ${['n', 'e', 's', 'w'].map((f) => btn(`f-${f}`, f.toUpperCase(), (d.facing || 's') === f)).join('')}</div>`;
       const wallPiece = (spec ? spec.cls : 'prop') === 'wall';
+      // OFFSET: slide the piece off the centre of its tile, and optionally keep that as where this object
+      // always stands (render/props/offsets.js). The sliders show where it actually is, default included.
+      {
+        const off = decorOffset(d), def = defaultOffset(d);
+        const own = typeof d.offX === 'number' || typeof d.offY === 'number';
+        const oslider = (f, label, v, hint) => `<div>${label} <input data-a="${f}" type="range" min="-1" max="1" step="0.01" value="${v}" style="width:150px;vertical-align:middle"> <span data-v="${f}">${v.toFixed(2)}</span> <span style="opacity:.55">${hint}</span></div>`;
+        h += oslider('offX', 'offset X', off.x, '+ right');
+        h += oslider('offY', 'offset Y', off.y, '+ down');
+        const from = own ? 'its own offset' : def ? 'the saved default' : 'centred';
+        h += `<div style="opacity:.7">now: ${from}${def ? ` · default for <b>${esc(offsetKey(d))}</b> is ${def.x.toFixed(2)}, ${def.y.toFixed(2)}` : ''}</div>`;
+        // ROTATION, free on all three axes, in degrees (dungeon.js applyDecorTransform composes it on top
+        // of the piece's facing, about its tile-centre pivot — so a quad stood up at X 90 wants some height)
+        const rslider = (f, label, hint) => `<div>${label} <input data-a="${f}" type="range" min="-180" max="180" step="1" value="${+d[f] || 0}" style="width:150px;vertical-align:middle"> <span data-v="${f}">${(+d[f] || 0).toFixed(0)}</span>° <span style="opacity:.55">${hint}</span></div>`;
+        h += rslider('rotX', 'rotate X', 'tip');
+        h += rslider('rotY', 'rotate Y', 'spin');
+        h += rslider('rotZ', 'rotate Z', 'roll');
+        h += `<div>${btn('rot-reset', 'Reset rotation')}${[90, -90].map((v) => btn(`rot-up${v}`, v > 0 ? 'Stand up (X 90)' : 'Stand up (X −90)')).join('')}</div>`;
+        h += `<div>${btn('off-save', 'Save as default')}${own && def ? btn('off-follow', 'Use default') : ''}${btn('off-centre', 'Centre')}${def ? btn('off-forget', 'Forget default') : ''}</div>`;
+      }
+      // a light's controls show for a bare light AND for a sprite burning with one (the Lights tab)
+      if (d.light) {
+        if (d.type !== 'light') h += `<div style="margin-top:4px;color:#ffcf8a">its light</div>`;
+        const L = d.light, hex = '#' + (L.color >>> 0).toString(16).padStart(6, '0');
+        h += `<div>colour <input data-a="lcolor" type="color" value="${hex}" style="vertical-align:middle;width:48px;height:18px;padding:0;border:1px solid #3a3a42;background:none"></div>`;
+        const slider = (f, label, min, max, step, unit) => `<div>${label} <input data-a="l:${f}" type="range" min="${min}" max="${max}" step="${step}" value="${L[f]}" style="width:150px;vertical-align:middle"> <span data-v="l:${f}">${(+L[f]).toFixed(2)}</span>${unit}</div>`;
+        h += slider('intensity', 'strength', 0, 12, 0.1, '');
+        h += slider('radius', 'reach', 0.5, 14, 0.1, ' tiles');
+        h += slider('y', 'height', 0.1, 4, 0.05, ' tiles');
+        h += `<div>flicker <select data-a="lkind" style="background:#1c1c22;color:#e8e2d6;border:1px solid #3a3a42;font:inherit">${LIGHT_KINDS.map((k) => `<option ${L.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select></div>`;
+        if (d.type === 'light') h += `<div>${btn('del', 'Delete')}${btn('deselect', 'Deselect')}</div>`;
+      }
+      if (d.type !== 'light') {
       if (!wallPiece) {
         const tx = Math.max(1, d.tilesX | 0), ty = Math.max(1, d.tilesY | 0);
         h += `<div>footprint ${btn('tx-', '‹')} <b>${tx}</b> wide ${btn('tx+', '›')} × ${btn('ty-', '‹')} <b>${ty}</b> deep ${btn('ty+', '›')} tiles</div>`;
@@ -650,11 +758,12 @@ export class LevelBuilder {
       h += `<div>height <input data-a="lift" type="range" min="0" max="2" step="0.05" value="${d.lift || 0}" style="width:158px;vertical-align:middle"> <span data-v="lift">${(d.lift || 0).toFixed(2)}</span> tiles</div>`;
       h += `<label style="display:block;cursor:pointer"><input type="checkbox" data-a="blocking" ${d.blocking ? 'checked' : ''}> blocks movement — nobody walks through it</label>`;
       h += `<div>${btn('del', d.placed ? 'Delete' : 'Remove (hide)')}${btn('reset', 'Reset footprint, scale & height')}${btn('deselect', 'Deselect')}</div>`;
+      }
     } else if (this.selected) this.selected = null;
 
     // the palette
     h += sec('Props');
-    const groups = [['prop', 'Standing'], ['decal', 'Floor'], ['wall', 'Wall'], ['dc', 'Your Dungeon Crawlers'], ['freeport', 'Your Freeport']];
+    const groups = [['prop', 'Standing'], ['decal', 'Floor'], ['wall', 'Wall'], ['light', 'Lights'], ['sprite', 'Your sprites'], ['dc', 'Your Dungeon Crawlers'], ['freeport', 'Your Freeport']];
     h += `<div>${groups.map(([k, l]) => btn(`g-${k}`, l, this.group === k)).join('')}</div>`;
     h += `<input data-a="filter" placeholder="search…" value="${esc(this.filter)}" style="width:100%;box-sizing:border-box;margin:4px 0;background:#1c1c22;color:#e8e2d6;border:1px solid #3a3a42;font:inherit;padding:2px 4px">`;
     const items = (this.palette || []).filter((p) => p.group === this.group && (!this.filter || p.label.toLowerCase().includes(this.filter.toLowerCase()) || p.type.toLowerCase().includes(this.filter.toLowerCase())));
@@ -693,9 +802,27 @@ export class LevelBuilder {
         return;
       }
       if (a === 'filter') { el.addEventListener('input', () => { this.filter = el.value; const pos = el.selectionStart; this.render(); const f = this.root.querySelector('[data-a="filter"]'); f.focus(); f.setSelectionRange(pos, pos); }); return; }
+      if (ROT_FIELDS.includes(a)) {
+        el.addEventListener('input', () => { this.edit(a, +el.value, { live: true }); const v = root.querySelector(`[data-v="${a}"]`); if (v) v.textContent = (+el.value).toFixed(0); });
+        el.addEventListener('change', () => this.edit(a, +el.value));
+        return;
+      }
+      if (a === 'offX' || a === 'offY') {
+        el.addEventListener('input', () => { this.editOffset(a, +el.value, true); const v = root.querySelector(`[data-v="${a}"]`); if (v) v.textContent = (+el.value).toFixed(2); });
+        el.addEventListener('change', () => this.editOffset(a, +el.value));
+        return;
+      }
       if (a === 'blocking') { el.addEventListener('change', () => this.edit('blocking', el.checked)); return; }
       if (a === 'fog') { el.addEventListener('change', () => { this.renderer.fog.override = el.checked ? 'all' : null; }); return; }
       if (a === 'pause') { el.addEventListener('change', () => this.setPauseWorld(el.checked)); return; }
+      if (a === 'lcolor') { el.addEventListener('input', () => this.editLight('color', parseInt(el.value.slice(1), 16), true)); el.addEventListener('change', () => this.editLight('color', parseInt(el.value.slice(1), 16))); return; }
+      if (a === 'lkind') { el.addEventListener('change', () => this.editLight('kind', el.value)); return; }
+      if (a.startsWith('l:')) {
+        const f = a.slice(2);
+        el.addEventListener('input', () => { this.editLight(f, +el.value, true); const v = root.querySelector(`[data-v="${a}"]`); if (v) v.textContent = (+el.value).toFixed(2); });
+        el.addEventListener('change', () => this.editLight(f, +el.value));
+        return;
+      }
       el.addEventListener('click', (e) => { e.stopPropagation(); this.action(a, el); });
     });
   }
@@ -733,6 +860,39 @@ export class LevelBuilder {
     if (a === 'del') return this.remove(d);
     if (a === 'reset') { delete d.scale; delete d.lift; delete d.tilesX; delete d.tilesY; return this.commit(); }
     if (a === 'deselect') { this.selected = null; this.mark(); return this.render(); }
+    if (a === 'off-save') {
+      // the default takes this piece's spot, and the piece then FOLLOWS it (drops its own copy), so every
+      // other piece of the same object without an offset of its own moves to the same place
+      const off = decorOffset(d);
+      saveDefaultOffset(d, off.x, off.y);
+      delete d.offX; delete d.offY;
+      return this.commit();
+    }
+    if (a === 'rot-reset') { for (const f of ROT_FIELDS) delete d[f]; return this.commit(); }
+    if (a === 'rot-up90' || a === 'rot-up-90') { d.rotX = a === 'rot-up90' ? 90 : -90; if (!(d.lift > 0)) d.lift = 0.5; return this.commit(); }
+    if (a === 'off-follow') { delete d.offX; delete d.offY; return this.commit(); }
+    if (a === 'off-centre') { d.offX = 0; d.offY = 0; return this.commit(); }
+    if (a === 'off-forget') { clearDefaultOffset(d); return this.commit(); }
+  }
+
+  /**
+   * Slide the selected piece off its tile centre. The first touch copies the object's default into the
+   * entry, so moving X alone does not snap Y back to the centre. `live` moves the view and the light
+   * without rebuilding the decor.
+   */
+  editOffset(field, value, live = false) {
+    const d = this.selected; if (!d) return;
+    const off = decorOffset(d);
+    d.offX = off.x; d.offY = off.y;
+    d[field] = value;
+    if (live) {
+      for (const o of this.dv.decorViews) if (o.userData.decorRef === d) applyDecorTransform(o, d);
+      const lv = this.level, L = this.renderer.lighting;
+      if (lv && L && L.setMoods) L.setMoods(lv, createRng(((lv.seed | 0) * 31 + 11) >>> 0));
+      this.scheduleSave();
+      return;
+    }
+    this.commit();
   }
 
   dispose() {

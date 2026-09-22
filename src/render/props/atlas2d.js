@@ -10,6 +10,28 @@
 import * as THREE from 'three';
 import { PROPS2D, PROPS2D_ATLAS } from '../../assets/props2d/map.js';
 
+/**
+ * A LOWER ROW DRAWS OVER A HIGHER ROW (owner, 2026-09-21: "for 2d assets, assets on a lower row should draw
+ * over assets on a higher row"). Every upright 2D piece — the cast, a sheet prop, a pickup — is a card lying
+ * flat on the floor, and a tall one reaches north over the row above it. All of them sat at one height, so
+ * where two overlapped the depth test was a coin toss. Now each is raised `ROW_LIFT` per row it stands on
+ * (south = down the screen = higher), on a common base `STAND_Y`, so the one nearer the bottom of the screen
+ * is nearer the camera and wins: painter's order, from the depth buffer. 0.002 a row is 0.16 at row 80 —
+ * invisible under a camera 20 units up — and still eight depth-buffer steps at that distance. The cast
+ * takes a hair more (`CAST_EDGE`) so it stands in front of a prop on its own row.
+ * FLAT art — a pit, stairs, a rug, a pool — is NOT lifted: it is the floor, and stays under everything.
+ */
+export const ROW_LIFT = 0.002;
+export const STAND_Y = 0.05;
+export const CAST_EDGE = 0.0005;
+export const rowLift = (z) => ROW_LIFT * z;
+const FLAT_NAMES = new Set(['pit', 'stairs-down', 'stairs-up', 'lava-pool', 'rugs-strip', 'magic-circle', 'trap-rune',
+  'teleporter', 'bridge', 'broken-bridge', 'spike-trap']);
+/** Is this sheet sprite floor art (drawn under everything) rather than an upright piece? */
+export function isFlatSprite(name) {
+  return !!name && (FLAT_NAMES.has(name) || /^(floor-(pit|stairs|spikes)|pool-|trapdoor-)/.test(name));   // not floor-torch: it stands
+}
+
 const URL_ATLAS = new URL('../../assets/props2d/atlas.png', import.meta.url).href;
 let atlas = null;
 const texCache = new Map();

@@ -158,6 +158,46 @@ const BILLBOARD_VS = `
   }`;
 
 /**
+ * THE FLAME STANDS UP IN THE WORLD (owner, 2026-09-21: "flames are pointing the wrong way, they face up as
+ * if it were 2d, instead of up in world Y"). The spherical billboard above stood every flame along the
+ * CAMERA's up — under the owner's camera, perspective looking straight down, that is world NORTH, so each
+ * flame lay on the floor pointing at the top of the screen like a painted one. This one draws the flame
+ * along world +Y as the camera actually projects it: under perspective a flame leans out from the centre
+ * of the view exactly as the solid props' tops do, and its on-screen length is its real projected length.
+ * Straight under the camera that length goes to nothing, so `uMin` keeps a floor on it (a fraction of the
+ * flame's height, at its own distance) and bends the degenerate direction toward screen-up — a flame seen
+ * from above is still a flame. Built in view space and handed to the projection, so it works under both
+ * cameras. `?flames=screen` puts the old camera-up flames back.
+ */
+const FLAME_VS = `
+  varying vec2 vUv; varying vec2 vFogXZ; varying float vPhase;
+  uniform float uMin;
+  void main() {
+    vUv = uv;
+    vec3 origin = modelMatrix[3].xyz;
+    float sx = length(modelMatrix[0].xyz), sy = length(modelMatrix[1].xyz);
+    bool ortho = projectionMatrix[2][3] == 0.0;
+    vec3 ov = (viewMatrix * vec4(origin, 1.0)).xyz;
+    vec3 uv1 = (viewMatrix * vec4(origin + vec3(0.0, 1.0, 0.0), 1.0)).xyz;
+    // screen-plane units: view xy, divided by depth under perspective
+    float io = ortho ? 1.0 : 1.0 / max(-ov.z, 1e-3);
+    vec2 so = ov.xy * io;
+    vec2 s1 = uv1.xy * (ortho ? 1.0 : 1.0 / max(-uv1.z, 1e-3));
+    vec2 dRef = s1 - so;                              // where one unit of world up goes on screen
+    float minK = uMin * io;
+    vec2 dir = normalize(dRef + vec2(0.0, minK * 0.6)); // degenerate straight down: lean to screen-up
+    float k = max(length(dRef), minK);
+    float h = position.y * sy;
+    vec2 sp = so + dir * k * h + vec2(dir.y, -dir.x) * (position.x * sx) * io;
+    float z = (viewMatrix * vec4(origin + vec3(0.0, h, 0.0), 1.0)).z;
+    vec3 v = vec3(ortho ? sp : sp * -z, z);
+    vFogXZ = origin.xz;
+    vPhase = fract(dot(origin, vec3(0.317, 0.911, 0.523)) * 3.7) * 6.283;
+    gl_Position = projectionMatrix * vec4(v, 1.0);
+  }`;
+const SCREEN_FLAMES = typeof location !== 'undefined' && new URLSearchParams(location.search).get('flames') === 'screen';
+
+/**
  * Spherical/cylindrical billboard of a sprite texture tinted by uColor (additive, fog-aware).
  * One material per (texture,color) pair is shared; animate by scaling the mesh.
  */
@@ -190,15 +230,15 @@ export function flameMaterial(spherical = false) {
     return memo('flame:spherical', () => {
       const base = flameMaterial(false);
       const m = base.clone();
-      m.uniforms = { ...base.uniforms, uCylindrical: { value: 0 } };
+      m.uniforms = { ...base.uniforms, uCylindrical: { value: 0 }, uMin: { value: 0.55 } };
       return m;
     });
   }
   return memo('flame', () => {
     const m = new THREE.ShaderMaterial({
-      uniforms: { ...fogUniforms(), uTime: { value: 0 }, uCylindrical: { value: 1 } },
+      uniforms: { ...fogUniforms(), uTime: { value: 0 }, uCylindrical: { value: 1 }, uMin: { value: 0 } },
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, toneMapped: false,
-      vertexShader: BILLBOARD_VS,
+      vertexShader: SCREEN_FLAMES ? BILLBOARD_VS : FLAME_VS,
       fragmentShader: `uniform float uTime; varying vec2 vUv; varying vec2 vFogXZ; varying float vPhase;
         ${fogGlsl()}
         float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }

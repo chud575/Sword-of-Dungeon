@@ -210,6 +210,7 @@ export class Menus {
       { label: 'New Game', sub: 'Choose your difficulty and descend into the mountain.', onSelect: () => this.showNewGame({}) },
       { label: 'Continue', sub: cont ? `Resume your ${cont.meta.difficulty} quest — depth ${cont.meta.depth}, level ${cont.meta.level}, ${formatTime(cont.meta.elapsed)} in the deep.` : 'No saved quest waits for you.', disabled: !cont, onSelect: () => { if (!this.app.continueGame()) this.showTitle(); } },
       { label: 'Daily Seed', sub: `Dungeon of ${daily}, classic rules — everyone descends the same deep today${attempted ? ' (already attempted)' : ''}.`, onSelect: () => this.showNewGame({ daily: true }) },
+      { label: 'Floor Designer', sub: 'An empty hall to place and test every prop and any light — nothing here touches your quest.', onSelect: () => this.app.floorDesigner() },
       { label: 'Hall of Fame', sub: `${getHallOfFame().length} heroes remembered by this browser.`, onSelect: () => this.showHall() },
       { label: 'Settings', sub: 'Sound, screen shake, interface scale and accessibility.', onSelect: () => this.showSettings() },
       { label: 'Help', sub: 'Controls and the rules of the deep.', onSelect: () => this.showHelp() },

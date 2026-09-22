@@ -166,6 +166,18 @@ band, "bright board") is retired. The targets are now the user's painted concept
   Crawlers library loads all 116 meshes and draws **none** of them in a generated level — the kit claims every
   type it maps first — so the builder offers its models by name (`art: 'dc'`). Freeport picks between its two
   chests and two braziers by TILE, not by variant, so a sheet shot on one tile only ever shows one of each pair.
+- **2026-09-21, owner's QoL pass.** Title → **Floor Designer** (`debug/floorDesigner.js`): an empty 25×19 hall that
+  never saves, with the builder open; its Lights tab places the owner's torch / brazier / sconce SPRITES WITH THEIR
+  LIGHT (one decor entry carrying `sprite` + `light`). Builder fields added: `offX`/`offY` (with a per-object saved
+  default, `render/props/offsets.js`) and `rotX`/`rotY`/`rotZ`. **Upright 2D art is ordered by row**: each card is
+  raised `ROW_LIFT` (0.002) per row so a lower row draws over a higher one (`props/atlas2d.js`); flat floor art (pits,
+  stairs, pools, rugs) is not lifted. **Every trap is in a chest**: `trapsIntoChests` hands `placeTraps`' hidden traps
+  over as trapped treasure squares (`fromTrap`), and every treasure square draws as the closed chest
+  (`?squares=slab` for the old flagstone). **A fall holds 1 s** on the origin level (`FALL_HOLD`, `game.busy()`):
+  the hero shrinks into the pit (`SpriteBillboard.sink`) and the camera sinks after him (camera `'fall'`).
+  The sheet importer keys the ground at luma 6, not 46 (46 ate the outlines and dark interiors of half the sheet),
+  and trusts a source's own alpha. Flame billboards now rise along world Y (`?flames=screen` for the old ones) —
+  NOT yet seen to make a visible difference; which flames the owner meant is still open.
 - **Forest:** olive-to-yellow-lime grass with tufts and flowers, clumpy three-tone canopies darker and
   bluer than the grass, pale ruins, a winding stream with bridges where trails cross.
 
