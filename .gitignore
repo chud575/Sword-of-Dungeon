@@ -1,0 +1,15 @@
+# dependencies and build output
+node_modules/
+dist/
+shots/
+
+# macOS
+.DS_Store
+
+# Xcode / iOS build artifacts
+DerivedData/
+.build/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+ios/App/Pods/
+ios/App/App/public/
