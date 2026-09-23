@@ -252,6 +252,25 @@ not `filter: drop-shadow` — keep it that way; Safari has already reloaded this
 that, every page load overwrote the player's quest (the title menu pauses the game and a pause autosaves).
 `tests/saveGuard.test.js` holds the line.
 
+**A standing hero's shadow no longer flickers** (owner, 2026-09-23). `SpriteBillboard.sync` nudges the grounding pool's
+foot cores (and the rim) away from the strongest warm light, and picked it by THIS FRAME'S intensity — which the torch
+flicker changes every frame, so between two torches at similar reach the pick flipped and the cores jumped ~10 px side to
+side. Measured in the 3D edition, standing still 300 frames on seed 42 (43,15): 19 switches before, 0 after. The pick
+now reads each light's steady strength (`userData.steady`, set in `render/lighting.js` beside the flickering intensity),
+holds the current light until another is 35% stronger, and eases direction, height and strength over ~0.2 s. The same
+code runs here.
+
+**No pit is ever the only way through** (owner, 2026-09-23: "this is something that really irks me in the base code,
+unavoidable pits"). `placePits` put a pit on any room floor away from stairs, temples and doors without asking whether
+the tile was a chokepoint: over seeds 1-150 x depths 1-10, 77 of 1,500 levels (5.1%) had a pit cutting part of the
+level off, 26 of them with the stairs down behind it. The pits are still dug from the level's own stream exactly as
+before; `unblockPits` then moves any pit whose blocking splits the walkable level, to a tile where it splits nothing,
+drawn from its own `seedFrom(level.seed, 'pit-move')` stream. Measured: the 1,423 levels without a blocking pit are
+identical to before (tiles, items, monsters, decor, traps); 77 pits moved, none dropped, 0 levels blocked.
+`tests/generator.test.js` holds the line. Drift still only softens a fall (it does not float you over a pit) —
+the owner is considering changing that. A HIDDEN pit trap that springs (they are all in chests now) still opens a
+pit where it stood; that path is not covered.
+
 **Music is off by default** (`musicVolume: 0`, owner 2026-09-23); the drone still builds and follows depth and
 combat, muted until the slider is raised. **The fight zoom is tweened** (owner, same day): one texel closer as
 before (×1.33), eased in over `COMBAT_ZOOM_IN` 0.55 s and out over `COMBAT_ZOOM_OUT` 0.8 s instead of cut the

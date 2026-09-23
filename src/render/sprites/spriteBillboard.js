@@ -781,9 +781,10 @@ export class SpriteBillboard {
       if (!l || l.intensity <= 0) { col.set(0, 0, 0); pos.set(0, -100, 0, 1); continue; }
       pos.set(l.position.x, l.position.y, l.position.z, l.distance);
       col.set(l.color.r * l.intensity, l.color.g * l.intensity, l.color.b * l.intensity);
-      // warm lights (torches) drive the rim; weight by falloff at the hero
+      // warm lights (torches) drive the rim; weight by falloff at the hero — and by the light's STEADY strength
+      // (lighting.js `userData.steady`), not this frame's flicker, or two torches at similar reach trade places
       const d = Math.hypot(l.position.x - wp.x, l.position.y - wp.y - 0.8, l.position.z - wp.z);
-      const w = l.color.r > l.color.b * 1.5 ? l.intensity / Math.max(0.5, d * d) : 0;
+      const w = l.color.r > l.color.b * 1.5 ? (l.userData.steady ?? l.intensity) / Math.max(0.5, d * d) : 0;
       if (w > bestW) { bestW = w; best = l; }
     }
     for (let i = 0; i < MAX_SPOTS; i++) {
@@ -797,17 +798,40 @@ export class SpriteBillboard {
       dir.set(d.x, d.y, d.z, coneCos);
     }
     // rim + stretched shadow from the strongest warm light
+    //
+    // CHOSEN STEADY, HELD, AND EASED (owner, 2026-09-23: "there is an odd shadow flicker happening when the hero
+    // stands still"). Every torch's intensity flickers each frame, so with two torches at similar reach the
+    // "strongest" traded places frame to frame, and the grounding pool's foot cores — nudged away from that light
+    // — jumped from one side of the boots to the other, ~10 px at the play camera. The choice is now made on each
+    // light's steady strength (above), the light in use is kept until another is clearly (35%) stronger, and the
+    // direction, height and strength are eased over ~0.2 s, so a standing hero's shadow stands still.
+    if (this._castLight && best !== this._castLight && this._castLight.intensity > 0 && L.points.includes(this._castLight)) {
+      const c = this._castLight;
+      const d = Math.hypot(c.position.x - wp.x, c.position.y - wp.y - 0.8, c.position.z - wp.z);
+      const wc = c.color.r > c.color.b * 1.5 ? (c.userData.steady ?? c.intensity) / Math.max(0.5, d * d) : 0;
+      if (wc > 0 && bestW < wc * 1.35) { best = c; bestW = wc; }
+    }
+    this._castLight = best;
+    const now = performance.now();
+    const dt = this._castT ? Math.min(0.1, (now - this._castT) / 1000) : 1;
+    this._castT = now;
+    const ease = 1 - Math.exp(-dt / 0.2);
     let lx = 0, lz = 0;
     if (best) {
-      const dx = best.position.x - wp.x, dy = best.position.y - (wp.y + 0.7), dz = best.position.z - wp.z;
+      const C = this._castAim || (this._castAim = { dx: 0, dy: 0, dz: 0, k: 0, h: 0, init: false });
+      const tdx = best.position.x - wp.x, tdy = best.position.y - (wp.y + 0.7), tdz = best.position.z - wp.z;
+      const tk = Math.min(0.85, bestW * 0.13);
+      const e = C.init ? ease : 1; C.init = true;
+      C.dx += (tdx - C.dx) * e; C.dy += (tdy - C.dy) * e; C.dz += (tdz - C.dz) * e;
+      C.k += (tk - C.k) * e; C.h += (best.position.y - C.h) * e;
+      const dx = C.dx, dy = C.dy, dz = C.dz, k = C.k;
       const len = Math.hypot(dx, dy, dz) || 1;
       u.uRimDir.value.set(dx / len, dy / len, dz / len);
-      const k = Math.min(0.85, bestW * 0.13);
       u.uRimColor.value.set(best.color.r * k, best.color.g * k, best.color.b * k);
       const flat = Math.hypot(dx, dz) || 1;
       lx = dx / flat; lz = dz / flat;
-      this.updateCast(-dx, -dz, Math.hypot(dx, dz), best.position.y, k);
-    } else { u.uRimColor.value.set(0, 0, 0); this.cast.visible = false; }
+      this.updateCast(-dx, -dz, Math.hypot(dx, dz), C.h, k);
+    } else { u.uRimColor.value.set(0, 0, 0); this.cast.visible = false; if (this._castAim) this._castAim.init = false; }
     this.updateBlob(lx, lz, yaw);
   }
 

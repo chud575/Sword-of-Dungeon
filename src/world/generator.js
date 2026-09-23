@@ -400,10 +400,71 @@ function nearSpecial(level, x, y, r = 1) {
 
 function placePits(level, rng) {
   const n = level.depth < 2 ? rng.int(0, 1) : rng.int(0, 3);
+  const spot = (x, y) => level.get(x, y) === TILE.FLOOR && !nearSpecial(level, x, y, 2) && !level.itemsAt(x, y).length;
   for (let i = 0; i < n; i++) {
-    const t = pickTile(level, rng, (x, y) => level.get(x, y) === TILE.FLOOR && !nearSpecial(level, x, y, 2) && !level.itemsAt(x, y).length);
+    const t = pickTile(level, rng, spot);
     if (t) level.set(t.x, t.y, TILE.PIT);
   }
+  unblockPits(level, spot);
+}
+
+/**
+ * NO PIT MAY BE THE ONLY WAY THROUGH (owner, 2026-09-23: "this is something that really irks me in the base code,
+ * unavoidable pits"). `placePits` puts a pit on any room floor away from the stairs, temples and doors and never
+ * asked whether that tile was a chokepoint: over seeds 1-150, depths 1-10, 77 of 1,500 levels (5.1%) had a pit
+ * that cut part of the level off, and on 26 of them the stairs down were behind it — the only way on was to fall.
+ *
+ * The pits are still PLACED exactly as before, from the level's own stream, so every level that never had a
+ * blocking pit is unchanged down to the last draw. Then, while blocking the pits splits the walkable level into
+ * more pieces than it has with them open, the pit doing the splitting is lifted and set down again on a tile where
+ * it splits nothing — picked from a stream of its own (CLAUDE.md rule 1), so moving it shifts no other placement.
+ * A pit with nowhere safe to go is simply not dug.
+ */
+function unblockPits(level, spot) {
+  const pits = [];
+  for (let y = 0; y < level.height; y++) for (let x = 0; x < level.width; x++) if (level.get(x, y) === TILE.PIT) pits.push({ x, y });
+  if (!pits.length) return;
+  const open = walkableParts(level, false);
+  if (walkableParts(level, true) <= open) return;
+  const move = createRng(seedFrom(level.seed, 'pit-move'));
+  for (const p of pits) {
+    // does this pit split the level? (lift it and see whether the pieces join up)
+    const withAll = walkableParts(level, true);
+    if (withAll <= open) break;
+    level.set(p.x, p.y, TILE.FLOOR);
+    if (walkableParts(level, true) >= withAll) { level.set(p.x, p.y, TILE.PIT); continue; }   // not this one
+    const to = pickTile(level, move, (x, y) => {
+      if (!spot(x, y)) return false;
+      level.set(x, y, TILE.PIT);
+      const ok = walkableParts(level, true) <= open;
+      level.set(x, y, TILE.FLOOR);
+      return ok;
+    });
+    if (to) level.set(to.x, to.y, TILE.PIT);
+    level.debug.pitsMoved = (level.debug.pitsMoved || 0) + 1;
+  }
+}
+
+/** How many separate pieces the walkable level falls into — with the pits treated as holes, or as floor. */
+function walkableParts(level, pitsBlock) {
+  const W = level.width, H = level.height, seen = new Uint8Array(W * H);
+  const passable = (t) => t !== TILE.WALL && !(pitsBlock && t === TILE.PIT);
+  let parts = 0;
+  for (let i = 0; i < W * H; i++) {
+    if (seen[i] || !passable(level.tiles[i])) continue;
+    parts++;
+    const stack = [i]; seen[i] = 1;
+    while (stack.length) {
+      const j = stack.pop(), x = j % W, y = (j / W) | 0;
+      for (const d of DIRS4) {
+        const nx = x + d.dx, ny = y + d.dy;
+        if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+        const k = ny * W + nx;
+        if (!seen[k] && passable(level.tiles[k])) { seen[k] = 1; stack.push(k); }
+      }
+    }
+  }
+  return parts;
 }
 
 /** Organic pools: a random-walk blob smoothed so it has no one-tile spikes. */

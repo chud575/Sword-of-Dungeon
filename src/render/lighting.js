@@ -1062,6 +1062,7 @@ export class Lighting {
       // a revealed map multiplies the room light several times over; in the warm bands the torches keep pace, or
       // their pools vanish (in the cold bands a stronger fire only turned the pale rooms warm, review-03 F1d)
       l.intensity = TORCH_TUNE.i * f * (1 + lit * TORCH_TUNE.revealBoost * (this.depth <= 5 ? 1 : 0)) * gain;
+      l.userData.steady = l.intensity / Math.max(1e-3, f);   // the same light without its flicker (spriteBillboard picks by it)
       // a boosted fire on a revealed map throws a tighter pool, or its orange spills over the cool side
       l.distance = TORCH_TUNE.dist * (lit && this.depth <= 5 ? TORCH_TUNE.revealDist : 1);
       if (LOOK.base) { l.distance = 3.6; l.intensity *= 0.45; }
@@ -1094,6 +1095,7 @@ export class Lighting {
       l.position.set(sp.x, sp.y, sp.z);
       l.color.setHex(sp.color);
       l.intensity = sp.intensity * f * DECOR_TUNE.i;
+      l.userData.steady = l.intensity / Math.max(1e-3, f);
       l.distance = sp.radius * DECOR_TUNE.dist;
       put(l.position.x, l.position.y, l.position.z, l.color, l.intensity);
     }

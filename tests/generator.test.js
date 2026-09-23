@@ -195,3 +195,36 @@ test('sword level: obsidian style, sword in a shrine chamber, no temple', () => 
     assert.equal(lv.temples.length, 0);
   }
 });
+
+test('no pit is the only way through: blocking every pit never cuts off part of a level', () => {
+  // Before 2026-09-23 a pit could land on a chokepoint — 77 of 1,500 levels (seeds 1-150, depths 1-10), 26 of them
+  // with the stairs down behind it. `unblockPits` (world/generator.js) moves such a pit; this holds the line.
+  const parts = (lv, pitsBlock) => {
+    const W = lv.width, H = lv.height, seen = new Uint8Array(W * H);
+    const pass = (t) => t !== TILE.WALL && !(pitsBlock && t === TILE.PIT);
+    let n = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (seen[i] || !pass(lv.tiles[i])) continue;
+      n++; const st = [i]; seen[i] = 1;
+      while (st.length) {
+        const j = st.pop(), x = j % W, y = (j / W) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy, k = ny * W + nx;
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && !seen[k] && pass(lv.tiles[k])) { seen[k] = 1; st.push(k); }
+        }
+      }
+    }
+    return n;
+  };
+  let pits = 0, moved = 0;
+  for (let seed = 1; seed <= 60; seed++) for (let depth = 1; depth <= 10; depth++) {
+    const lv = generateLevel(seed, depth);
+    for (const t of lv.tiles) if (t === TILE.PIT) pits++;
+    moved += lv.debug.pitsMoved || 0;
+    assert.equal(parts(lv, true), parts(lv, false), `seed ${seed} depth ${depth}: a pit cuts the level in two`);
+    // the move is seeded too: the same level comes out the same every time
+    assert.deepEqual(Array.from(generateLevel(seed, depth).tiles), Array.from(lv.tiles), `seed ${seed} depth ${depth} is not deterministic`);
+  }
+  assert.ok(pits > 300, `pits are still dug (${pits})`);
+  assert.ok(moved > 0, 'the check found something to move in 600 levels — it is exercised');
+});
