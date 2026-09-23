@@ -304,4 +304,16 @@ test('a fight moves the camera one whole texel closer, only when that step is sl
   // 900 px draws at texel 2, where one texel closer would be x1.5: no zoom rather than a lurch
   assert.equal(texelAt(900, false), 2);
   assert.equal(texelAt(900, true), 2, 'a x1.5 jump is not a slight zoom');
+  // THE ZOOM IS TWEENED, NOT CUT (owner, 2026-09-23): part-way through, the frame is BETWEEN the two sizes,
+  // and it gets there the same way back out
+  const heightAfter = (fighting, frames) => { rig.setCombatFocus(fighting); for (let i = 0; i < frames; i++) rig.update(1 / 60); rig.place(); return rig.viewHeight; };
+  rig.setViewportHeight(1254);
+  const rest = heightAfter(false, 120), close = heightAfter(true, 120);
+  assert.ok(Math.abs(rest / close - 4 / 3) < 1e-6, `settles one texel closer (x${(rest / close).toFixed(4)})`);
+  heightAfter(false, 120);
+  const inward = heightAfter(true, 15);
+  assert.ok(inward < rest && inward > close, `a quarter-second in, the frame is between the two sizes (${inward.toFixed(3)})`);
+  heightAfter(true, 120);
+  const outward = heightAfter(false, 15);
+  assert.ok(outward > close && outward < rest, `and a quarter-second out (${outward.toFixed(3)})`);
 });

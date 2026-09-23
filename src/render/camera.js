@@ -54,6 +54,16 @@ export const ZOOM_STOPS = [0.72, 0.85, 1, 1.18, 1.4];
  * texels are already big: 3 -> 4 is x1.33, but 2 -> 3 would be x1.5. A step larger than this is skipped.
  */
 const COMBAT_ZOOM_MAX = 1.34;
+/**
+ * THE FIGHT ZOOM IS TWEENED, in and out (owner, 2026-09-23: "when the camera zooms in for combat, i want the
+ * zoom to be tweened in (during combat) and out (when combat ends)"). It used to be a CUT: the step above was
+ * taken the frame `currentCombatFocus` crossed 0.5, because a frame drawn on whole texels cannot sit between
+ * two of them. The pixel grid is retired (CLAUDE.md rule 2 — every sprite is a world quad), so the frame
+ * now eases continuously from the resting size to the same one-texel-closer size and back: a timed,
+ * eased-in-and-out move of COMBAT_ZOOM_IN seconds when a fight starts and COMBAT_ZOOM_OUT when it ends.
+ * `?quads=0` keeps the old cut, since that path still needs whole texels.
+ */
+const COMBAT_ZOOM_IN = 0.55, COMBAT_ZOOM_OUT = 0.8;
 const DEAD_ZONE = { x: 0.42, z: 0.32 }; // half extents, tiles
 // Camera sway is off: the rig no longer leads the player or drifts while idle. Deliberate motion
 // (hit shake, stairs dive, pit fall) still plays; only the continuous sway is gone.
@@ -192,10 +202,14 @@ export class CameraRig {
     // the nearest, which keeps the intended framing.
     const raw = this.viewportPx / (wantTiles * pxPerTile);
     let S = Math.max(1, ov ? Math.floor(raw) : Math.round(raw));
-    // In a fight, one whole texel closer — never a fraction of one (see COMBAT_ZOOM_MAX).
-    if (!ov && this.currentCombatFocus > 0.5 && (S + 1) / S <= COMBAT_ZOOM_MAX) S += 1;
-    this.texelSize = S;
-    const h = this.viewportPx / (S * pxPerTile); // world units tall
+    // In a fight, one whole texel closer (see COMBAT_ZOOM_MAX): eased there and back on the world-quad
+    // path, a cut on the legacy pixel grid, which cannot sit between two texel sizes.
+    const step = !ov && (S + 1) / S <= COMBAT_ZOOM_MAX;
+    let scale = S;
+    if (!WORLD_QUADS) { if (step && this.currentCombatFocus > 0.5) S += 1; scale = S; }
+    else if (step) scale = S + smoothstep(0, 1, this.currentCombatFocus);
+    this.texelSize = Math.round(scale); // the whole texel size nearest to what is drawn: S + 1 once a fight settles
+    const h = this.viewportPx / (scale * pxPerTile); // world units tall
     this.viewHeight = h;
     const w = h * this.aspect;
     // The orthographic frustum is always kept current even while the perspective camera is the one
@@ -462,7 +476,12 @@ export class CameraRig {
     // context
     this.sanctum = damp(this.sanctum, this.sanctumFactor(), 3, dt);
     this.currentZoom = damp(this.currentZoom, this.zoom, 6, dt);
-    this.currentCombatFocus = damp(this.currentCombatFocus, this.combatFocus, 5, dt);
+    // a timed ramp, eased where it is read (applyFrustum), so the fight zoom has a real start and finish
+    {
+      const d = this.combatFocus - this.currentCombatFocus;
+      const rate = dt / (d > 0 ? COMBAT_ZOOM_IN : COMBAT_ZOOM_OUT);
+      this.currentCombatFocus = Math.abs(d) <= rate ? this.combatFocus : this.currentCombatFocus + Math.sign(d) * rate;
+    }
 
     // follow spring toward anchor + look-ahead (+ cinematic drift in overview)
     const dst = ov ? this._dst.copy(ov.center) : this._dst.copy(this.anchor).add(this.lookAhead).add(FRAME_BIAS);
@@ -579,7 +598,7 @@ export class CameraRig {
     // Transient "fov punch" effects become a small zoom nudge so hits and stairs still read.
     const punch = (this.fovOffset + (this._trFov || 0)) * -0.006;
     const z = this.currentZoom * (1 + punch);
-    const focus = this.currentCombatFocus > 0.5;
+    const focus = this.currentCombatFocus;
     if (Math.abs(z - this._lastFrustumZoom) > 1e-4 || focus !== this._lastFocus) { this._lastFrustumZoom = z; this._lastFocus = focus; this._frustumZoom = z; this.applyFrustumForZoom(z); }
     if (c.isPerspectiveCamera) {
       // Match the orthographic framing at the plane the camera is looking at, so the toggle is a

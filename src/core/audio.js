@@ -41,7 +41,7 @@ export class AudioEngine {
     this.blocked = false;      // creation failed (no WebAudio)
     this.offline = false;
     this.rng = createRng('fargoal-audio');
-    this.volumes = { master: settings.masterVolume ?? 0.8, music: settings.musicVolume ?? 0.5, sfx: settings.sfxVolume ?? 0.8, ui: 1 };
+    this.volumes = { master: settings.masterVolume ?? 0.8, music: settings.musicVolume ?? 0, sfx: settings.sfxVolume ?? 0.8, ui: 1 };
     this.muted = false;
     this.voices = 0;
     this.state = { depth: 1, combat: 0, danger: 0, near: Infinity, nearPan: 0, hpFrac: 1, openness: 1, paused: false, over: false, title: false, sword: false, temple: false, water: false };

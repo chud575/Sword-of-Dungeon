@@ -214,7 +214,13 @@ A five-round floor / props / reviewer pass (2026-09-13) took the environment fro
 **The floor is now the user's own art (2026-09-14).** The default dungeon floor is the hand-painted tiles from their
 earlier game, Dungeon Crawlers: `src/assets/tiles/dc/atlasN.png` (three rows of eight 128px tiles = six materials ×
 four variants) with matching `atlasN_nrm.png` normal maps, one atlas per dungeon level (1–5, then round again).
-Material 5 of each atlas (a brick or cobble run) paves the corridors; rooms take one of the other five. Loading,
+The corridors take the atlas's GREYEST run and rooms one of the other five — `DC_CORRIDOR_BY_ATLAS`, not the
+flat material 5 they used to (owner, 2026-09-23: "your choice of corridor tiles is incorrect. They're
+yellow/orange tiles, originally they were dark grey dungeony tiles"; material 5 is a brick run in every atlas
+but atlas 1's is GOLD, so depth 1 was paved in yellow; the owner then chose to keep that brick and grey it,
+`DC_GREY`). Picked by mean r-b then luminance and checked by eye
+at all four variants, because a material whose variants alternate dark and tan makes a corridor flicker down
+its length. Loading,
 per-material tone (`DC_TONE`: dark materials lifted, warm ones desaturated so torches don't blow them out) and the
 normal-map green flip live in `render/paintedTiles.js`; laying them into the field is `paintPaintedTiles` in
 `render/floorField.js`. `?tiles=painted` shows the generated flagstones instead; `?tiles=0` the procedural stone.
@@ -245,6 +251,11 @@ not `filter: drop-shadow` — keep it that way; Safari has already reloaded this
 **Saves:** the game built at boot (behind the title screen) is marked `placeholder` and nothing saves it; before
 that, every page load overwrote the player's quest (the title menu pauses the game and a pause autosaves).
 `tests/saveGuard.test.js` holds the line.
+
+**Music is off by default** (`musicVolume: 0`, owner 2026-09-23); the drone still builds and follows depth and
+combat, muted until the slider is raised. **The fight zoom is tweened** (owner, same day): one texel closer as
+before (×1.33), eased in over `COMBAT_ZOOM_IN` 0.55 s and out over `COMBAT_ZOOM_OUT` 0.8 s instead of cut the
+frame focus crossed 0.5 (`render/camera.js`); `?quads=0` keeps the cut, since whole texels are all it can draw.
 
 Measure floor colour with `tools/cast.mjs` before believing anything about it.
 

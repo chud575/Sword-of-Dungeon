@@ -30,7 +30,7 @@ import { LOOK } from './look.js';
  * of every wall and is OFF (see the note in `paintDungeon` — the walls cast a real one now).
  */
 export const FOOT_SHADE = { contact: 0.3, cast: 0 };
-import { PAINTED, DC, DC_CORRIDOR, DC_CIRCLES } from './paintedTiles.js';
+import { PAINTED, DC, DC_CIRCLES, dcCorridorMaterial, dcRoomMaterials } from './paintedTiles.js';
 
 /** Texels a tile. Must equal materials.js TEXELS_PER_TILE (import would be circular via tiles.js). */
 export const FIELD_S = 32;
@@ -351,8 +351,8 @@ function paintPaintedTiles(level, out, seed, roomOf) {
     const n = DC[want] ? want : loaded.length ? loaded[((level.depth | 0) - 1) % loaded.length] : 0;
     dcSet = n ? DC[n] : null; dcN = n;
   }
-  // corridors are the atlas's brick run; rooms take one of the other five materials
-  const dcCorr = DC_CORRIDOR;
+  // corridors are the atlas's greyest stone run; rooms take one of the other five materials
+  const dcCorr = dcCorridorMaterial(dcN), dcRooms = dcRoomMaterials(dcN);
   // A ROOM IS ONE CONTINUOUS FIELD: a seamless flagstone texture laid in world space across the room, one of the
   // set picked per room, shifted per room so neighbouring rooms do not repeat in step
   const field = (tex, x, y, ox, oy) => {
@@ -384,7 +384,7 @@ function paintPaintedTiles(level, out, seed, roomOf) {
     if (t === TILE.WATER) continue;
     if (dcSet && t !== TILE.WALL) {
       const rm = roomOf[y * W + x];
-      const mi = t === TILE.CORRIDOR || rm < 0 ? dcCorr : [0, 1, 2, 3, 4][Math.floor(hash2(rm + 1, 5, seed + 4010) * 5) % 5];
+      const mi = t === TILE.CORRIDOR || rm < 0 ? dcCorr : dcRooms[Math.floor(hash2(rm + 1, 5, seed + 4010) * 5) % 5];
       // a circle set lays its quarters as 2×2 blocks counted from the room's corner, so every circle is whole
       const circle = DC_CIRCLES[dcN] && DC_CIRCLES[dcN][mi];
       let vi = Math.floor(hash2(x, y, seed + 4011) * 4) % 4;

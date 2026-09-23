@@ -22,7 +22,9 @@ export const DIFFICULTIES = ['classic', 'standard', 'story', 'nightmare'];
 
 /** Default settings (see ui/menus.js Settings panel). */
 export const DEFAULT_SETTINGS = {
-  masterVolume: 0.8, musicVolume: 0.5, sfxVolume: 0.8,
+  // Music is OFF by default (owner, 2026-09-23: "i need you to default the music to off... or 0 volume").
+  // The drone still builds and follows depth and combat; it is simply muted until the slider is raised.
+  masterVolume: 0.8, musicVolume: 0, sfxVolume: 0.8,
   cameraTilt: 17,          // degrees off straight-down; higher leans the plan view further forward
   flatDecor: true,          // false strips the painted 2D dressing and draws only real geometry
   tileSkin: '',             // '' = the procedural fields (render/tiles.js); otherwise a render/tileSkins.js id

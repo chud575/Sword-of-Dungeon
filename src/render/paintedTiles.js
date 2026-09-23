@@ -36,8 +36,37 @@ const DC_ATLASES = [1, 2, 3, 4, 5];
  * `chroma` is the most saturation a material keeps.
  */
 export const DC_TONE = { lum: 0.42, maxGain: 1.5, chroma: 0.24, warmChroma: 0.12 };
-/** Material 5 in every atlas is a brick or cobble run (yellow, grey, mossy, cobble, blue brick): it paves the corridors. */
+/**
+ * THE CORRIDOR RUN, ONE PER ATLAS (owner, 2026-09-23: "your choice of corridor tiles is incorrect. They're
+ * yellow/orange tiles, originally they were dark grey dungeony tiles"). Material 5 IS a brick or cobble run
+ * in every atlas, which is why it was the corridor everywhere — but in three of the five it is a COLOURED
+ * one, and atlas 1's is gold, so depth 1 (and 6, and 11) was paved in yellow brick. The corridors now take
+ * each atlas's greyest run, picked off the decoded tiles by mean r-b then luminance and then checked by eye
+ * on a contact sheet of all thirty materials at all four variants — because a material's four variants are
+ * not always the same stone, and one whose variants alternate dark and tan (atlas 5's m2) makes a corridor
+ * flicker down its length:
+ *   1 -> 5  its brick run, TONED GREY (DC_GREY below; the owner's pick over the grey-green slab, 2026-09-23:
+ *           "can we make atlas 1 row 5 the corridor, and tone it to grey?")
+ *   2 -> 5  grey cobble           3 -> 5  mossy grey-green brick
+ *   4 -> 1  dark grey brick run   5 -> 5  blue-grey brick (the deep band, and its variants do hold together)
+ * Anything outside the map keeps material 5.
+ */
+export const DC_CORRIDOR_BY_ATLAS = { 1: 5, 2: 5, 3: 5, 4: 1, 5: 5 };
 export const DC_CORRIDOR = 5;
+/** The material that paves atlas `n`'s corridors. */
+export const dcCorridorMaterial = (n) => (n in DC_CORRIDOR_BY_ATLAS ? DC_CORRIDOR_BY_ATLAS[n] : DC_CORRIDOR);
+/**
+ * The five materials a ROOM may take in atlas `n` — every one but the corridor run, so a room never reads
+ * as corridor. Five entries whatever the corridor is, which keeps the room hash below unchanged in shape.
+ */
+export const dcRoomMaterials = (n) => { const c = dcCorridorMaterial(n); return [0, 1, 2, 3, 4, 5].filter((m) => m !== c); };
+/**
+ * PER-MATERIAL GREY: `DC_GREY[atlas][material]` is the fraction of its colour a material keeps AFTER DC_TONE,
+ * at the same luminance — 0 is plain grey. Atlas 1's brick run is the only grey brick shape the atlas has, but
+ * it is painted gold; greyed, it is the corridor the owner asked for. Only corridor runs belong here: rooms
+ * are told apart by their colour.
+ */
+export const DC_GREY = { 1: { 5: 0 } };
 /**
  * THE CIRCLE SETS: materials whose four variants are the four quarters of one circle, so they must be laid as a 2×2
  * block, never at random. `DC_CIRCLES[atlas][material]` is the variant index for [top-left, top-right, bottom-left,
@@ -149,6 +178,16 @@ export async function loadPaintedTiles(size = 64) {
               t.rgb[i * 3] = Math.min(1, (y + (R - y) * sat) * gain);
               t.rgb[i * 3 + 1] = Math.min(1, (y + (G - y) * sat) * gain);
               t.rgb[i * 3 + 2] = Math.min(1, (y + (B - y) * sat) * gain);
+            }
+          }
+          // DC_GREY: keep the luminance, drop the colour (mats.length is this material's index, row * 2 + side)
+          const grey = DC_GREY[n] && DC_GREY[n][mats.length];
+          if (grey != null) {
+            for (const t of vars) for (let i = 0; i < N; i++) {
+              const R = t.rgb[i * 3], G = t.rgb[i * 3 + 1], B = t.rgb[i * 3 + 2], y = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+              t.rgb[i * 3] = y + (R - y) * grey;
+              t.rgb[i * 3 + 1] = y + (G - y) * grey;
+              t.rgb[i * 3 + 2] = y + (B - y) * grey;
             }
           }
           mats.push(vars);
