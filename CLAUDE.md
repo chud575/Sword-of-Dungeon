@@ -252,6 +252,26 @@ not `filter: drop-shadow` — keep it that way; Safari has already reloaded this
 that, every page load overwrote the player's quest (the title menu pauses the game and a pause autosaves).
 `tests/saveGuard.test.js` holds the line.
 
+**No trap is the only way through either** (owner, 2026-09-24: "the same logic we used for pits needs to be applied to
+teleporters as well"). A teleporter tile is a sprung teleport trap, and a trap's pit opens where its chest stood; every
+trap is in a chest, `placeTraps` lays them on corridors too, and the treasure pass adds trapped chests of its own. Over
+seeds 1-150 x depths 1-10, 757 of 1,500 levels (50.5%) had a pit- or teleport-trapped chest that would cut part of the
+level off once sprung — 561 teleport, 458 pit, 877 in a one-tile corridor. `unblockTrapChests` runs LAST and judges the
+level as if every such chest had sprung: it lifts them all and sets them back one at a time, each on its own tile if
+the level stays whole, else on a tile where it does, from its own `trap-move` stream (two chests side by side in one
+corridor are why it is lift-all-then-replace: lifting either alone joins nothing). Solid furniture (`decorBlock`)
+counts as rock. Measured: 0 levels cut, 1,085 chests moved, none dropped, the 741 untouched levels identical.
+`tests/generator.test.js` holds the line.
+A level also checks ITSELF (`Level.defuseBlockers`, on `Game.load` for every saved level, on `enterLevel`, and right
+after a trap springs): with every teleporter and pit tile treated as a hole, any that is the only way on is worn back
+to floor. That is what rescues a save laid before the rule — the owner's quest was stopped by a teleporter in a
+one-tile corridor on such a level.
+**One teleporter to a room** (owner, 2026-09-24: "there cannot be 2 teleporters in the same room"). `unblockTrapChests`
+also moves a second teleport-trapped chest out of a room (142 of 1,500 levels had one); in play a teleporter that springs
+into a room that already has one throws the hero that once and is spent (game.js), and `Level.spendExtraTeleporters`
+wears any second teleporter in a room back to floor on load and on entering a level. Measured: 0 rooms with two, still
+0 levels cut, 1,280 chests moved, none dropped, the 664 untouched levels identical.
+
 **A standing hero's shadow no longer flickers** (owner, 2026-09-23). `SpriteBillboard.sync` nudges the grounding pool's
 foot cores (and the rim) away from the strongest warm light, and picked it by THIS FRAME'S intensity — which the torch
 flicker changes every frame, so between two torches at similar reach the pick flipped and the cores jumped ~10 px side to

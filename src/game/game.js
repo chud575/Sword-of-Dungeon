@@ -143,6 +143,8 @@ export class Game {
       old.visible.fill(0);
     }
     const level = this.getLevel(depth);
+    // a level laid (or saved) before the trap rule may still hold a sprung trap that is the only way on (Level.defuseBlockers)
+    if (level.defuseBlockers() + level.spendExtraTeleporters()) this.log('The old trap here has worn away to bare stone.', 'info');
     this.state.depth = depth;
     if (depth > this.state.deepest) { this.state.deepest = depth; p.deepest = depth; }
     const firstVisit = !level.visited;
@@ -450,6 +452,7 @@ export class Game {
     switch (type) {
       case 'pit': {
         level.set(x, y, TILE.PIT);
+        level.defuseBlockers();   // a pit that would be the only way on is spent as it opens (Level.defuseBlockers)
         const levels = Math.floor(4 * rng.next() + 2);
         if (hasStatus(p, 'drift')) { removeStatus(p, 'drift'); this.log('PIT!! ...LIKE A FEATHER...', 'magic'); }
         else { const dmg = damagePlayer(this, Math.floor(10 * rng.next() + L), 'trap:pit'); this.log(`PIT!!...YOU FELL! (${dmg} damage)`, 'danger'); }
@@ -480,6 +483,9 @@ export class Game {
       case 'teleport':
       default: {
         level.set(x, y, TILE.TRAP_TELEPORT);
+        level.defuseBlockers();   // ...and so is a teleporter that would be the only way on
+        // ...and one that would be the second in its room: it throws the hero this once, then is spent (Level.spendExtraTeleporters)
+        if (level.get(x, y) === TILE.TRAP_TELEPORT && level.roomHasTeleporter(level.roomIndexAt(x, y), x, y)) level.set(x, y, TILE.FLOOR);
         this.log('TELEPORT...', 'magic');
         if (!known) loseMap();
         this.teleportPlayer('trap');
@@ -943,6 +949,8 @@ export class Game {
     this.stats = st.stats;
     this.levels = new Map();
     for (const ld of data.levels) this.levels.set(ld.depth, Level.deserialize(ld));
+    // a save from before the trap rule: no sprung teleporter or pit on any of its levels may be the only way on
+    for (const lv of this.levels.values()) { lv.defuseBlockers(); lv.spendExtraTeleporters(); }
     for (const [k, v] of Object.entries(data.rngs)) { if (!this.rngs[k]) this.rngs[k] = createRng(0); this.rngs[k].setState(v); }
     this.accumulator = data.accumulator || 0;
     this.heldDir = data.heldDir || null;

@@ -228,3 +228,90 @@ test('no pit is the only way through: blocking every pit never cuts off part of 
   assert.ok(pits > 300, `pits are still dug (${pits})`);
   assert.ok(moved > 0, 'the check found something to move in 600 levels — it is exercised');
 });
+
+test('no trap is the only way through either: every pit- and teleport-trapped chest sprung at once cuts nothing off', () => {
+  // A teleporter tile is a sprung teleport trap, and a trap's pit opens where its chest stood. Before 2026-09-24,
+  // 757 of 1,500 levels (seeds 1-150, depths 1-10) had a trapped chest that would cut part of the level off once
+  // sprung — most in one-tile corridors. `unblockTrapChests` (world/generator.js) moves them; this holds the line.
+  const parts = (lv, extra) => {
+    const W = lv.width, H = lv.height, seen = new Uint8Array(W * H);
+    const pass = (i) => lv.tiles[i] !== TILE.WALL && lv.tiles[i] !== TILE.PIT && !(extra && extra.has(i));
+    let n = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (seen[i] || !pass(i)) continue;
+      n++; const st = [i]; seen[i] = 1;
+      while (st.length) {
+        const j = st.pop(), x = j % W, y = (j / W) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy, k = ny * W + nx;
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && !seen[k] && pass(k)) { seen[k] = 1; st.push(k); }
+        }
+      }
+    }
+    return n;
+  };
+  let traps = 0, moved = 0;
+  for (let seed = 1; seed <= 60; seed++) for (let depth = 1; depth <= 10; depth++) {
+    const lv = generateLevel(seed, depth);
+    const sprung = new Set(lv.items.filter((it) => it.type === 'chest' && (it.trap === 'pit' || it.trap === 'teleport')).map((it) => it.y * lv.width + it.x));
+    traps += sprung.size;
+    moved += lv.debug.trapsMoved || 0;
+    assert.equal(parts(lv, sprung), parts(lv, null), `seed ${seed} depth ${depth}: a sprung trap would cut the level in two`);
+    assert.deepEqual(generateLevel(seed, depth).items.map((i) => [i.x, i.y]), lv.items.map((i) => [i.x, i.y]), `seed ${seed} depth ${depth}: the move is not deterministic`);
+  }
+  assert.ok(traps > 1000, `trapped chests are still placed (${traps})`);
+  assert.ok(moved > 0, 'the check found something to move in 600 levels — it is exercised');
+});
+
+test('a sprung teleporter or pit that is the only way on is worn back to floor (old saves, traps sprung in play)', () => {
+  // Level.defuseBlockers (world/level.js): the owner's quest was stopped by a teleporter in a one-tile corridor on a
+  // level laid before the generator's trap rule. Put one on a corridor chokepoint and the level must clear it.
+  let tried = 0, cleared = 0, kept = 0;
+  for (let seed = 1; seed <= 20 && tried < 12; seed++) {
+    const lv = generateLevel(seed, 4);
+    const base = lv.partsWith(null);
+    for (let i = 0; i < lv.tiles.length && tried < 12; i++) {
+      if (lv.tiles[i] !== TILE.CORRIDOR) continue;
+      if (lv.partsWith(new Set([i])) <= base) continue;          // not a chokepoint
+      lv.tiles[i] = TILE.TRAP_TELEPORT; tried++;
+      assert.equal(lv.defuseBlockers(), 1, `seed ${seed}: the blocking teleporter is defused`);
+      assert.equal(lv.tiles[i], TILE.FLOOR);
+      cleared++;
+      break;
+    }
+    // ...and a teleporter that blocks nothing is left alone
+    for (let i = 0; i < lv.tiles.length; i++) {
+      if (lv.tiles[i] !== TILE.FLOOR || lv.partsWith(new Set([i])) > base) continue;
+      lv.tiles[i] = TILE.TRAP_TELEPORT;
+      assert.equal(lv.defuseBlockers(), 0); assert.equal(lv.tiles[i], TILE.TRAP_TELEPORT); kept++;
+      break;
+    }
+  }
+  assert.ok(cleared >= 5 && kept >= 5, `exercised (${cleared} cleared, ${kept} kept)`);
+});
+
+test('one teleporter to a room: no room holds two teleport-trapped chests, and a saved level keeps only the first', () => {
+  // owner, 2026-09-24: "there cannot be 2 teleporters in the same room". Before, 142 of 1,500 levels had a room with
+  // two teleport-trapped chests (each springs into a teleporter).
+  for (let seed = 1; seed <= 60; seed++) for (let depth = 1; depth <= 10; depth++) {
+    const lv = generateLevel(seed, depth);
+    const rooms = new Map();
+    for (const it of lv.items) {
+      if (it.type !== 'chest' || it.trap !== 'teleport') continue;
+      const r = lv.roomIndexAt(it.x, it.y);
+      if (r < 0) continue;
+      assert.ok(!rooms.has(r), `seed ${seed} depth ${depth}: two teleport chests in room ${r}`);
+      rooms.set(r, it);
+    }
+  }
+  // a saved level from before the rule: two teleporters in one room -> the second is worn to floor
+  const lv = generateLevel(3, 4);
+  const room = lv.rooms.findIndex((r) => r.w >= 4 && r.h >= 4);
+  const r = lv.rooms[room];
+  const floor = [];
+  for (let y = r.y; y < r.y + r.h && floor.length < 2; y++) for (let x = r.x; x < r.x + r.w && floor.length < 2; x++) if (lv.get(x, y) === TILE.FLOOR) floor.push([x, y]);
+  for (const [x, y] of floor) lv.set(x, y, TILE.TRAP_TELEPORT);
+  assert.equal(lv.spendExtraTeleporters(), 1);
+  assert.equal(lv.get(floor[0][0], floor[0][1]), TILE.TRAP_TELEPORT, 'the first is kept');
+  assert.equal(lv.get(floor[1][0], floor[1][1]), TILE.FLOOR, 'the second is spent');
+});

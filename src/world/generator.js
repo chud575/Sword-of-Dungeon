@@ -106,6 +106,7 @@ export function generateLevel(seed, depth, opts = {}) {
   placeDecor(level, isSwordLevel);
   if (opts.monsters !== false) spawnMonsters(level, rng, balance);
   trapsIntoChests(level);
+  unblockTrapChests(level);
   return level;
 }
 
@@ -124,6 +125,7 @@ function generateForestLevel(level, rng, balance, opts) {
   placeTreasure(level, rng);
   if (opts.monsters !== false) spawnMonsters(level, rng, balance);
   trapsIntoChests(level);
+  unblockTrapChests(level);
   return level;
 }
 
@@ -445,13 +447,79 @@ function unblockPits(level, spot) {
   }
 }
 
-/** How many separate pieces the walkable level falls into — with the pits treated as holes, or as floor. */
-function walkableParts(level, pitsBlock) {
+/**
+ * THE SAME RULE FOR TELEPORTERS — AND FOR THE PITS A TRAP OPENS (owner, 2026-09-24: "the same logic we used for pits
+ * needs to be applied to teleporters as well"). A teleporter tile is a sprung teleport trap: every trap is in a
+ * chest, and opening one turns its tile into TRAP_TELEPORT (or PIT), which throws the hero across the level (or down
+ * it) every time he steps on it after. `placeTraps` lays traps on corridors as well as rooms, and the treasure pass
+ * adds trapped chests of its own, so over seeds 1-150 x depths 1-10, 757 of 1,500 levels (50.5%) had a pit- or
+ * teleport-trapped chest that would cut part of the level off once sprung — 561 teleport, 458 pit, 877 of them in a
+ * one-tile corridor.
+ *
+ * So the level is judged as if EVERY such chest had been sprung (with the pits already dug): while that splits the
+ * walkable level into more pieces than the pits alone do, the chest doing the splitting is moved to a tile where it
+ * splits nothing. Runs LAST, after every other placement, and draws from a stream of its own, so nothing else on any
+ * level moves; a chest with nowhere safe to go is not placed.
+ */
+function unblockTrapChests(level) {
+  const W = level.width;
+  const risky = level.items.filter((it) => it.type === 'chest' && (it.trap === 'pit' || it.trap === 'teleport'));
+  if (!risky.length) return;
+  const base = walkableParts(level, true);
+  const set = new Set(risky.map((it) => it.y * W + it.x));
+  // ...and ONE TELEPORTER TO A ROOM (owner, 2026-09-24: "there cannot be 2 teleporters in the same room"): a second
+  // teleport-trapped chest in a room would spring into a second teleporter there, so it moves too
+  const teleRoom = (it) => (it.trap === 'teleport' ? level.roomIndexAt(it.x, it.y) : -1);
+  const firstTele = new Set();
+  let doubled = false;
+  for (const it of risky) { const r = teleRoom(it); if (r < 0) continue; if (firstTele.has(r)) doubled = true; else firstTele.add(r); }
+  if (!doubled && walkableParts(level, true, set) <= base) return;
+  const move = createRng(seedFrom(level.seed, 'trap-move'));
+  const teleRooms = new Set();
+  // LIFT THEM ALL, THEN SET THEM BACK ONE BY ONE: each goes back on its own tile if the level stays whole with it there,
+  // and to a tile where it does if not. A single pass settles every case — including two chests side by side in one
+  // corridor, where lifting either alone joins nothing and neither looks guilty.
+  set.clear();
+  for (const it of risky) {
+    const k = it.y * W + it.x;
+    const tele = it.trap === 'teleport';
+    const room = teleRoom(it);
+    set.add(k);
+    if (walkableParts(level, true, set) <= base && !(room >= 0 && teleRooms.has(room))) {   // back where it was
+      if (room >= 0) teleRooms.add(room);
+      continue;
+    }
+    set.delete(k);
+    const to = pickTile(level, move, (x, y) => {
+      const t = level.get(x, y);
+      if ((t !== TILE.FLOOR && t !== TILE.CORRIDOR) || !level.isWalkable(x, y) || nearSpecial(level, x, y, 1) || level.itemsAt(x, y).length || level.decorAt(x, y).length || level.entityAt(x, y)) return false;
+      if (tele) { const r = level.roomIndexAt(x, y); if (r >= 0 && teleRooms.has(r)) return false; }
+      const j = y * W + x;
+      set.add(j);
+      const ok = walkableParts(level, true, set) <= base;
+      set.delete(j);
+      return ok;
+    });
+    if (to) {
+      it.x = to.x; it.y = to.y; set.add(to.y * W + to.x);
+      if (tele) { const r = level.roomIndexAt(to.x, to.y); if (r >= 0) teleRooms.add(r); }
+    } else level.removeItem(it);
+    level.debug.trapsMoved = (level.debug.trapsMoved || 0) + 1;
+  }
+}
+
+/**
+ * How many separate pieces the walkable level falls into — with the pits treated as holes, or as floor, and with any
+ * `extra` tile indices (trapped chests judged as sprung) treated as holes too.
+ */
+function walkableParts(level, pitsBlock, extra = null) {
   const W = level.width, H = level.height, seen = new Uint8Array(W * H);
-  const passable = (t) => t !== TILE.WALL && !(pitsBlock && t === TILE.PIT);
+  // solid furniture (level.decorBlock, laid by placeDecor after the pits) blocks a way as surely as rock
+  const db = level.decorBlock;
+  const passable = (t, i) => t !== TILE.WALL && !(db && db[i] === 1) && !(pitsBlock && t === TILE.PIT) && !(extra && extra.has(i));
   let parts = 0;
   for (let i = 0; i < W * H; i++) {
-    if (seen[i] || !passable(level.tiles[i])) continue;
+    if (seen[i] || !passable(level.tiles[i], i)) continue;
     parts++;
     const stack = [i]; seen[i] = 1;
     while (stack.length) {
@@ -460,7 +528,7 @@ function walkableParts(level, pitsBlock) {
         const nx = x + d.dx, ny = y + d.dy;
         if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
         const k = ny * W + nx;
-        if (!seen[k] && passable(level.tiles[k])) { seen[k] = 1; stack.push(k); }
+        if (!seen[k] && passable(level.tiles[k], k)) { seen[k] = 1; stack.push(k); }
       }
     }
   }

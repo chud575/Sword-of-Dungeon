@@ -323,6 +323,100 @@ export class Level {
     return count;
   }
 
+  /**
+   * NO SPRUNG TRAP MAY BE THE ONLY WAY THROUGH (owner, 2026-09-24: "this teleporter is currently making it impossible to
+   * continue with the game"). The generator no longer lays a trap where it could (world/generator.js
+   * `unblockTrapChests`), but a level already in a save was laid before that, and a trap can still spring somewhere
+   * the generator never judged. So a level checks itself: with every teleporter and pit tile treated as a hole, does
+   * the walkable level fall into more pieces than with them open? If it does, the tiles are set back one at a time,
+   * each kept if the level stays whole and otherwise worn back to plain floor — the trap is spent. No randomness.
+   * @returns {number} how many were defused
+   */
+  defuseBlockers() {
+    const N = this.tiles.length;
+    const hazard = (t) => t === TILE.TRAP_TELEPORT || t === TILE.PIT || t === TILE.TRAP_PIT;
+    const spots = [];
+    for (let i = 0; i < N; i++) if (hazard(this.tiles[i])) spots.push(i);
+    if (!spots.length) return 0;
+    const holes = new Set(spots);
+    const base = this.partsWith(null);
+    if (this.partsWith(holes) <= base) return 0;
+    holes.clear();
+    let n = 0;
+    for (const i of spots) {
+      holes.add(i);
+      if (this.partsWith(holes) <= base) continue;
+      holes.delete(i);
+      this.tiles[i] = TILE.FLOOR;
+      n++;
+    }
+    if (n) this.debug.trapsDefused = (this.debug.trapsDefused || 0) + n;
+    return n;
+  }
+
+  /** The room a tile belongs to (its index in `rooms`), or -1 on a corridor, in rock, or outside every room. */
+  roomIndexAt(x, y) {
+    const t = this.get(x, y);
+    if (t === TILE.WALL || t === TILE.CORRIDOR) return -1;
+    for (let i = 0; i < this.rooms.length; i++) {
+      const r = this.rooms[i];
+      if (x >= r.x && y >= r.y && x < r.x + r.w && y < r.y + r.h) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * ONE TELEPORTER TO A ROOM (owner, 2026-09-24: "the rule should simply be that there cannot be 2 teleporters in the
+   * same room"). The generator lays no second teleport-trapped chest in a room (world/generator.js); this is the same
+   * rule for a level already in a save — any teleporter after the first in a room, in reading order, is worn back to
+   * floor. (A teleporter that springs in play is checked the other way round in game.js: if its room already has one,
+   * it is the new one that is spent.)
+   * @returns {number} how many were spent
+   */
+  spendExtraTeleporters() {
+    const W = this.width, seen = new Set();
+    let n = 0;
+    for (let i = 0; i < this.tiles.length; i++) {
+      if (this.tiles[i] !== TILE.TRAP_TELEPORT) continue;
+      const room = this.roomIndexAt(i % W, (i / W) | 0);
+      if (room < 0) continue;
+      if (seen.has(room)) { this.tiles[i] = TILE.FLOOR; n++; } else seen.add(room);
+    }
+    return n;
+  }
+
+  /** Is there a teleporter in this room other than on (x,y)? */
+  roomHasTeleporter(room, x, y) {
+    if (room < 0) return false;
+    const W = this.width;
+    for (let i = 0; i < this.tiles.length; i++) {
+      if (this.tiles[i] !== TILE.TRAP_TELEPORT) continue;
+      const tx = i % W, ty = (i / W) | 0;
+      if ((tx !== x || ty !== y) && this.roomIndexAt(tx, ty) === room) return true;
+    }
+    return false;
+  }
+
+  /** Separate walkable pieces (4-connectivity, solid furniture counts as rock), with `holes` tile indices closed. */
+  partsWith(holes) {
+    const W = this.width, H = this.height, seen = new Uint8Array(W * H), db = this.decorBlock;
+    const pass = (i) => this.tiles[i] !== TILE.WALL && !(db && db[i] === 1) && !(holes && holes.has(i));
+    let parts = 0;
+    for (let i = 0; i < W * H; i++) {
+      if (seen[i] || !pass(i)) continue;
+      parts++;
+      const stack = [i]; seen[i] = 1;
+      while (stack.length) {
+        const j = stack.pop(), x = j % W, y = (j / W) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy, k = ny * W + nx;
+          if (nx >= 0 && ny >= 0 && nx < W && ny < H && !seen[k] && pass(k)) { seen[k] = 1; stack.push(k); }
+        }
+      }
+    }
+    return parts;
+  }
+
   countWalkable() { let n = 0; for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i] !== TILE.WALL) n++; return n; }
 
   /** Reveal the whole level (Magic Map / death). */
