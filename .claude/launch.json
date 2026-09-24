@@ -15,21 +15,6 @@
       ],
       "port": 5173,
       "autoPort": true
-    },
-    {
-      "name": "fantastic",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": [
-        "--prefix",
-        "/Users/joshchudnovsky/Desktop/ClaudeGames/Fargoal/FANTASTIC_Edition",
-        "run",
-        "dev",
-        "--",
-        "--port",
-        "5174"
-      ],
-      "port": 5174,
-      "autoPort": true
     }
   ]
 }
